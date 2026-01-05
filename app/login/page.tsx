@@ -8,12 +8,25 @@ export default function LoginPage() {
   const [msg, setMsg] = useState("");
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data }) => {
-      if (data.session) {
-        const { data: ok } = await supabase.rpc("is_superadmin");
-        window.location.href = ok ? "/superadmin" : "/app";
+    (async () => {
+      const { data } = await supabase.auth.getSession();
+      if (!data.session) return;
+
+      const uid = data.session.user.id;
+      const { data: prof } = await supabase
+        .from("profiles")
+        .select("must_change_password")
+        .eq("id", uid)
+        .single();
+
+      if (prof?.must_change_password) {
+        window.location.href = "/cambiar-password";
+        return;
       }
-    });
+
+      const { data: ok } = await supabase.rpc("is_superadmin");
+      window.location.href = ok ? "/superadmin" : "/app";
+    })();
   }, []);
 
   async function signIn(e: React.FormEvent) {
@@ -23,21 +36,26 @@ export default function LoginPage() {
     const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
     if (error) { setMsg(error.message); return; }
 
-    // perfil (si existe)
-    try {
-      const { data: u } = await supabase.auth.getUser();
-      const user = u.user;
-      if (user) {
-        await supabase.from("profiles").upsert({
-          id: user.id,
-          email: user.email ?? null,
-          full_name: (user.user_metadata?.full_name as string) ?? null,
-        });
-      }
-    } catch {}
+    const { data: sess } = await supabase.auth.getSession();
+    const uid = sess.session?.user.id;
+    if (!uid) { window.location.href = "/login"; return; }
+
+    const { data: prof, error: pErr } = await supabase
+      .from("profiles")
+      .select("must_change_password")
+      .eq("id", uid)
+      .single();
+
+    if (pErr) { setMsg(pErr.message); return; }
+
+    if (prof?.must_change_password) {
+      window.location.href = "/cambiar-password";
+      return;
+    }
 
     const { data: ok, error: rpcErr } = await supabase.rpc("is_superadmin");
     if (rpcErr) { window.location.href = "/app"; return; }
+
     window.location.href = ok ? "/superadmin" : "/app";
   }
 
@@ -50,7 +68,7 @@ export default function LoginPage() {
         </header>
 
         <div className="page">
-          <p className="helper">Accedé con tu usuario. Los SuperAdmin se redirigen automáticamente a su tablero.</p>
+          <p className="helper">Ingresá con tu usuario. Si es tu primera vez, se te pedirá cambiar la contraseña.</p>
 
           <form className="form narrow" onSubmit={signIn}>
             <div className="field">

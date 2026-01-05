@@ -1,65 +1,60 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { daysBetweenToday, semaforo } from "@/lib/semaforo";
 
 type Cedula = {
   id: string;
-  caratula: string;
+  caratula: string | null;
   juzgado: string | null;
   fecha_vencimiento: string;
-  estado: "NUEVA" | "EN_CURSO" | "CERRADA";
-  storage_path: string | null;
+  estado: string;
+  owner_user_id: string;
 };
 
-function badgeClass(sem: string) {
-  if (sem === "ROJO") return "badge rojo";
-  if (sem === "AMARILLO") return "badge amarillo";
-  return "badge verde";
-}
+export default function MisCedulasPage() {
+  const [checking, setChecking] = useState(true);
+  const [rows, setRows] = useState<Cedula[]>([]);
+  const [msg, setMsg] = useState("");
 
-export default function MisCedulas() {
-  const [cfg, setCfg] = useState({ umbral_amarillo: 3, umbral_rojo: 0 });
-  const [cedulas, setCedulas] = useState<Cedula[]>([]);
+  useEffect(() => {
+    (async () => {
+      const { data: sess } = await supabase.auth.getSession();
+      if (!sess.session) { window.location.href = "/login"; return; }
+      const uid = sess.session.user.id;
 
-  async function load() {
-    const { data: sess } = await supabase.auth.getSession();
-    if (!sess.session) { window.location.href = "/login"; return; }
+      const { data: prof, error: pErr } = await supabase
+        .from("profiles")
+        .select("must_change_password")
+        .eq("id", uid)
+        .single();
 
-    // Si es superadmin, no usa este dashboard
-    try {
-      const { data: ok } = await supabase.rpc("is_superadmin");
-      if (ok) { window.location.href = "/superadmin"; return; }
-    } catch {}
+      if (pErr) { window.location.href = "/login"; return; }
+      if (prof?.must_change_password) { window.location.href = "/cambiar-password"; return; }
 
-    const { data: st } = await supabase
-      .from("settings")
-      .select("umbral_amarillo, umbral_rojo")
-      .eq("id", 1)
-      .single();
+      const { data, error } = await supabase
+        .from("cedulas")
+        .select("id, caratula, juzgado, fecha_vencimiento, estado, owner_user_id")
+        .eq("owner_user_id", uid)
+        .order("fecha_vencimiento", { ascending: true });
 
-    setCfg({
-      umbral_amarillo: st?.umbral_amarillo ?? 3,
-      umbral_rojo: st?.umbral_rojo ?? 0
-    });
+      if (error) setMsg(error.message);
+      else setRows((data ?? []) as Cedula[]);
 
-    const { data, error } = await supabase
-      .from("cedulas")
-      .select("id,caratula,juzgado,fecha_vencimiento,estado,storage_path")
-      .order("fecha_vencimiento", { ascending: true });
+      setChecking(false);
+    })();
+  }, []);
 
-    if (error) { alert(error.message); return; }
-    setCedulas((data as any) ?? []);
+  if (checking) {
+    return (
+      <main className="container">
+        <section className="card">
+          <div className="page"><p className="helper">Cargando…</p></div>
+        </section>
+      </main>
+    );
   }
-
-  useEffect(() => { load(); }, []);
-
-  const rows = useMemo(() => cedulas.map(c => {
-    const dias = daysBetweenToday(c.fecha_vencimiento);
-    return { ...c, dias, sem: semaforo(dias, cfg.umbral_amarillo, cfg.umbral_rojo) };
-  }), [cedulas, cfg]);
 
   return (
     <main className="container">
@@ -67,49 +62,33 @@ export default function MisCedulas() {
         <header className="nav">
           <h1>Mis cédulas</h1>
           <div className="spacer" />
-          <Link className="btn primary" href="/app/nueva">+ Nueva</Link>
+          <Link className="btn primary" href="/app/nueva">Nueva</Link>
           <Link className="btn danger" href="/logout">Salir</Link>
         </header>
 
         <div className="tableWrap">
+          {msg && <div className="error">{msg}</div>}
+
           <table className="table">
             <thead>
               <tr>
-                <th>Semáforo</th>
                 <th>Carátula</th>
                 <th>Juzgado</th>
                 <th>Vencimiento</th>
-                <th>Días</th>
                 <th>Estado</th>
-                <th>PDF</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map(r => (
+              {rows.map((r) => (
                 <tr key={r.id}>
-                  <td>
-                    <span className={badgeClass(r.sem)}>
-                      <span className="dot" />
-                      {r.sem}
-                    </span>
-                  </td>
-                  <td>
-                    <strong>{r.caratula}</strong>
-                    <div className="muted" style={{ fontSize: 12 }}>
-                      ID: {r.id.slice(0, 8)}
-                    </div>
-                  </td>
-                  <td>{r.juzgado ?? <span className="muted">—</span>}</td>
+                  <td>{r.caratula ?? "-"}</td>
+                  <td className="muted">{r.juzgado ?? "-"}</td>
                   <td>{r.fecha_vencimiento}</td>
-                  <td>{r.dias}</td>
-                  <td>{r.estado}</td>
-                  <td>{r.storage_path ? "OK" : <span className="muted">—</span>}</td>
+                  <td className="muted">{r.estado}</td>
                 </tr>
               ))}
               {rows.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="muted">No hay cédulas todavía. Tocá “Nueva”.</td>
-                </tr>
+                <tr><td colSpan={4} className="muted">No hay cédulas todavía.</td></tr>
               )}
             </tbody>
           </table>
