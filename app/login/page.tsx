@@ -53,9 +53,7 @@ export default function LoginPage() {
       return;
     }
 
-    const { data: ok, error: rpcErr } = await supabase.rpc("is_superadmin");
-    if (rpcErr) { window.location.href = "/app"; return; }
-
+    const { data: ok } = await supabase.rpc("is_superadmin");
     window.location.href = ok ? "/superadmin" : "/app";
   }
 
@@ -63,35 +61,26 @@ export default function LoginPage() {
     <main className="container">
       <section className="card">
         <header className="nav">
-          <h1>Ingresar</h1>
+          <img className="logoLogin" src="/logo.png" alt="Estudio" />
+          <div>
+            <h1 style={{ marginBottom: 2 }}>Ingreso</h1>
+            <div className="muted" style={{ fontSize: 13 }}>
+              Accedé a tu tablero de cédulas y vencimientos
+            </div>
+          </div>
           <div className="spacer" />
         </header>
 
         <div className="page">
-          <p className="helper">Ingresá con tu usuario. Si es tu primera vez, se te pedirá cambiar la contraseña.</p>
-
           <form className="form narrow" onSubmit={signIn}>
             <div className="field">
               <div className="label">Email</div>
-              <input
-                className="input"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="tu@email.com"
-                autoComplete="email"
-              />
+              <input className="input" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
             </div>
 
             <div className="field">
               <div className="label">Contraseña</div>
-              <input
-                className="input"
-                type="password"
-                value={pass}
-                onChange={(e) => setPass(e.target.value)}
-                placeholder="••••••••"
-                autoComplete="current-password"
-              />
+              <input className="input" type="password" value={pass} onChange={(e) => setPass(e.target.value)} autoComplete="current-password" />
             </div>
 
             <div className="actions">
