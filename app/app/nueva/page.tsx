@@ -18,7 +18,10 @@ export default function NuevaCedulaPage() {
 
   const [caratula, setCaratula] = useState("");
   const [juzgado, setJuzgado] = useState("");
-  const [fechaNotif, setFechaNotif] = useState(""); // YYYY-MM-DD
+
+  // ✅ Fecha de carga (autocompleta al subir archivo)
+  const [fechaCarga, setFechaCarga] = useState<string>(""); // YYYY-MM-DD
+
   const [file, setFile] = useState<File | null>(null);
 
   const vencimientoAuto = useMemo(() => {
@@ -63,6 +66,30 @@ export default function NuevaCedulaPage() {
     })();
   }, []);
 
+  function onFileSelected(f: File | null) {
+    setMsg("");
+    setFile(f);
+
+    if (!f) {
+      setFechaCarga("");
+      return;
+    }
+
+    const name = f.name.toLowerCase();
+    const ok =
+      name.endsWith(".pdf") || name.endsWith(".doc") || name.endsWith(".docx");
+    if (!ok) {
+      setFechaCarga("");
+      setMsg("El archivo debe ser PDF, DOC o DOCX.");
+      return;
+    }
+
+    // ✅ Autocompleta fecha de carga con “hoy”
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    setFechaCarga(toISODate(today));
+  }
+
   async function onSave() {
     setMsg("");
 
@@ -71,12 +98,12 @@ export default function NuevaCedulaPage() {
       return;
     }
 
+    // ✅ Archivo obligatorio
     if (!file) {
-      setMsg("Por favor cargá la CÉDULA desde acá (Nueva).");
+      setMsg("Tenés que cargar el archivo de la cédula (obligatorio).");
       return;
     }
 
-    // Permitimos PDF y DOC/DOCX (como pediste después)
     const name = file.name.toLowerCase();
     const ok =
       name.endsWith(".pdf") || name.endsWith(".doc") || name.endsWith(".docx");
@@ -85,15 +112,18 @@ export default function NuevaCedulaPage() {
       return;
     }
 
+    // ✅ Si por alguna razón no se seteó fechaCarga, la seteamos igual
+    const fc = fechaCarga || toISODate(new Date());
+
     setSaving(true);
     try {
       const session = await requireSessionOrRedirect();
       if (!session) return;
       const uid = session.user.id;
 
-      // 1) Crear cédula (NO pedimos vencimiento; DB lo calcula igual por trigger)
-      // Igual mandamos fecha_vencimiento como referencia consistente con UI (30 días).
-      const fechaCargaISO = new Date().toISOString();
+      // Guardamos fecha_carga como timestamptz (ISO completo) para auditoría
+      // y fecha_vencimiento como YYYY-MM-DD (30 días)
+      const fechaCargaISOFull = new Date(fc + "T00:00:00.000Z").toISOString();
 
       const { data: created, error: insErr } = await supabase
         .from("cedulas")
@@ -101,9 +131,13 @@ export default function NuevaCedulaPage() {
           owner_user_id: uid,
           caratula: caratula.trim(),
           juzgado: juzgado.trim() || null,
-          fecha_notificacion: fechaNotif || null,
-          fecha_carga: fechaCargaISO,
-          fecha_vencimiento: vencimientoAuto, // compatible con la DB + trigger
+
+          // ✅ Ahora "Fecha de carga" reemplaza lo anterior
+          fecha_carga: fechaCargaISOFull,
+
+          // ✅ Vencimiento automático a 30 días
+          fecha_vencimiento: vencimientoAuto,
+
           estado: "NUEVA",
           pdf_path: null,
         })
@@ -117,8 +151,12 @@ export default function NuevaCedulaPage() {
 
       const cedulaId = created.id;
 
-      // 2) Subir archivo a Storage (seguimos usando bucket "cedulas" aunque no sea PDF)
-      const ext = name.endsWith(".pdf") ? "pdf" : name.endsWith(".docx") ? "docx" : "doc";
+      const ext = name.endsWith(".pdf")
+        ? "pdf"
+        : name.endsWith(".docx")
+          ? "docx"
+          : "doc";
+
       const path = `${uid}/${cedulaId}.${ext}`;
 
       const { error: upErr } = await supabase.storage
@@ -134,7 +172,6 @@ export default function NuevaCedulaPage() {
         return;
       }
 
-      // 3) Guardar el path del archivo en la DB
       const { error: dbErr } = await supabase
         .from("cedulas")
         .update({ pdf_path: path })
@@ -176,7 +213,7 @@ export default function NuevaCedulaPage() {
 
         <div className="page">
           <p className="helper">
-            El sistema toma automáticamente la <b>fecha de carga</b> y calcula un <b>vencimiento automático</b> a 30 días.
+            El sistema calcula un <b>vencimiento automático</b> a 30 días desde la carga.
           </p>
 
           <div className="pill" style={{ marginBottom: 12 }}>
@@ -206,26 +243,30 @@ export default function NuevaCedulaPage() {
               />
             </div>
 
+            {/* ✅ Fecha de carga: no editable, se completa al subir */}
             <div>
-              <label className="label">Fecha notificación</label>
+              <label className="label">Fecha de carga</label>
               <input
                 className="input"
                 type="date"
-                value={fechaNotif}
-                onChange={(e) => setFechaNotif(e.target.value)}
+                value={fechaCarga}
+                disabled
+                style={{ opacity: 0.75, cursor: "not-allowed" }}
               />
+              <p className="helper" style={{ marginTop: 6 }}>
+                Se completa automáticamente al cargar el archivo.
+              </p>
             </div>
 
             <div>
-              <label className="label">CÉDULA</label>
+              <label className="label">CÉDULA (obligatorio)</label>
 
-              {/* Input real escondido */}
               <input
                 id="cedulaFile"
                 type="file"
                 style={{ display: "none" }}
                 accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                onChange={(e) => onFileSelected(e.target.files?.[0] ?? null)}
               />
 
               <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -243,7 +284,12 @@ export default function NuevaCedulaPage() {
             </div>
 
             <div style={{ display: "flex", gap: 10 }}>
-              <button className="btn primary" disabled={saving} onClick={onSave}>
+              <button
+                className="btn primary"
+                disabled={saving || !file}
+                onClick={onSave}
+                title={!file ? "Primero cargá el archivo" : undefined}
+              >
                 {saving ? "Guardando…" : "Guardar"}
               </button>
               <Link className="btn" href="/app">Cancelar</Link>
