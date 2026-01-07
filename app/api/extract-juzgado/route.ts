@@ -3,10 +3,17 @@ import mammoth from "mammoth";
 
 export const runtime = "nodejs";
 
+/**
+ * Carga pdfjs-dist (v3) vía require para evitar problemas de ESM/exports en Next.
+ */
+function getPdfJs(): any {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const pdfjs = require("pdfjs-dist/legacy/build/pdf.js");
+  return pdfjs;
+}
+
 async function extractPdfText(buffer: Buffer): Promise<string> {
-  // ✅ Ruta correcta para pdfjs-dist v5 en Next/Vercel
-  const pdfjsMod: any = await import("pdfjs-dist/legacy/build/pdf");
-  const pdfjs: any = pdfjsMod?.default ?? pdfjsMod;
+  const pdfjs = getPdfJs();
 
   const uint8 = new Uint8Array(buffer);
   const loadingTask = pdfjs.getDocument({ data: uint8, disableWorker: true });
@@ -16,33 +23,45 @@ async function extractPdfText(buffer: Buffer): Promise<string> {
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
+
     const strings = (content.items || [])
       .map((it: any) => (typeof it?.str === "string" ? it.str : ""))
       .filter(Boolean);
+
     out += strings.join(" ") + "\n";
   }
   return out;
 }
 
 /**
- * Extrae Juzgado entre TRIBUNAL y -
- * Ej: TRIBUNAL  JUZGADO ... Nº 17 - Sito en ...
+ * Extrae Juzgado entre TRIBUNAL y '-'
+ * Ej: "TRIBUNAL JUZGADO ... Nº 17 - Sito en ..."
+ * Fallback: si no hay '-' claro, corta por "Sito en".
  */
 function extractJuzgado(raw: string): string | null {
   if (!raw) return null;
 
   const norm = raw
     .replace(/\u00A0/g, " ")
-    .replace(/\r/g, "")
+    .replace(/\r/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
-  const re = /TRIBUNAL\s+(.+?)\s*-\s*/i;
-  const m = re.exec(norm);
-  if (!m?.[1]) return null;
+  // Caso principal: TRIBUNAL ... -
+  let m = /TRIBUNAL\s+(.+?)\s*-\s*/i.exec(norm);
+  if (m?.[1]) {
+    const v = m[1].trim();
+    return v.length ? v : null;
+  }
 
-  const value = m[1].trim();
-  return value.length ? value : null;
+  // Fallback: TRIBUNAL ... Sito en
+  m = /TRIBUNAL\s+(.+?)\s+Sito\s+en\s+/i.exec(norm);
+  if (m?.[1]) {
+    const v = m[1].trim();
+    return v.length ? v : null;
+  }
+
+  return null;
 }
 
 export async function POST(req: Request) {
