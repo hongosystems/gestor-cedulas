@@ -8,7 +8,17 @@ function toISODate(d: Date) {
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
+  return `${yyyy}-${mm}-${dd}`; // YYYY-MM-DD (interno)
+}
+
+function toDDMMYY(isoYYYYMMDD: string) {
+  if (!isoYYYYMMDD) return "";
+  const m = isoYYYYMMDD.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return isoYYYYMMDD;
+  const yy = m[1].slice(2);
+  const mm = m[2];
+  const dd = m[3];
+  return `${dd}/${mm}/${yy}`; // DD/MM/AA (UI)
 }
 
 export default function NuevaCedulaPage() {
@@ -19,12 +29,12 @@ export default function NuevaCedulaPage() {
   const [caratula, setCaratula] = useState("");
   const [juzgado, setJuzgado] = useState("");
 
-  // ✅ Fecha de carga (autocompleta al subir archivo)
-  const [fechaCarga, setFechaCarga] = useState<string>(""); // YYYY-MM-DD
+  // ✅ Guardamos ISO internamente
+  const [fechaCargaISO, setFechaCargaISO] = useState<string>(""); // YYYY-MM-DD
 
   const [file, setFile] = useState<File | null>(null);
 
-  const vencimientoAuto = useMemo(() => {
+  const vencimientoAutoISO = useMemo(() => {
     const base = new Date();
     base.setHours(0, 0, 0, 0);
     const v = new Date(base);
@@ -71,23 +81,22 @@ export default function NuevaCedulaPage() {
     setFile(f);
 
     if (!f) {
-      setFechaCarga("");
+      setFechaCargaISO("");
       return;
     }
 
     const name = f.name.toLowerCase();
-    const ok =
-      name.endsWith(".pdf") || name.endsWith(".doc") || name.endsWith(".docx");
+    const ok = name.endsWith(".pdf") || name.endsWith(".doc") || name.endsWith(".docx");
     if (!ok) {
-      setFechaCarga("");
+      setFechaCargaISO("");
       setMsg("El archivo debe ser PDF, DOC o DOCX.");
       return;
     }
 
-    // ✅ Autocompleta fecha de carga con “hoy”
+    // ✅ Autocompleta fecha de carga con “hoy” (ISO interno)
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    setFechaCarga(toISODate(today));
+    setFechaCargaISO(toISODate(today));
   }
 
   async function onSave() {
@@ -105,15 +114,14 @@ export default function NuevaCedulaPage() {
     }
 
     const name = file.name.toLowerCase();
-    const ok =
-      name.endsWith(".pdf") || name.endsWith(".doc") || name.endsWith(".docx");
+    const ok = name.endsWith(".pdf") || name.endsWith(".doc") || name.endsWith(".docx");
     if (!ok) {
       setMsg("El archivo debe ser PDF, DOC o DOCX.");
       return;
     }
 
-    // ✅ Si por alguna razón no se seteó fechaCarga, la seteamos igual
-    const fc = fechaCarga || toISODate(new Date());
+    // ✅ Si por alguna razón no se seteó, igual lo fijamos
+    const fcISO = fechaCargaISO || toISODate(new Date());
 
     setSaving(true);
     try {
@@ -121,9 +129,8 @@ export default function NuevaCedulaPage() {
       if (!session) return;
       const uid = session.user.id;
 
-      // Guardamos fecha_carga como timestamptz (ISO completo) para auditoría
-      // y fecha_vencimiento como YYYY-MM-DD (30 días)
-      const fechaCargaISOFull = new Date(fc + "T00:00:00.000Z").toISOString();
+      // Guardamos fecha_carga como timestamptz ISO completo
+      const fechaCargaISOFull = new Date(fcISO + "T00:00:00.000Z").toISOString();
 
       const { data: created, error: insErr } = await supabase
         .from("cedulas")
@@ -132,11 +139,8 @@ export default function NuevaCedulaPage() {
           caratula: caratula.trim(),
           juzgado: juzgado.trim() || null,
 
-          // ✅ Ahora "Fecha de carga" reemplaza lo anterior
           fecha_carga: fechaCargaISOFull,
-
-          // ✅ Vencimiento automático a 30 días
-          fecha_vencimiento: vencimientoAuto,
+          fecha_vencimiento: vencimientoAutoISO,
 
           estado: "NUEVA",
           pdf_path: null,
@@ -151,12 +155,7 @@ export default function NuevaCedulaPage() {
 
       const cedulaId = created.id;
 
-      const ext = name.endsWith(".pdf")
-        ? "pdf"
-        : name.endsWith(".docx")
-          ? "docx"
-          : "doc";
-
+      const ext = name.endsWith(".pdf") ? "pdf" : name.endsWith(".docx") ? "docx" : "doc";
       const path = `${uid}/${cedulaId}.${ext}`;
 
       const { error: upErr } = await supabase.storage
@@ -217,7 +216,7 @@ export default function NuevaCedulaPage() {
           </p>
 
           <div className="pill" style={{ marginBottom: 12 }}>
-            Vencimiento automático: <b>{vencimientoAuto}</b>
+            Vencimiento automático: <b>{toDDMMYY(vencimientoAutoISO)}</b>
           </div>
 
           {msg && <div className="error">{msg}</div>}
@@ -243,14 +242,15 @@ export default function NuevaCedulaPage() {
               />
             </div>
 
-            {/* ✅ Fecha de carga: no editable, se completa al subir */}
+            {/* ✅ Fecha de carga: DD/MM/AA, no editable */}
             <div>
               <label className="label">Fecha de carga</label>
               <input
                 className="input"
-                type="date"
-                value={fechaCarga}
+                type="text"
+                value={toDDMMYY(fechaCargaISO)}
                 disabled
+                placeholder="DD/MM/AA"
                 style={{ opacity: 0.75, cursor: "not-allowed" }}
               />
               <p className="helper" style={{ marginTop: 6 }}>
