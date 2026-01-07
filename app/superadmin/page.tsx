@@ -9,21 +9,34 @@ type Cedula = {
   owner_user_id: string;
   caratula: string | null;
   juzgado: string | null;
-  fecha_vencimiento: string; // YYYY-MM-DD
+  fecha_carga: string | null; // timestamptz ISO
   estado: string;
 };
 
 type Profile = { id: string; full_name: string | null; email: string | null };
 
-function daysBetweenToday(vtoISO: string) {
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const d = new Date(vtoISO); d.setHours(0, 0, 0, 0);
-  return Math.ceil((d.getTime() - today.getTime()) / 86400000);
+// Reglas del cliente (fijas)
+const UMBRAL_AMARILLO = 30; // desde 30 días => amarillo
+const UMBRAL_ROJO = 60;     // desde 60 días => rojo
+
+function startOfDay(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
 
-function semaforo(dias: number, umbralAmarillo: number, umbralRojo: number) {
-  if (dias <= umbralRojo) return "ROJO";
-  if (dias <= umbralAmarillo) return "AMARILLO";
+function daysSince(fechaCargaISO: string | null) {
+  if (!fechaCargaISO) return 0;
+  const carga = new Date(fechaCargaISO);
+  if (isNaN(carga.getTime())) return 0;
+
+  const today = startOfDay(new Date());
+  const base = startOfDay(carga);
+  const diffMs = today.getTime() - base.getTime();
+  return Math.floor(diffMs / 86400000);
+}
+
+function semaforoPorAntiguedad(diasDesdeCarga: number) {
+  if (diasDesdeCarga >= UMBRAL_ROJO) return "ROJO";
+  if (diasDesdeCarga >= UMBRAL_AMARILLO) return "AMARILLO";
   return "VERDE";
 }
 
@@ -41,8 +54,6 @@ export default function SuperAdminPage() {
   const [msg, setMsg] = useState("");
   const [cedulas, setCedulas] = useState<Cedula[]>([]);
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
-  const [umbralAmarillo, setUmbralAmarillo] = useState(3);
-  const [umbralRojo, setUmbralRojo] = useState(0);
 
   useEffect(() => {
     (async () => {
@@ -65,16 +76,6 @@ export default function SuperAdminPage() {
       const { data: ok, error: rpcErr } = await supabase.rpc("is_superadmin");
       if (rpcErr || !ok) { window.location.href = "/app"; return; }
 
-      // thresholds
-      const { data: st } = await supabase
-        .from("settings")
-        .select("umbral_amarillo, umbral_rojo")
-        .eq("id", 1)
-        .single();
-
-      setUmbralAmarillo(st?.umbral_amarillo ?? 3);
-      setUmbralRojo(st?.umbral_rojo ?? 0);
-
       // profiles
       const { data: profs, error: profsErr } = await supabase
         .from("profiles")
@@ -89,9 +90,9 @@ export default function SuperAdminPage() {
       // cedulas abiertas
       const { data: cs, error: cErr } = await supabase
         .from("cedulas")
-        .select("id, owner_user_id, caratula, juzgado, fecha_vencimiento, estado")
+        .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado")
         .neq("estado", "CERRADA")
-        .order("fecha_vencimiento", { ascending: true });
+        .order("fecha_carga", { ascending: true }); // más antiguas primero
 
       if (cErr) { setMsg(cErr.message); setChecking(false); return; }
 
@@ -101,16 +102,16 @@ export default function SuperAdminPage() {
   }, []);
 
   const ranking = useMemo(() => {
-    const perUser: Record<string, { rojos: number; amarillos: number; verdes: number; total: number; minDias: number }> = {};
+    const perUser: Record<string, { rojos: number; amarillos: number; verdes: number; total: number; maxDias: number }> = {};
 
     for (const c of cedulas) {
-      const dias = daysBetweenToday(c.fecha_vencimiento);
-      const s = semaforo(dias, umbralAmarillo, umbralRojo);
+      const dias = daysSince(c.fecha_carga);
+      const s = semaforoPorAntiguedad(dias);
       const uid = c.owner_user_id;
 
-      perUser[uid] ||= { rojos: 0, amarillos: 0, verdes: 0, total: 0, minDias: 9999 };
+      perUser[uid] ||= { rojos: 0, amarillos: 0, verdes: 0, total: 0, maxDias: -1 };
       perUser[uid].total++;
-      perUser[uid].minDias = Math.min(perUser[uid].minDias, dias);
+      perUser[uid].maxDias = Math.max(perUser[uid].maxDias, dias); // antigüedad mayor = más crítico
 
       if (s === "ROJO") perUser[uid].rojos++;
       else if (s === "AMARILLO") perUser[uid].amarillos++;
@@ -125,9 +126,9 @@ export default function SuperAdminPage() {
     })).sort((a, b) =>
       (b.rojos - a.rojos) ||
       (b.amarillos - a.amarillos) ||
-      (a.minDias - b.minDias)
+      (b.maxDias - a.maxDias) // más antigüedad primero
     );
-  }, [cedulas, profiles, umbralAmarillo, umbralRojo]);
+  }, [cedulas, profiles]);
 
   async function logout() {
     await supabase.auth.signOut();
@@ -167,8 +168,8 @@ export default function SuperAdminPage() {
             <div className="pill">Rojas: <b>{totalRojas}</b></div>
             <div className="pill">Amarillas: <b>{totalAmarillas}</b></div>
             <div className="pill">Verdes: <b>{totalVerdes}</b></div>
-            <div className="pill">Umbral Amarillo ≤ <b>{umbralAmarillo}</b> días</div>
-            <div className="pill">Umbral Rojo ≤ <b>{umbralRojo}</b> días</div>
+            <div className="pill">Amarillo desde <b>{UMBRAL_AMARILLO}</b> días</div>
+            <div className="pill">Rojo desde <b>{UMBRAL_ROJO}</b> días</div>
           </div>
 
           <div className="tableWrap">
@@ -180,7 +181,7 @@ export default function SuperAdminPage() {
                   <th style={{ textAlign: "right" }}>AMARILLO</th>
                   <th style={{ textAlign: "right" }}>VERDE</th>
                   <th style={{ textAlign: "right" }}>Total</th>
-                  <th style={{ textAlign: "right" }}>Vto más cercano (días)</th>
+                  <th style={{ textAlign: "right" }}>Cédula más antigua (días)</th>
                 </tr>
               </thead>
               <tbody>
@@ -191,7 +192,7 @@ export default function SuperAdminPage() {
                     <td style={{ textAlign: "right" }}>{r.amarillos}</td>
                     <td style={{ textAlign: "right" }}>{r.verdes}</td>
                     <td style={{ textAlign: "right" }}>{r.total}</td>
-                    <td style={{ textAlign: "right" }}>{r.minDias === 9999 ? "-" : r.minDias}</td>
+                    <td style={{ textAlign: "right" }}>{r.maxDias < 0 ? "-" : r.maxDias}</td>
                   </tr>
                 ))}
                 {ranking.length === 0 && (
@@ -202,7 +203,7 @@ export default function SuperAdminPage() {
           </div>
 
           <p className="helper" style={{ marginTop: 10 }}>
-            Orden de prioridad: más ROJOS, luego AMARILLOS, luego vencimiento más cercano.
+            Orden de prioridad: más ROJOS, luego AMARILLOS, luego mayor antigüedad desde la carga.
           </p>
         </div>
       </section>
