@@ -4,7 +4,9 @@ import mammoth from "mammoth";
 export const runtime = "nodejs";
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
-  const pdfjs: any = (await import("pdfjs-dist/legacy/build/pdf.mjs")).default;
+  // ✅ Ruta correcta para pdfjs-dist v5 en Next/Vercel
+  const pdfjsMod: any = await import("pdfjs-dist/legacy/build/pdf");
+  const pdfjs: any = pdfjsMod?.default ?? pdfjsMod;
 
   const uint8 = new Uint8Array(buffer);
   const loadingTask = pdfjs.getDocument({ data: uint8, disableWorker: true });
