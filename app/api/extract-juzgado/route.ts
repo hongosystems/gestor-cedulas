@@ -3,37 +3,44 @@ import mammoth from "mammoth";
 
 export const runtime = "nodejs";
 
+async function extractPdfText(buffer: Buffer): Promise<string> {
+  const pdfjs: any = (await import("pdfjs-dist/legacy/build/pdf.mjs")).default;
+
+  const uint8 = new Uint8Array(buffer);
+  const loadingTask = pdfjs.getDocument({ data: uint8, disableWorker: true });
+  const pdf = await loadingTask.promise;
+
+  let out = "";
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const strings = (content.items || [])
+      .map((it: any) => (typeof it?.str === "string" ? it.str : ""))
+      .filter(Boolean);
+    out += strings.join(" ") + "\n";
+  }
+  return out;
+}
+
 /**
- * Extrae el texto entre:
- *   TRIBUNAL <...> -
- * Soporta guiones: -, – y —
- * Soporta saltos de línea entre medio.
+ * Extrae Juzgado entre TRIBUNAL y -
+ * Ej: TRIBUNAL  JUZGADO ... Nº 17 - Sito en ...
  */
 function extractJuzgado(raw: string): string | null {
   if (!raw) return null;
 
-  const text = raw
-    .replace(/\u00a0/g, " ") // nbsp
+  const norm = raw
+    .replace(/\u00A0/g, " ")
     .replace(/\r/g, "")
-    .replace(/[ \t]+\n/g, "\n");
+    .replace(/\s+/g, " ")
+    .trim();
 
-  // Caso principal: TRIBUNAL ... -
-  const re = /TRIBUNAL\s+([\s\S]*?)\s*[-–—]\s*/i;
-  const m = re.exec(text);
-  if (m?.[1]) {
-    const value = m[1].replace(/\s+/g, " ").trim();
-    return value.length ? value : null;
-  }
+  const re = /TRIBUNAL\s+(.+?)\s*-\s*/i;
+  const m = re.exec(norm);
+  if (!m?.[1]) return null;
 
-  // Fallback: TRIBUNAL <línea> (si no aparece guion)
-  const re2 = /TRIBUNAL\s+([^\n\r]+)/i;
-  const m2 = re2.exec(text);
-  if (m2?.[1]) {
-    const value = m2[1].replace(/\s+/g, " ").trim();
-    return value.length ? value : null;
-  }
-
-  return null;
+  const value = m[1].trim();
+  return value.length ? value : null;
 }
 
 export async function POST(req: Request) {
@@ -49,21 +56,27 @@ export async function POST(req: Request) {
     }
 
     const name = (file.name || "").toLowerCase();
-    if (!name.endsWith(".docx")) {
+    const buf = Buffer.from(await file.arrayBuffer());
+
+    let rawText = "";
+
+    if (name.endsWith(".docx")) {
+      const result = await mammoth.extractRawText({ buffer: buf });
+      rawText = result.value || "";
+    } else if (name.endsWith(".pdf")) {
+      rawText = await extractPdfText(buf);
+    } else {
       return NextResponse.json(
-        { error: "Formato inválido. Solo DOCX." },
+        { error: "Formato inválido. Solo PDF o DOCX." },
         { status: 400 }
       );
     }
 
-    const buf = Buffer.from(await file.arrayBuffer());
-    const result = await mammoth.extractRawText({ buffer: buf });
-
-    const juzgado = extractJuzgado(result.value || "");
+    const juzgado = extractJuzgado(rawText);
     return NextResponse.json({ juzgado });
   } catch (e: any) {
     return NextResponse.json(
-      { error: e?.message || "Error leyendo DOCX." },
+      { error: e?.message || "Error leyendo archivo." },
       { status: 500 }
     );
   }

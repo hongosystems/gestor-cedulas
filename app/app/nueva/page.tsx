@@ -4,57 +4,71 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
-function pad2(n: number) {
-  return String(n).padStart(2, "0");
+function isoToday(): string {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
-function toISODate(d: Date) {
-  const yyyy = d.getFullYear();
-  const mm = pad2(d.getMonth() + 1);
-  const dd = pad2(d.getDate());
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-function addDaysISO(iso: string, days: number) {
-  const d = new Date(iso + "T00:00:00");
+function addDaysISO(iso: string, days: number): string {
+  const d = new Date(iso);
   d.setDate(d.getDate() + days);
-  return toISODate(d);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
-function isoToDDMMAA(iso: string) {
-  // iso: YYYY-MM-DD -> DD/MM/AA
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-  if (!m) return iso;
-  const yy = m[1].slice(2);
-  return `${m[3]}/${m[2]}/${yy}`;
+function formatDDMMAA(iso: string): string {
+  if (!iso) return "";
+  // iso = YYYY-MM-DD
+  const [y, m, d] = iso.split("-");
+  if (!y || !m || !d) return iso;
+  return `${d}/${m}/${y.slice(-2)}`;
 }
 
-async function requireSessionOrRedirect() {
-  const { data } = await supabase.auth.getSession();
-  if (!data.session) {
-    window.location.href = "/login";
-    return null;
-  }
-  return data.session;
+function fileExt(name: string): string {
+  const n = (name || "").toLowerCase();
+  if (n.endsWith(".pdf")) return "pdf";
+  if (n.endsWith(".docx")) return "docx";
+  if (n.endsWith(".doc")) return "doc";
+  return "";
+}
+
+function contentTypeForExt(ext: string): string {
+  if (ext === "pdf") return "application/pdf";
+  if (ext === "docx") return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (ext === "doc") return "application/msword";
+  return "application/octet-stream";
 }
 
 export default function NuevaCedulaPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [parsing, setParsing] = useState(false);
-
   const [msg, setMsg] = useState("");
 
   const [caratula, setCaratula] = useState("");
   const [juzgado, setJuzgado] = useState("");
 
-  // Fecha de Carga: se setea automáticamente al subir el archivo
-  const [fechaCargaISO, setFechaCargaISO] = useState<string>(""); // YYYY-MM-DD
-  const vencimientoISO = useMemo(() => {
-    return fechaCargaISO ? addDaysISO(fechaCargaISO, 30) : "";
-  }, [fechaCargaISO]);
+  // Fecha de Carga auto (ISO), no editable
+  const [fechaCargaISO, setFechaCargaISO] = useState("");
+  // Vencimiento auto = carga + 30
+  const vencISO = useMemo(() => (fechaCargaISO ? addDaysISO(fechaCargaISO, 30) : ""), [fechaCargaISO]);
 
   const [file, setFile] = useState<File | null>(null);
+
+  async function requireSessionOrRedirect() {
+    const { data } = await supabase.auth.getSession();
+    if (!data.session) {
+      window.location.href = "/login";
+      return null;
+    }
+    return data.session;
+  }
 
   useEffect(() => {
     (async () => {
@@ -62,7 +76,6 @@ export default function NuevaCedulaPage() {
       if (!session) return;
 
       const uid = session.user.id;
-
       const { data: prof, error: pErr } = await supabase
         .from("profiles")
         .select("must_change_password")
@@ -83,66 +96,57 @@ export default function NuevaCedulaPage() {
   }, []);
 
   async function onFileChange(f: File | null) {
-    setMsg("");
     setFile(f);
+    setMsg("");
 
-    if (!f) {
-      setFechaCargaISO("");
+    if (!f) return;
+
+    const ext = fileExt(f.name);
+    if (!["pdf", "docx", "doc"].includes(ext)) {
+      setMsg("Formato inválido. Tipos permitidos: PDF, DOC, DOCX.");
       return;
     }
 
-    const name = (f.name || "").toLowerCase();
-    const isPdf = name.endsWith(".pdf") || f.type === "application/pdf";
-    const isDocx = name.endsWith(".docx");
-    const isDoc = name.endsWith(".doc");
+    // ✅ Fecha de carga se setea automáticamente al subir archivo
+    const carga = isoToday();
+    setFechaCargaISO(carga);
 
-    if (!isPdf && !isDocx && !isDoc) {
-      setMsg("El archivo debe ser PDF, DOC o DOCX.");
-      setFechaCargaISO("");
-      setFile(null);
+    // DOC viejo: no lo parseamos (sin conversión)
+    if (ext === "doc") {
+      setMsg("DOC detectado. Podés completar Carátula y Juzgado manualmente (sin autocompletar).");
       return;
     }
 
-    // ✅ Fecha de Carga se autocompleta al subir el archivo
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    setFechaCargaISO(toISODate(today));
-
-    // ✅ Autocompletar solo si es DOCX
-    if (!isDocx) return;
-
+    // PDF o DOCX: autocompletar
     setParsing(true);
     try {
+      const fd = new FormData();
+      fd.append("file", f);
+
       // 1) Carátula
-      const fd1 = new FormData();
-      fd1.append("file", f);
-      const r1 = await fetch("/api/extract-caratula", { method: "POST", body: fd1 });
-      const j1 = await r1.json().catch(() => ({}));
-      if (r1.ok && j1?.caratula) {
-        setCaratula(String(j1.caratula));
+      const resC = await fetch("/api/extract-caratula", { method: "POST", body: fd });
+      const jsonC = await resC.json().catch(() => ({}));
+      if (resC.ok && jsonC?.caratula) {
+        setCaratula(String(jsonC.caratula));
       }
 
-      // 2) Juzgado
+      // 2) Juzgado (nuevo FormData para evitar edge cases de stream en algunos runtimes)
       const fd2 = new FormData();
       fd2.append("file", f);
-      const r2 = await fetch("/api/extract-juzgado", { method: "POST", body: fd2 });
-      const j2 = await r2.json().catch(() => ({}));
-      if (r2.ok && j2?.juzgado) {
-        setJuzgado(String(j2.juzgado));
+      const resJ = await fetch("/api/extract-juzgado", { method: "POST", body: fd2 });
+      const jsonJ = await resJ.json().catch(() => ({}));
+      if (resJ.ok && jsonJ?.juzgado) {
+        setJuzgado(String(jsonJ.juzgado));
       }
 
-      // Mensaje suave si no pudo completar algo
-      const noCaratula = r1.ok && !j1?.caratula;
-      const noJuzgado = r2.ok && !j2?.juzgado;
-      if (noCaratula && noJuzgado) {
-        setMsg("No se pudo leer el DOCX para autocompletar Carátula/Juzgado. Podés completarlos a mano.");
-      } else if (noCaratula) {
-        setMsg("No se pudo autocompletar Carátula desde el DOCX. Podés completarla a mano.");
-      } else if (noJuzgado) {
-        setMsg("No se pudo autocompletar Juzgado desde el DOCX. Podés completarlo a mano.");
+      // Mensaje suave si no encontró nada
+      const noCar = !(jsonC?.caratula);
+      const noJuz = !(jsonJ?.juzgado);
+      if (noCar && noJuz) {
+        setMsg("No se pudo leer el archivo para autocompletar Carátula/Juzgado. Podés completarlos a mano.");
       }
     } catch {
-      setMsg("No se pudo leer el DOCX para autocompletar datos.");
+      setMsg("No se pudo leer el archivo para autocompletar.");
     } finally {
       setParsing(false);
     }
@@ -151,11 +155,13 @@ export default function NuevaCedulaPage() {
   async function onSave() {
     setMsg("");
 
+    // ✅ PDF/DOC/DOCX es obligatorio (no opcional)
     if (!file) {
-      setMsg("La cédula es obligatoria. Cargá el archivo para continuar.");
+      setMsg("Tenés que cargar el archivo (PDF/DOC/DOCX).");
       return;
     }
 
+    // Carga auto se define al seleccionar archivo
     if (!fechaCargaISO) {
       setMsg("No se pudo determinar la Fecha de Carga. Volvé a cargar el archivo.");
       return;
@@ -166,27 +172,22 @@ export default function NuevaCedulaPage() {
       return;
     }
 
-    // vencimiento automático: 30 días
-    if (!vencimientoISO) {
-      setMsg("No se pudo calcular el vencimiento automático.");
-      return;
-    }
-
     setSaving(true);
     try {
       const session = await requireSessionOrRedirect();
       if (!session) return;
+
       const uid = session.user.id;
 
-      // 1) Crear cédula (sin pedir vencimiento al usuario)
+      // 1) Crear cédula
       const { data: created, error: insErr } = await supabase
         .from("cedulas")
         .insert({
           owner_user_id: uid,
           caratula: caratula.trim(),
           juzgado: juzgado.trim() || null,
-          fecha_notificacion: fechaCargaISO, // reutilizamos esta columna como "Fecha de Carga"
-          fecha_vencimiento: vencimientoISO,
+          fecha_carga: fechaCargaISO,
+          fecha_vencimiento: vencISO, // ✅ siempre seteado (NOT NULL)
           estado: "NUEVA",
           pdf_path: null,
         })
@@ -198,18 +199,17 @@ export default function NuevaCedulaPage() {
         return;
       }
 
-      const cedulaId = created.id;
+      const cedulaId = created.id as string;
 
-      // 2) Subir archivo a storage (mismo bucket)
-      const ext = (file.name.split(".").pop() || "bin").toLowerCase();
-      const safeExt = ext === "docx" || ext === "doc" || ext === "pdf" ? ext : "bin";
-      const path = `${uid}/${cedulaId}.${safeExt}`;
+      // 2) Subir archivo
+      const ext = fileExt(file.name) || "bin";
+      const path = `${uid}/${cedulaId}.${ext}`;
 
       const { error: upErr } = await supabase.storage
         .from("cedulas")
         .upload(path, file, {
           upsert: true,
-          contentType: file.type || "application/octet-stream",
+          contentType: contentTypeForExt(ext),
         });
 
       if (upErr) {
@@ -218,7 +218,7 @@ export default function NuevaCedulaPage() {
         return;
       }
 
-      // 3) Guardar link
+      // 3) Guardar link del archivo (mantenemos pdf_path por compatibilidad, aunque sea DOCX)
       const { error: dbErr } = await supabase
         .from("cedulas")
         .update({ pdf_path: path })
@@ -248,8 +248,6 @@ export default function NuevaCedulaPage() {
     );
   }
 
-  const fileLabel = file ? file.name : "Ningún archivo seleccionado";
-
   return (
     <main className="container">
       <section className="card">
@@ -257,37 +255,29 @@ export default function NuevaCedulaPage() {
           <img className="logoMini" src="/logo.png" alt="Logo" />
           <h1>Nueva cédula</h1>
           <div className="spacer" />
-          <Link className="btn" href="/app">
-            Volver
-          </Link>
+          <Link className="btn" href="/app">Volver</Link>
         </header>
 
         <div className="page">
           <p className="helper">
-            El sistema toma automáticamente la <b>Fecha de Carga</b> al subir el archivo y calcula un{" "}
-            <b>vencimiento automático a 30 días</b>.
+            El sistema toma automáticamente la <b>Fecha de Carga</b> al subir el archivo y calcula un <b>vencimiento automático</b> a 30 días.
+            <br />
+            Fecha de Carga: <b>{fechaCargaISO ? formatDDMMAA(fechaCargaISO) : "—"}</b> — Vencimiento automático: <b>{fechaCargaISO ? formatDDMMAA(vencISO) : "—"}</b>
           </p>
-
-          {fechaCargaISO && (
-            <p className="helper" style={{ marginTop: 6 }}>
-              Fecha de Carga: <b>{isoToDDMMAA(fechaCargaISO)}</b> — Vencimiento automático:{" "}
-              <b>{isoToDDMMAA(vencimientoISO)}</b>
-            </p>
-          )}
 
           {msg && <div className="error">{msg}</div>}
 
-          <div style={{ display: "grid", gap: 12, marginTop: 10 }}>
+          <div style={{ display: "grid", gap: 12 }}>
             <div>
               <label className="label">Carátula</label>
               <input
                 className="input"
                 value={caratula}
                 onChange={(e) => setCaratula(e.target.value)}
-                placeholder='Ej: Pérez c/ Gómez s/ daños'
+                placeholder="Ej: Pérez c/ Gómez s/ daños"
               />
               <p className="helper" style={{ marginTop: 6 }}>
-                Si subís un DOCX, se autocompleta buscando: <i>Expediente caratulado: “…”</i>
+                Si subís un DOCX o PDF, se autocompleta buscando: <i>Expediente caratulado: “…”</i>
               </p>
             </div>
 
@@ -297,57 +287,44 @@ export default function NuevaCedulaPage() {
                 className="input"
                 value={juzgado}
                 onChange={(e) => setJuzgado(e.target.value)}
-                placeholder='Opcional (se intenta autocompletar desde DOCX)'
+                placeholder="Opcional"
               />
               <p className="helper" style={{ marginTop: 6 }}>
-                En DOCX se autocompleta tomando el texto entre <b>TRIBUNAL</b> y <b>-</b>.
+                En PDF/DOCX se autocompleta tomando el texto entre <b>TRIBUNAL</b> y <b>-</b>.
               </p>
             </div>
 
             <div>
               <label className="label">Fecha de Carga (auto)</label>
-              <input
-                className="input"
-                value={fechaCargaISO ? isoToDDMMAA(fechaCargaISO) : ""}
-                readOnly
-                disabled
-                placeholder="DD/MM/AA"
-              />
-              <p className="helper" style={{ marginTop: 6 }}>
-                Se completa automáticamente al subir el archivo. No es editable.
-              </p>
+              <input className="input" value={fechaCargaISO ? formatDDMMAA(fechaCargaISO) : ""} disabled />
             </div>
 
             <div>
               <label className="label">CÉDULA (obligatorio)</label>
 
-              {/* input oculto para que el botón diga "Cargar archivo" */}
-              <input
-                id="cedula-file"
-                type="file"
-                accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                style={{ display: "none" }}
-                onChange={(e) => onFileChange(e.target.files?.[0] ?? null)}
-              />
-
-              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                <label
-                  htmlFor="cedula-file"
-                  className="btn"
-                  style={{ cursor: parsing || saving ? "not-allowed" : "pointer", opacity: parsing || saving ? 0.7 : 1 }}
-                >
+              {/* Botón estético para subir archivo */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <label className="btn" style={{ cursor: "pointer" }}>
                   Cargar archivo
+                  <input
+                    type="file"
+                    accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    style={{ display: "none" }}
+                    onChange={(e) => onFileChange(e.target.files?.[0] ?? null)}
+                  />
                 </label>
-                <span className="helper">{fileLabel}</span>
+                <span className="helper" style={{ margin: 0 }}>
+                  {file ? file.name : "Ningún archivo seleccionado"}
+                </span>
               </div>
 
               <p className="helper" style={{ marginTop: 6 }}>
-                Tipos permitidos: PDF, DOC, DOCX. (El autorrelleno funciona con DOCX.)
+                Tipos permitidos: PDF, DOC, DOCX.
               </p>
 
               {parsing && (
                 <p className="helper" style={{ marginTop: 6 }}>
-                  Leyendo DOCX para autocompletar…
+                  Leyendo archivo para autocompletar…
                 </p>
               )}
             </div>
@@ -356,9 +333,7 @@ export default function NuevaCedulaPage() {
               <button className="btn primary" disabled={saving || parsing} onClick={onSave}>
                 {saving ? "Guardando…" : "Guardar"}
               </button>
-              <Link className="btn" href="/app">
-                Cancelar
-              </Link>
+              <Link className="btn" href="/app">Cancelar</Link>
             </div>
           </div>
         </div>
