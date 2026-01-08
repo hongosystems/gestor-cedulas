@@ -217,7 +217,10 @@ export default function MisCedulasPage() {
 
     try {
       const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session) return null;
+      if (!sessionData.session) {
+        console.warn("No hay sesión para detectar tipo de documento");
+        return null;
+      }
 
       const response = await fetch(
         `/api/detect-type?path=${encodeURIComponent(path)}`,
@@ -231,12 +234,17 @@ export default function MisCedulasPage() {
       if (response.ok) {
         const data = await response.json();
         const tipo = data.tipo as DocumentType;
-        // Guardar en el estado
-        setDocumentTypes((prev) => ({ ...prev, [cedulaId]: tipo }));
-        return tipo;
+        if (tipo) {
+          // Guardar en el estado
+          setDocumentTypes((prev) => ({ ...prev, [cedulaId]: tipo }));
+          return tipo;
+        }
+      } else {
+        const errorText = await response.text();
+        console.warn(`Error detectando tipo de documento: ${response.status} - ${errorText}`);
       }
-    } catch (err) {
-      // Silencioso - no es crítico si falla la detección
+    } catch (err: any) {
+      console.warn("Error en detectDocumentType:", err?.message || err);
     }
 
     return null;
@@ -285,11 +293,18 @@ export default function MisCedulasPage() {
 
   // Efecto para detectar tipos de documentos al cargar
   useEffect(() => {
-    cedulas.forEach((c) => {
-      if (c.pdf_path && !documentTypes[c.id]) {
-        detectDocumentType(c.pdf_path, c.id);
+    if (cedulas.length === 0) return;
+
+    // Detectar tipos de todos los documentos que aún no tienen tipo detectado
+    const detectAll = async () => {
+      for (const c of cedulas) {
+        if (c.pdf_path && !documentTypes[c.id]) {
+          await detectDocumentType(c.pdf_path, c.id);
+        }
       }
-    });
+    };
+
+    detectAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cedulas]);
 

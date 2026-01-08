@@ -59,7 +59,9 @@ export async function GET(req: NextRequest) {
       .download(path);
 
     if (downloadError || !fileData) {
-      return NextResponse.json({ error: "Archivo no encontrado." }, { status: 404 });
+      // Si no se puede descargar el archivo, retornar null en lugar de error
+      // para que el frontend no falle
+      return NextResponse.json({ tipo: null });
     }
 
     const buffer = Buffer.from(await fileData.arrayBuffer());
@@ -77,12 +79,18 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: "Error leyendo DOCX." }, { status: 500 });
       }
     } else if (ext === "pdf") {
-      // Para PDFs, necesitaríamos una librería como pdf-parse
-      // Por ahora, retornamos null y el frontend puede manejar PDFs de otra forma
-      // O podemos intentar extraer texto con alguna librería
-      return NextResponse.json({ tipo: null, error: "PDF aún no soportado para detección de tipo." });
+      // Para PDFs, detectar por el nombre del archivo como fallback
+      // Si el nombre contiene "oficio" o "cedula", usar eso
+      const fileNameUpper = fileName.toUpperCase();
+      if (/OFICIO/i.test(fileNameUpper)) {
+        return NextResponse.json({ tipo: "OFICIO" });
+      } else if (/CEDULA/i.test(fileNameUpper)) {
+        return NextResponse.json({ tipo: "CEDULA" });
+      }
+      // Si no se puede determinar por el nombre, retornar null (no error)
+      return NextResponse.json({ tipo: null });
     } else {
-      return NextResponse.json({ error: "Formato no soportado." }, { status: 400 });
+      return NextResponse.json({ tipo: null });
     }
 
     if (!text || text.trim().length === 0) {
