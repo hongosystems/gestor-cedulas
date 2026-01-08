@@ -12,6 +12,7 @@ type Cedula = {
   juzgado: string | null;
   fecha_carga: string | null;
   pdf_path: string | null;
+  tipo_documento: "CEDULA" | "OFICIO" | null;
 };
 
 type DocumentType = "CEDULA" | "OFICIO" | null;
@@ -100,7 +101,6 @@ export default function MisCedulasPage() {
   const [cedulas, setCedulas] = useState<Cedula[]>([]);
   const [sortField, setSortField] = useState<SortField>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const [documentTypes, setDocumentTypes] = useState<Record<string, DocumentType>>({});
 
   useEffect(() => {
     (async () => {
@@ -128,11 +128,34 @@ export default function MisCedulasPage() {
       }
 
       // listar cédulas del usuario
-      const { data: cs, error: cErr } = await supabase
+      // Intentar incluir tipo_documento, pero si no existe la columna, usar select sin ella
+      let query = supabase
         .from("cedulas")
-        .select("id, owner_user_id, caratula, juzgado, fecha_carga, pdf_path")
+        .select("id, owner_user_id, caratula, juzgado, fecha_carga, pdf_path, tipo_documento")
         .eq("owner_user_id", uid)
         .order("fecha_carga", { ascending: false });
+      
+      const { data: cs, error: cErr } = await query;
+      
+      // Si el error es porque la columna no existe, intentar sin tipo_documento
+      if (cErr && cErr.message?.includes("tipo_documento")) {
+        const { data: cs2, error: cErr2 } = await supabase
+          .from("cedulas")
+          .select("id, owner_user_id, caratula, juzgado, fecha_carga, pdf_path")
+          .eq("owner_user_id", uid)
+          .order("fecha_carga", { ascending: false });
+        
+        if (cErr2) {
+          setMsg(cErr2.message);
+          setLoading(false);
+          return;
+        }
+        // Agregar tipo_documento como null para cada registro
+        const csWithNull = (cs2 ?? []).map((c: any) => ({ ...c, tipo_documento: null }));
+        setCedulas(csWithNull as Cedula[]);
+        setLoading(false);
+        return;
+      }
 
       if (cErr) {
         setMsg(cErr.message);
@@ -208,48 +231,6 @@ export default function MisCedulasPage() {
     window.location.href = "/login";
   }
 
-  // Función para detectar el tipo de documento (CÉDULA u OFICIO)
-  async function detectDocumentType(path: string, cedulaId: string) {
-    // Si ya lo tenemos detectado, no volver a detectar
-    if (documentTypes[cedulaId]) {
-      return documentTypes[cedulaId];
-    }
-
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session) {
-        console.warn("No hay sesión para detectar tipo de documento");
-        return null;
-      }
-
-      const response = await fetch(
-        `/api/detect-type?path=${encodeURIComponent(path)}`,
-        {
-          headers: {
-            Authorization: `Bearer ${sessionData.session.access_token}`,
-          },
-        }
-      );
-
-      if (response.ok) {
-        const data = await response.json();
-        const tipo = data.tipo as DocumentType;
-        if (tipo) {
-          // Guardar en el estado
-          setDocumentTypes((prev) => ({ ...prev, [cedulaId]: tipo }));
-          return tipo;
-        }
-      } else {
-        const errorText = await response.text();
-        console.warn(`Error detectando tipo de documento: ${response.status} - ${errorText}`);
-      }
-    } catch (err: any) {
-      console.warn("Error en detectDocumentType:", err?.message || err);
-    }
-
-    return null;
-  }
-
   async function abrirArchivo(path: string) {
     setMsg("");
     try {
@@ -291,22 +272,6 @@ export default function MisCedulasPage() {
     }
   }
 
-  // Efecto para detectar tipos de documentos al cargar
-  useEffect(() => {
-    if (cedulas.length === 0) return;
-
-    // Detectar tipos de todos los documentos que aún no tienen tipo detectado
-    const detectAll = async () => {
-      for (const c of cedulas) {
-        if (c.pdf_path && !documentTypes[c.id]) {
-          await detectDocumentType(c.pdf_path, c.id);
-        }
-      }
-    };
-
-    detectAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cedulas]);
 
   if (loading) {
     return (
@@ -415,7 +380,7 @@ export default function MisCedulasPage() {
                     <td style={{ textAlign: "right" }}>
                       {c.pdf_path ? (
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
-                          {documentTypes[c.id] && (
+                          {c.tipo_documento && (
                             <span
                               style={{
                                 fontSize: 11,
@@ -425,7 +390,7 @@ export default function MisCedulasPage() {
                                 textTransform: "uppercase",
                               }}
                             >
-                              {documentTypes[c.id]}
+                              {c.tipo_documento}
                             </span>
                           )}
                           <button className="btn primary" onClick={() => abrirArchivo(c.pdf_path!)}>

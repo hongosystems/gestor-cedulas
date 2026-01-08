@@ -46,6 +46,7 @@ export default function NuevaCedulaPage() {
   const [juzgado, setJuzgado] = useState("");
 
   const [file, setFile] = useState<File | null>(null);
+  const [tipoDocumento, setTipoDocumento] = useState<"CEDULA" | "OFICIO" | null>(null);
 
   // Se setea AL SUBIR ARCHIVO, no editable
   const [fechaCargaISO, setFechaCargaISO] = useState<string>("");
@@ -144,9 +145,33 @@ export default function NuevaCedulaPage() {
             setJuzgado(juzgadoData.juzgado);
           }
         }
+
+        // Detectar tipo de documento (CÉDULA u OFICIO) para guardarlo en la BD
+        const formDataTipo = new FormData();
+        formDataTipo.append("file", f);
+        const tipoRes = await fetch("/api/detect-type-upload", {
+          method: "POST",
+          body: formDataTipo,
+        });
+        if (tipoRes.ok) {
+          const tipoData = await tipoRes.json();
+          if (tipoData.tipo) {
+            setTipoDocumento(tipoData.tipo);
+          }
+        }
       } catch (err) {
         // Si falla el parseo, no es crítico - el usuario puede completar manualmente
         // Error silencioso: el usuario puede completar los campos manualmente
+      }
+    } else {
+      // Para PDFs o DOC, intentar detectar por nombre del archivo
+      const nameUpper = (f.name || "").toUpperCase();
+      if (/OFICIO/i.test(nameUpper)) {
+        setTipoDocumento("OFICIO");
+      } else if (/CEDULA/i.test(nameUpper)) {
+        setTipoDocumento("CEDULA");
+      } else {
+        setTipoDocumento(null);
       }
     }
   }
@@ -174,20 +199,44 @@ export default function NuevaCedulaPage() {
 
       const uid = session.user.id;
 
-      // 1) Crear cédula (fecha_carga y vencimiento automático)
-      const { data: created, error: insErr } = await supabase
+      // 1) Crear cédula (fecha_carga, vencimiento automático y tipo_documento si existe la columna)
+      const baseInsertData: any = {
+        owner_user_id: uid,
+        caratula: caratula.trim(),
+        juzgado: juzgado.trim() || null,
+        fecha_carga: fechaCargaISO,                 // ✅ guarda fecha de carga
+        fecha_vencimiento: vencISO || null,         // ✅ guarda vencimiento (carga + 30)
+        estado: "NUEVA",
+        pdf_path: null,
+      };
+      
+      // Intentar insertar con tipo_documento primero
+      let insertData = { ...baseInsertData };
+      if (tipoDocumento) {
+        insertData.tipo_documento = tipoDocumento;
+      }
+      
+      let { data: created, error: insErr } = await supabase
         .from("cedulas")
-        .insert({
-          owner_user_id: uid,
-          caratula: caratula.trim(),
-          juzgado: juzgado.trim() || null,
-          fecha_carga: fechaCargaISO,                 // ✅ guarda fecha de carga
-          fecha_vencimiento: vencISO || null,         // ✅ guarda vencimiento (carga + 30)
-          estado: "NUEVA",
-          pdf_path: null,
-        })
+        .insert(insertData)
         .select("id")
         .single();
+      
+      // Si falla porque la columna tipo_documento no existe, reintentar sin ella
+      if (insErr && (insErr.message?.includes("tipo_documento") || insErr.message?.includes("schema cache"))) {
+        const { data: createdRetry, error: insErrRetry } = await supabase
+          .from("cedulas")
+          .insert(baseInsertData)
+          .select("id")
+          .single();
+        
+        if (insErrRetry || !createdRetry?.id) {
+          setMsg(insErrRetry?.message || "No se pudo crear la cédula.");
+          return;
+        }
+        created = createdRetry;
+        insErr = null;
+      }
 
       if (insErr || !created?.id) {
         setMsg(insErr?.message || "No se pudo crear la cédula.");
