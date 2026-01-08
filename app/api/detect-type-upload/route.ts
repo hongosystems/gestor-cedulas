@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
 import mammoth from "mammoth";
-import * as pdfParse from "pdf-parse";
 
 export const runtime = "nodejs";
+
+// Dynamic import for pdf-parse
+async function loadPdfParse() {
+  const pdfParseModule = await import("pdf-parse");
+  // pdf-parse puede exportar como default o como named export
+  return (pdfParseModule as any).default || pdfParseModule;
+}
 
 /**
  * Detecta si un documento es CÉDULA u OFICIO desde un archivo subido
@@ -40,8 +46,20 @@ export async function POST(req: Request) {
         const result = await mammoth.extractRawText({ buffer: buf });
         text = result.value || "";
       } else if (ext === "pdf") {
-        const pdfData = await (pdfParse.default || pdfParse)(buf);
-        text = pdfData.text || "";
+        try {
+          const pdfParser = await loadPdfParse();
+          const pdfData = await pdfParser(buf);
+          text = pdfData.text || "";
+        } catch (e: any) {
+          // Si falla el parseo del PDF, intentar por nombre del archivo
+          const nameUpper = name.toUpperCase();
+          if (/OFICIO/i.test(nameUpper)) {
+            return NextResponse.json({ tipo: "OFICIO" });
+          } else if (/CEDULA/i.test(nameUpper)) {
+            return NextResponse.json({ tipo: "CEDULA" });
+          }
+          return NextResponse.json({ tipo: null });
+        }
       }
 
       if (!text || text.trim().length === 0) {

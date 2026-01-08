@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
 import mammoth from "mammoth";
-import * as pdfParse from "pdf-parse";
 
 export const runtime = "nodejs";
+
+// Dynamic import for pdf-parse
+async function loadPdfParse() {
+  const pdfParseModule = await import("pdf-parse");
+  // pdf-parse puede exportar como default o como named export
+  return (pdfParseModule as any).default || pdfParseModule;
+}
 
 /**
  * Extrae la carátula de documentos OFICIO y Cédulas
@@ -163,7 +169,8 @@ export async function POST(req: Request) {
       text = result.value || "";
     } else if (ext === "pdf") {
       try {
-        const pdfData = await (pdfParse.default || pdfParse)(buf);
+        const pdfParser = await loadPdfParse();
+        const pdfData = await pdfParser(buf);
         text = pdfData.text || "";
       } catch (e: any) {
         return NextResponse.json(
