@@ -14,6 +14,8 @@ type Cedula = {
   pdf_path: string | null;
 };
 
+type DocumentType = "CEDULA" | "OFICIO" | null;
+
 function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
@@ -98,6 +100,7 @@ export default function MisCedulasPage() {
   const [cedulas, setCedulas] = useState<Cedula[]>([]);
   const [sortField, setSortField] = useState<SortField>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const [documentTypes, setDocumentTypes] = useState<Record<string, DocumentType>>({});
 
   useEffect(() => {
     (async () => {
@@ -170,8 +173,12 @@ export default function MisCedulasPage() {
           if (!a.cargaISO && !b.cargaISO) return 0;
           if (!a.cargaISO) return 1;
           if (!b.cargaISO) return -1;
-          compareA = new Date(a.cargaISO).getTime();
-          compareB = new Date(b.cargaISO).getTime();
+          // Usar la fecha completa ISO (con hora, minutos, segundos) para ordenamiento preciso
+          // Si la fecha solo tiene YYYY-MM-DD, agregar hora 00:00:00 para mantener compatibilidad
+          const dateA = a.cargaISO.length === 10 ? new Date(a.cargaISO + "T00:00:00") : new Date(a.cargaISO);
+          const dateB = b.cargaISO.length === 10 ? new Date(b.cargaISO + "T00:00:00") : new Date(b.cargaISO);
+          compareA = dateA.getTime();
+          compareB = dateB.getTime();
         } else {
           return 0;
         }
@@ -199,6 +206,40 @@ export default function MisCedulasPage() {
   async function logout() {
     await supabase.auth.signOut();
     window.location.href = "/login";
+  }
+
+  // Función para detectar el tipo de documento (CÉDULA u OFICIO)
+  async function detectDocumentType(path: string, cedulaId: string) {
+    // Si ya lo tenemos detectado, no volver a detectar
+    if (documentTypes[cedulaId]) {
+      return documentTypes[cedulaId];
+    }
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) return null;
+
+      const response = await fetch(
+        `/api/detect-type?path=${encodeURIComponent(path)}`,
+        {
+          headers: {
+            Authorization: `Bearer ${sessionData.session.access_token}`,
+          },
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        const tipo = data.tipo as DocumentType;
+        // Guardar en el estado
+        setDocumentTypes((prev) => ({ ...prev, [cedulaId]: tipo }));
+        return tipo;
+      }
+    } catch (err) {
+      // Silencioso - no es crítico si falla la detección
+    }
+
+    return null;
   }
 
   async function abrirArchivo(path: string) {
@@ -242,6 +283,16 @@ export default function MisCedulasPage() {
     }
   }
 
+  // Efecto para detectar tipos de documentos al cargar
+  useEffect(() => {
+    cedulas.forEach((c) => {
+      if (c.pdf_path && !documentTypes[c.id]) {
+        detectDocumentType(c.pdf_path, c.id);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cedulas]);
+
   if (loading) {
     return (
       <main className="container">
@@ -270,10 +321,17 @@ export default function MisCedulasPage() {
         </header>
 
         <div className="page">
-          <p className="helper" style={{ marginBottom: 12 }}>
-            Semáforo automático por antigüedad desde la carga: <b>Verde</b> 0–29 · <b>Amarillo</b> 30–59 ·{" "}
-            <b>Rojo</b> 60+ días.
-          </p>
+          <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+            <span style={{ color: "var(--muted)", fontSize: 13 }}>
+              Semáforo automático por antigüedad desde la carga:
+            </span>
+            <SemaforoChip value="VERDE" />
+            <span style={{ color: "var(--muted)", fontSize: 13 }}>0–29</span>
+            <SemaforoChip value="AMARILLO" />
+            <span style={{ color: "var(--muted)", fontSize: 13 }}>30–59</span>
+            <SemaforoChip value="ROJO" />
+            <span style={{ color: "var(--muted)", fontSize: 13 }}>60+ días</span>
+          </div>
 
           {msg && <div className="error">{msg}</div>}
 
@@ -341,9 +399,24 @@ export default function MisCedulasPage() {
 
                     <td style={{ textAlign: "right" }}>
                       {c.pdf_path ? (
-                        <button className="btn primary" onClick={() => abrirArchivo(c.pdf_path!)}>
-                          Abrir
-                        </button>
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+                          {documentTypes[c.id] && (
+                            <span
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 600,
+                                color: "var(--muted)",
+                                letterSpacing: 0.5,
+                                textTransform: "uppercase",
+                              }}
+                            >
+                              {documentTypes[c.id]}
+                            </span>
+                          )}
+                          <button className="btn primary" onClick={() => abrirArchivo(c.pdf_path!)}>
+                            Abrir
+                          </button>
+                        </div>
                       ) : (
                         <span className="muted">Sin archivo</span>
                       )}

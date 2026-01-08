@@ -5,15 +5,26 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 function isoToday(): string {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString().slice(0, 10); // YYYY-MM-DD
+  // Retornar la fecha completa con hora, minutos y segundos para poder ordenar correctamente
+  // aunque en el frontend solo se muestre la fecha
+  return new Date().toISOString(); // YYYY-MM-DDTHH:mm:ss.sssZ
 }
 
 function addDaysISO(iso: string, days: number): string {
-  const d = new Date(iso + "T00:00:00");
+  if (!iso) return "";
+  // Extraer solo la parte de la fecha (primeros 10 caracteres: YYYY-MM-DD)
+  // Maneja tanto fechas completas ISO como fechas solo con día
+  const datePart = iso.substring(0, 10);
+  const d = new Date(datePart + "T00:00:00");
+  if (isNaN(d.getTime())) {
+    // Si no es una fecha válida, intentar parsear directamente
+    const d2 = new Date(iso);
+    if (isNaN(d2.getTime())) return "";
+    d2.setDate(d2.getDate() + days);
+    return d2.toISOString();
+  }
   d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  return d.toISOString();
 }
 
 function fmtDDMMAA(iso?: string | null): string {
@@ -242,7 +253,7 @@ export default function NuevaCedulaPage() {
     <main className="container">
       <section className="card">
         <header className="nav">
-          <h1>Nueva cédula</h1>
+          <h1>Nueva carga</h1>
           <div className="spacer" />
           <Link className="btn" href="/app">
             Volver
@@ -250,21 +261,51 @@ export default function NuevaCedulaPage() {
         </header>
 
         <div className="page">
-          <p className="helper">
-            El sistema toma automáticamente la <b>Fecha de Carga</b> al subir el archivo y calcula un{" "}
-            <b>vencimiento automático</b> a 30 días.
-            <br />
+          {/* Sección de fecha de carga - más estética y separada */}
+          <div style={{ 
+            marginBottom: 32, 
+            padding: "16px 18px", 
+            borderRadius: 12, 
+            background: "rgba(0, 82, 156, 0.08)",
+            border: "1px solid rgba(0, 82, 156, 0.18)",
+            borderStyle: "dashed"
+          }}>
+            <p style={{ 
+              margin: 0, 
+              fontSize: 13, 
+              color: "var(--muted)", 
+              lineHeight: 1.6,
+              marginBottom: fechaCargaISO ? 10 : 0
+            }}>
+              El sistema toma automáticamente la <b style={{ color: "var(--text)" }}>Fecha de Carga</b> al subir el archivo y calcula un{" "}
+              <b style={{ color: "var(--text)" }}>vencimiento automático</b> a 30 días.
+            </p>
             {fechaCargaISO ? (
-              <>
-                Fecha de Carga: <b>{fmtDDMMAA(fechaCargaISO)}</b> — Vencimiento automático:{" "}
-                <b>{fmtDDMMAA(vencISO)}</b>
-              </>
+              <div style={{ 
+                marginTop: 12, 
+                paddingTop: 12, 
+                borderTop: "1px solid rgba(255, 255, 255, 0.08)",
+                display: "flex", 
+                gap: 16, 
+                fontSize: 13,
+                color: "var(--text)"
+              }}>
+                <span>
+                  <span style={{ color: "var(--muted)" }}>Fecha de Carga:</span>{" "}
+                  <b style={{ color: "var(--text)" }}>{fmtDDMMAA(fechaCargaISO)}</b>
+                </span>
+                <span style={{ color: "rgba(255, 255, 255, 0.2)" }}>•</span>
+                <span>
+                  <span style={{ color: "var(--muted)" }}>Vencimiento automático:</span>{" "}
+                  <b style={{ color: "var(--text)" }}>{fmtDDMMAA(vencISO)}</b>
+                </span>
+              </div>
             ) : null}
-          </p>
+          </div>
 
-          {msg && <div className="error">{msg}</div>}
+          {msg && <div className="error" style={{ marginBottom: 20 }}>{msg}</div>}
 
-          <div style={{ display: "grid", gap: 12 }}>
+          <div style={{ display: "grid", gap: 20 }}>
             <div>
               <label className="label">Carátula</label>
               <input
@@ -272,6 +313,7 @@ export default function NuevaCedulaPage() {
                 value={caratula}
                 onChange={(e) => setCaratula(e.target.value)}
                 placeholder="Ej: Pérez c/ Gómez s/ daños"
+                style={{ marginTop: 6 }}
               />
             </div>
 
@@ -282,6 +324,7 @@ export default function NuevaCedulaPage() {
                 value={juzgado}
                 onChange={(e) => setJuzgado(e.target.value)}
                 placeholder="Opcional"
+                style={{ marginTop: 6 }}
               />
             </div>
 
@@ -291,16 +334,16 @@ export default function NuevaCedulaPage() {
                 className="input"
                 value={fechaCargaISO ? fmtDDMMAA(fechaCargaISO) : ""}
                 disabled
-                style={{ opacity: 0.8, cursor: "not-allowed" }}
+                style={{ opacity: 0.8, cursor: "not-allowed", marginTop: 6 }}
                 placeholder="Se completa al subir el archivo"
               />
             </div>
 
             <div>
-              <label className="label">CÉDULA (obligatorio)</label>
+              <label className="label">Cargar CÉDULA U OFICIO (obligatorio)</label>
 
               {/* Botón custom coherente: mantenemos input real (oculto) */}
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 6 }}>
                 <label className="btn primary" style={{ cursor: "pointer" }}>
                   Cargar archivo
                   <input
@@ -311,17 +354,17 @@ export default function NuevaCedulaPage() {
                   />
                 </label>
 
-                <span className="helper" style={{ margin: 0 }}>
+                <span className="helper" style={{ margin: 0, fontSize: 13 }}>
                   {file ? file.name : "Ningún archivo seleccionado"}
                 </span>
               </div>
 
-              <p className="helper" style={{ marginTop: 6 }}>
+              <p className="helper" style={{ marginTop: 8, marginBottom: 0 }}>
                 Tipos permitidos: PDF, DOC, DOCX.
               </p>
             </div>
 
-            <div style={{ display: "flex", gap: 10 }}>
+            <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
               <button className="btn primary" disabled={saving} onClick={onSave}>
                 {saving ? "Guardando…" : "Guardar"}
               </button>

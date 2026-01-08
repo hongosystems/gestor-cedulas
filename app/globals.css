@@ -49,7 +49,7 @@ body{
   box-shadow: var(--shadow);
   overflow:hidden;
 }
-.page{ padding: 18px 18px 28px 18px; }
+.page{ padding: 24px 24px 32px 24px; }
 
 .nav{
   display:flex;
@@ -76,7 +76,7 @@ a:hover{ text-decoration: underline; }
 .form{ display:grid; gap: 12px; }
 .form.narrow{ width:min(520px, 100%); }
 
-.field{ display:grid; gap: 8px; }
+.field{ display:grid; gap: 10px; }
 .label{ font-weight:600; color: rgba(234,243,255,.86); }
 
 .input{
