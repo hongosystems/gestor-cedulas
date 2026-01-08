@@ -18,22 +18,29 @@
 }
 
 *{ box-sizing:border-box; }
-html,body{ height:100%; }
+html,body{ 
+  height:100%;
+  min-height: 100vh;
+}
 body{
   margin:0;
   color:var(--text);
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
   background:
-    radial-gradient(900px 500px at 18% 12%, rgba(0,82,156,.42), transparent 60%),
-    radial-gradient(900px 520px at 82% 22%, rgba(96,141,186,.22), transparent 62%),
-    radial-gradient(900px 520px at 65% 86%, rgba(0,169,82,.10), transparent 62%),
-    linear-gradient(180deg, var(--bg-1), var(--bg-0));
+    radial-gradient(1200px 700px at 18% 12%, rgba(0,82,156,.42), transparent 70%),
+    radial-gradient(1200px 700px at 82% 22%, rgba(96,141,186,.22), transparent 70%),
+    radial-gradient(1200px 700px at 65% 86%, rgba(0,169,82,.10), transparent 70%),
+    linear-gradient(180deg, var(--bg-1) 0%, var(--bg-0) 100%);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+  background-size: cover;
 }
 
 /* ===== Layout ===== */
 .container{
   width:min(1100px, calc(100% - 32px));
-  margin: 38px auto;
+  margin: 38px auto 38px auto;
+  padding-bottom: 20px;
 }
 .card{
   background: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.04));
@@ -42,7 +49,7 @@ body{
   box-shadow: var(--shadow);
   overflow:hidden;
 }
-.page{ padding: 18px 18px 22px 18px; }
+.page{ padding: 18px 18px 28px 18px; }
 
 .nav{
   display:flex;
@@ -150,6 +157,15 @@ a:hover{ text-decoration: underline; }
   padding: 12px 12px;
   border-bottom: 1px solid rgba(255,255,255,.10);
   background: rgba(0,82,156,.10);
+  transition: background .15s ease, color .15s ease;
+}
+.table thead th.sortable{
+  cursor: pointer;
+  user-select: none;
+}
+.table thead th.sortable:hover{
+  background: rgba(0,82,156,.18);
+  color: rgba(234,243,255,.95);
 }
 .table tbody td{
   padding: 11px 12px;

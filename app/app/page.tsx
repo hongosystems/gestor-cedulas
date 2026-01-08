@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { daysSince } from "@/lib/semaforo";
 
 type Cedula = {
   id: string;
   owner_user_id: string;
   caratula: string | null;
   juzgado: string | null;
-  fecha_notificacion: string | null; // usamos como "Fecha de Carga"
+  fecha_carga: string | null;
   pdf_path: string | null;
 };
 
@@ -18,20 +19,18 @@ function pad2(n: number) {
 }
 
 function isoToDDMMAA(iso: string) {
-  // YYYY-MM-DD -> DD/MM/AA
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  // Maneja formatos ISO: YYYY-MM-DD o YYYY-MM-DDTHH:mm:ss+00:00
+  if (!iso || iso.trim() === "") return "";
+  
+  // Extraer solo la parte de la fecha (primeros 10 caracteres: YYYY-MM-DD)
+  const datePart = iso.substring(0, 10);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(datePart);
   if (!m) return iso;
+  
   const yy = m[1].slice(2);
   return `${m[3]}/${m[2]}/${yy}`;
 }
 
-function daysSinceISO(iso: string) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const d = new Date(iso + "T00:00:00");
-  d.setHours(0, 0, 0, 0);
-  return Math.max(0, Math.floor((today.getTime() - d.getTime()) / 86400000));
-}
 
 type Semaforo = "VERDE" | "AMARILLO" | "ROJO";
 
@@ -90,10 +89,15 @@ async function requireSessionOrRedirect() {
   return data.session;
 }
 
+type SortField = "dias" | "semaforo" | "fecha_carga" | null;
+type SortDirection = "asc" | "desc";
+
 export default function MisCedulasPage() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
   const [cedulas, setCedulas] = useState<Cedula[]>([]);
+  const [sortField, setSortField] = useState<SortField>(null);
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
   useEffect(() => {
     (async () => {
@@ -123,9 +127,9 @@ export default function MisCedulasPage() {
       // listar cédulas del usuario
       const { data: cs, error: cErr } = await supabase
         .from("cedulas")
-        .select("id, owner_user_id, caratula, juzgado, fecha_notificacion, pdf_path")
+        .select("id, owner_user_id, caratula, juzgado, fecha_carga, pdf_path")
         .eq("owner_user_id", uid)
-        .order("fecha_notificacion", { ascending: false });
+        .order("fecha_carga", { ascending: false });
 
       if (cErr) {
         setMsg(cErr.message);
@@ -139,13 +143,58 @@ export default function MisCedulasPage() {
   }, []);
 
   const rows = useMemo(() => {
-    return cedulas.map((c) => {
-      const cargaISO = c.fecha_notificacion || "";
-      const dias = cargaISO ? daysSinceISO(cargaISO) : null;
-      const sem = dias === null ? ("VERDE" as Semaforo) : semaforoByAge(dias);
-      return { ...c, cargaISO, dias, sem };
+    let mapped = cedulas.map((c) => {
+      const cargaISO = c.fecha_carga || "";
+      const dias = cargaISO ? daysSince(cargaISO) : null;
+      const diasValidos = dias !== null && !isNaN(dias) && dias >= 0 ? dias : null;
+      const sem = diasValidos === null ? ("VERDE" as Semaforo) : semaforoByAge(diasValidos);
+      return { ...c, cargaISO, dias: diasValidos, sem };
     });
-  }, [cedulas]);
+
+    // Aplicar ordenamiento
+    if (sortField) {
+      mapped.sort((a, b) => {
+        let compareA: number;
+        let compareB: number;
+
+        if (sortField === "dias") {
+          compareA = a.dias ?? -1; // null va al final
+          compareB = b.dias ?? -1;
+        } else if (sortField === "semaforo") {
+          // Rojo = 2, Amarillo = 1, Verde = 0
+          const semOrder: Record<Semaforo, number> = { ROJO: 2, AMARILLO: 1, VERDE: 0 };
+          compareA = semOrder[a.sem];
+          compareB = semOrder[b.sem];
+        } else if (sortField === "fecha_carga") {
+          // null va al final
+          if (!a.cargaISO && !b.cargaISO) return 0;
+          if (!a.cargaISO) return 1;
+          if (!b.cargaISO) return -1;
+          compareA = new Date(a.cargaISO).getTime();
+          compareB = new Date(b.cargaISO).getTime();
+        } else {
+          return 0;
+        }
+
+        if (compareA < compareB) return sortDirection === "asc" ? -1 : 1;
+        if (compareA > compareB) return sortDirection === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+
+    return mapped;
+  }, [cedulas, sortField, sortDirection]);
+
+  function handleSort(field: SortField) {
+    if (sortField === field) {
+      // Si ya está ordenando por esta columna, invertir la dirección
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+    } else {
+      // Nueva columna, empezar con desc para días, semáforo y fecha_carga (más reciente/crítico primero)
+      setSortField(field);
+      setSortDirection("desc");
+    }
+  }
 
   async function logout() {
     await supabase.auth.signOut();
@@ -155,14 +204,41 @@ export default function MisCedulasPage() {
   async function abrirArchivo(path: string) {
     setMsg("");
     try {
-      const { data, error } = await supabase.storage.from("cedulas").createSignedUrl(path, 60);
-      if (error || !data?.signedUrl) {
-        setMsg(error?.message || "No se pudo generar el link para abrir el archivo.");
+      // Obtener el token de sesión para autenticación
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) {
+        setMsg("No estás autenticado");
         return;
       }
-      window.open(data.signedUrl, "_blank", "noopener,noreferrer");
-    } catch {
-      setMsg("No se pudo abrir el archivo.");
+
+      // Usar el endpoint API que sirve el archivo con headers para abrirlo en el navegador
+      const url = `/api/open-file?path=${encodeURIComponent(path)}&token=${encodeURIComponent(sessionData.session.access_token)}`;
+      
+      // Obtener el archivo y crear un blob URL para abrirlo directamente en el navegador
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        setMsg("No se pudo abrir el archivo: " + errorText);
+        return;
+      }
+
+      // Obtener el Content-Type del response
+      const contentType = response.headers.get("Content-Type") || "application/octet-stream";
+      
+      // Obtener el blob y crear uno nuevo con el tipo MIME explícito
+      const blob = await response.blob();
+      const typedBlob = new Blob([blob], { type: contentType });
+      const blobUrl = URL.createObjectURL(typedBlob);
+      
+      // Abrir el blob URL en una nueva pestaña - el navegador lo abrirá según el tipo MIME
+      // Para PDFs se abrirá en el visor del navegador, para otros tipos dependerá del navegador
+      window.open(blobUrl, "_blank", "noopener,noreferrer");
+      
+      // Limpiar el blob URL después de un tiempo para liberar memoria
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+    } catch (err: any) {
+      setMsg("No se pudo abrir el archivo: " + (err?.message || "Error desconocido"));
     }
   }
 
@@ -205,11 +281,41 @@ export default function MisCedulasPage() {
             <table className="table">
               <thead>
                 <tr>
-                  <th style={{ width: 130 }}>Semáforo</th>
+                  <th 
+                    className="sortable"
+                    style={{ width: 130 }}
+                    onClick={() => handleSort("semaforo")}
+                    title="Haz clic para ordenar"
+                  >
+                    Semáforo{" "}
+                    <span style={{ opacity: sortField === "semaforo" ? 1 : 0.4 }}>
+                      {sortField === "semaforo" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
+                    </span>
+                  </th>
                   <th>Carátula</th>
                   <th>Juzgado</th>
-                  <th style={{ width: 150 }}>Fecha de Carga</th>
-                  <th style={{ width: 80, textAlign: "right" }}>Días</th>
+                  <th 
+                    className="sortable"
+                    style={{ width: 150 }}
+                    onClick={() => handleSort("fecha_carga")}
+                    title="Haz clic para ordenar"
+                  >
+                    Fecha de Carga{" "}
+                    <span style={{ opacity: sortField === "fecha_carga" ? 1 : 0.4 }}>
+                      {sortField === "fecha_carga" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
+                    </span>
+                  </th>
+                  <th 
+                    className="sortable"
+                    style={{ width: 80, textAlign: "right" }}
+                    onClick={() => handleSort("dias")}
+                    title="Haz clic para ordenar"
+                  >
+                    Días{" "}
+                    <span style={{ opacity: sortField === "dias" ? 1 : 0.4 }}>
+                      {sortField === "dias" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
+                    </span>
+                  </th>
                   <th style={{ width: 170, textAlign: "right" }}>Cédula/Oficio</th>
                 </tr>
               </thead>
@@ -230,7 +336,7 @@ export default function MisCedulasPage() {
                     <td>{c.cargaISO ? isoToDDMMAA(c.cargaISO) : <span className="muted">—</span>}</td>
 
                     <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                      {typeof c.dias === "number" ? c.dias : <span className="muted">—</span>}
+                      {typeof c.dias === "number" && !isNaN(c.dias) ? c.dias : <span className="muted">—</span>}
                     </td>
 
                     <td style={{ textAlign: "right" }}>
