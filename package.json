@@ -12,11 +12,13 @@
     "@supabase/supabase-js": "^2.89.0",
     "mammoth": "^1.11.0",
     "next": "16.1.1",
+    "pdf-parse": "^2.4.5",
     "react": "19.2.3",
     "react-dom": "19.2.3"
   },
   "devDependencies": {
     "@types/node": "^20.19.27",
+    "@types/pdf-parse": "^1.1.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "dotenv": "^17.2.3",

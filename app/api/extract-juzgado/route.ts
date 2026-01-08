@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import mammoth from "mammoth";
+import * as pdfParse from "pdf-parse";
 
 export const runtime = "nodejs";
 
@@ -95,16 +96,30 @@ export async function POST(req: Request) {
     }
 
     const name = (file.name || "").toLowerCase();
+    const ext = name.split(".").pop()?.toLowerCase() || "";
 
-    if (!name.endsWith(".docx")) {
-      // Estable: no parseamos PDF
+    if (ext !== "docx" && ext !== "pdf") {
       return NextResponse.json({ juzgado: null });
     }
 
     const buf = Buffer.from(await file.arrayBuffer());
-    const result = await mammoth.extractRawText({ buffer: buf });
+    let text = "";
+
+    // Extraer texto según el tipo de archivo
+    if (ext === "docx") {
+      const result = await mammoth.extractRawText({ buffer: buf });
+      text = result.value || "";
+    } else if (ext === "pdf") {
+      try {
+        const pdfData = await (pdfParse.default || pdfParse)(buf);
+        text = pdfData.text || "";
+      } catch (e: any) {
+        // Si falla el parseo del PDF, retornar null silenciosamente
+        return NextResponse.json({ juzgado: null });
+      }
+    }
     
-    const juzgado = extractJuzgado(result.value || "");
+    const juzgado = extractJuzgado(text);
     // Asegurar uppercase si hay resultado
     const juzgadoFinal = juzgado ? juzgado.toUpperCase() : null;
     

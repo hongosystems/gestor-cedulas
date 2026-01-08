@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import mammoth from "mammoth";
+import * as pdfParse from "pdf-parse";
 
 export const runtime = "nodejs";
 
@@ -144,17 +145,35 @@ export async function POST(req: Request) {
     }
 
     const name = (file.name || "").toLowerCase();
-    if (!name.endsWith(".docx")) {
+    const ext = name.split(".").pop()?.toLowerCase() || "";
+    
+    if (ext !== "docx" && ext !== "pdf") {
       return NextResponse.json(
-        { error: "Formato inválido. Solo DOCX." },
+        { error: "Formato inválido. Solo DOCX y PDF." },
         { status: 400 }
       );
     }
 
     const buf = Buffer.from(await file.arrayBuffer());
-    const result = await mammoth.extractRawText({ buffer: buf });
+    let text = "";
 
-    const caratula = extractCaratula(result.value || "");
+    // Extraer texto según el tipo de archivo
+    if (ext === "docx") {
+      const result = await mammoth.extractRawText({ buffer: buf });
+      text = result.value || "";
+    } else if (ext === "pdf") {
+      try {
+        const pdfData = await (pdfParse.default || pdfParse)(buf);
+        text = pdfData.text || "";
+      } catch (e: any) {
+        return NextResponse.json(
+          { error: "Error leyendo PDF: " + (e?.message || "Error desconocido") },
+          { status: 500 }
+        );
+      }
+    }
+
+    const caratula = extractCaratula(text);
     // Asegurar uppercase si hay resultado
     const caratulaFinal = caratula ? caratula.toUpperCase() : null;
     

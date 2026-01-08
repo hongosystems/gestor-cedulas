@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import mammoth from "mammoth";
+import * as pdfParse from "pdf-parse";
 
 export const runtime = "nodejs";
 
@@ -19,8 +20,8 @@ export async function POST(req: Request) {
     const name = (file.name || "").toLowerCase();
     const ext = name.split(".").pop() || "";
 
-    // Para PDFs o archivos sin extensión, intentar detectar por nombre
-    if (ext !== "docx" && ext !== "doc") {
+    // Para archivos sin extensión o DOC, intentar detectar por nombre
+    if (ext !== "docx" && ext !== "pdf") {
       const nameUpper = name.toUpperCase();
       if (/OFICIO/i.test(nameUpper)) {
         return NextResponse.json({ tipo: "OFICIO" });
@@ -30,45 +31,21 @@ export async function POST(req: Request) {
       return NextResponse.json({ tipo: null });
     }
 
-    // Para DOCX, extraer texto y detectar
-    if (ext === "docx") {
-      try {
-        const buf = Buffer.from(await file.arrayBuffer());
+    const buf = Buffer.from(await file.arrayBuffer());
+    let text = "";
+
+    try {
+      // Extraer texto según el tipo de archivo
+      if (ext === "docx") {
         const result = await mammoth.extractRawText({ buffer: buf });
-        const text = result.value || "";
+        text = result.value || "";
+      } else if (ext === "pdf") {
+        const pdfData = await (pdfParse.default || pdfParse)(buf);
+        text = pdfData.text || "";
+      }
 
-        if (!text || text.trim().length === 0) {
-          return NextResponse.json({ tipo: null });
-        }
-
-        // Normalizar el texto
-        const normalizedText = text
-          .replace(/\u00A0/g, " ")
-          .replace(/\r/g, "")
-          .replace(/\n+/g, " ")
-          .replace(/\s+/g, " ")
-          .trim()
-          .toUpperCase();
-
-        // Buscar "CEDULA" o "CEDULA DE NOTIFICACION" en las primeras 500 caracteres
-        const first500 = normalizedText.substring(0, 500);
-        const hasCedula = /\bCEDULA\b/i.test(first500) || /\bCEDULA\s+DE\s+NOTIFICACION\b/i.test(first500);
-
-        // Buscar "OFICIO" como primera palabra o en las primeras 200 caracteres
-        const first200 = normalizedText.substring(0, 200);
-        const startsWithOficio = /^\s*OFICIO\b/i.test(normalizedText) || /\bOFICIO\b/i.test(first200);
-
-        // Priorizar OFICIO si está al inicio, sino CÉDULA si tiene "CEDULA"
-        let tipo: "CEDULA" | "OFICIO" | null = null;
-        if (startsWithOficio) {
-          tipo = "OFICIO";
-        } else if (hasCedula) {
-          tipo = "CEDULA";
-        }
-
-        return NextResponse.json({ tipo });
-      } catch (e: any) {
-        // Si falla, intentar por nombre del archivo
+      if (!text || text.trim().length === 0) {
+        // Si no hay texto, intentar por nombre del archivo
         const nameUpper = name.toUpperCase();
         if (/OFICIO/i.test(nameUpper)) {
           return NextResponse.json({ tipo: "OFICIO" });
@@ -77,9 +54,43 @@ export async function POST(req: Request) {
         }
         return NextResponse.json({ tipo: null });
       }
-    }
 
-    return NextResponse.json({ tipo: null });
+      // Normalizar el texto
+      const normalizedText = text
+        .replace(/\u00A0/g, " ")
+        .replace(/\r/g, "")
+        .replace(/\n+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toUpperCase();
+
+      // Buscar "CEDULA" o "CEDULA DE NOTIFICACION" en las primeras 500 caracteres
+      const first500 = normalizedText.substring(0, 500);
+      const hasCedula = /\bCEDULA\b/i.test(first500) || /\bCEDULA\s+DE\s+NOTIFICACION\b/i.test(first500);
+
+      // Buscar "OFICIO" como primera palabra o en las primeras 200 caracteres
+      const first200 = normalizedText.substring(0, 200);
+      const startsWithOficio = /^\s*OFICIO\b/i.test(normalizedText) || /\bOFICIO\b/i.test(first200);
+
+      // Priorizar OFICIO si está al inicio, sino CÉDULA si tiene "CEDULA"
+      let tipo: "CEDULA" | "OFICIO" | null = null;
+      if (startsWithOficio) {
+        tipo = "OFICIO";
+      } else if (hasCedula) {
+        tipo = "CEDULA";
+      }
+
+      return NextResponse.json({ tipo });
+    } catch (e: any) {
+      // Si falla, intentar por nombre del archivo
+      const nameUpper = name.toUpperCase();
+      if (/OFICIO/i.test(nameUpper)) {
+        return NextResponse.json({ tipo: "OFICIO" });
+      } else if (/CEDULA/i.test(nameUpper)) {
+        return NextResponse.json({ tipo: "CEDULA" });
+      }
+      return NextResponse.json({ tipo: null });
+    }
   } catch (e: any) {
     return NextResponse.json({ tipo: null });
   }

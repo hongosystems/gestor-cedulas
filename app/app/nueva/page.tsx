@@ -115,8 +115,8 @@ export default function NuevaCedulaPage() {
       return;
     }
 
-    // Autorrelleno para archivos DOCX
-    if (name.endsWith(".docx")) {
+    // Autorrelleno para archivos DOCX y PDF
+    if (name.endsWith(".docx") || name.endsWith(".pdf")) {
       try {
         // Extraer carátula
         const formDataCaratula = new FormData();
@@ -164,7 +164,7 @@ export default function NuevaCedulaPage() {
         // Error silencioso: el usuario puede completar los campos manualmente
       }
     } else {
-      // Para PDFs o DOC, intentar detectar por nombre del archivo
+      // Para DOC u otros formatos, intentar detectar por nombre del archivo
       const nameUpper = (f.name || "").toUpperCase();
       if (/OFICIO/i.test(nameUpper)) {
         setTipoDocumento("OFICIO");
