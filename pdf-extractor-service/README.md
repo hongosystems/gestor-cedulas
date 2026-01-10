@@ -25,7 +25,10 @@ npm start
 ## Variables de Entorno
 
 - `PORT`: Puerto del servidor (default: 3000)
-- `MAX_OCR_PAGES`: Máximo de páginas para procesar con OCR (default: 5)
+- `OCR_TIMEOUT`: Timeout para OCR de primera página en milisegundos (default: 20000 = 20 segundos)
+- `ENDPOINT_TIMEOUT`: Timeout total del endpoint en milisegundos (default: 25000 = 25 segundos)
+
+**Nota:** El servicio procesa SOLO la primera página porque la información relevante (Carátula y Juzgado) siempre está en la primera página tanto para Cédulas como Oficios.
 
 ## API
 

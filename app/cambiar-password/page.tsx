@@ -40,22 +40,14 @@ export default function CambiarPasswordPage() {
         
         // Verificar si es admin_expedientes (intentar función RPC primero, si falla verificar directamente)
         let isAdminExp = false;
-        const { data: rpcResult, error: adminExpErr } = await supabase.rpc("is_admin_expedientes");
+        // Usar consulta directa para evitar errores 400
+        const { data: roleData, error: roleErr } = await supabase
+          .from("user_roles")
+          .select("is_admin_expedientes")
+          .eq("user_id", uid)
+          .maybeSingle();
         
-        if (adminExpErr) {
-          // Si la función RPC no existe o falla, verificar directamente en la tabla
-          const { data: roleData, error: roleErr } = await supabase
-            .from("user_roles")
-            .select("is_admin_expedientes")
-            .eq("user_id", uid)
-            .maybeSingle();
-          
-          if (!roleErr && roleData) {
-            isAdminExp = roleData.is_admin_expedientes === true;
-          }
-        } else {
-          isAdminExp = rpcResult === true;
-        }
+        isAdminExp = !roleErr && roleData?.is_admin_expedientes === true;
         
         if (isAdminExp) {
           window.location.href = "/app/expedientes";

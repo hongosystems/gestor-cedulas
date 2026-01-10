@@ -85,24 +85,14 @@ export default function NuevaExpedientePage() {
 
       const uid = session.user.id;
 
-      // Verificar que el usuario tenga el rol de admin_expedientes (intentar función RPC primero, si falla verificar directamente)
-      let hasRole = false;
-      const { data: rpcResult, error: rpcErr } = await supabase.rpc("is_admin_expedientes");
+      // Verificar que el usuario tenga el rol de admin_expedientes - usar consulta directa para evitar errores 400
+      const { data: roleData, error: roleErr } = await supabase
+        .from("user_roles")
+        .select("is_admin_expedientes")
+        .eq("user_id", uid)
+        .maybeSingle();
       
-      if (rpcErr) {
-        // Si la función RPC no existe o falla, verificar directamente en la tabla
-        const { data: roleData, error: roleErr } = await supabase
-          .from("user_roles")
-          .select("is_admin_expedientes")
-          .eq("user_id", uid)
-          .maybeSingle();
-        
-        if (!roleErr && roleData) {
-          hasRole = roleData.is_admin_expedientes === true;
-        }
-      } else {
-        hasRole = rpcResult === true;
-      }
+      const hasRole = !roleErr && roleData?.is_admin_expedientes === true;
       
       if (!hasRole) {
         window.location.href = "/app";

@@ -1,0 +1,166 @@
+═══════════════════════════════════════════════════════════════
+  GUÍA RÁPIDA: DEPLOY PDF EXTRACTOR SERVICE
+═══════════════════════════════════════════════════════════════
+
+📦 ARCHIVOS CREADOS/MODIFICADOS
+═══════════════════════════════════════════════════════════════
+
+✅ MICROSERVICIO (carpeta: pdf-extractor-service/)
+   - server.js
+   - package.json
+   - Dockerfile
+   - .dockerignore
+   - README.md
+
+✅ NEXT.JS (gestor-cedulas/)
+   - app/api/extract-pdf/route.ts (NUEVO)
+   - app/app/nueva/page.tsx (MODIFICADO)
+   - DEPLOY_PDF_EXTRACTOR.md (documentación completa)
+
+═══════════════════════════════════════════════════════════════
+  PASO 1: DEPLOYAR MICROSERVICIO EN RENDER
+═══════════════════════════════════════════════════════════════
+
+1. Sube la carpeta "pdf-extractor-service" a un repositorio Git
+   (puede ser el mismo repo del proyecto o uno separado)
+
+2. Ve a https://render.com → Sign Up / Login
+
+3. Dashboard → "New +" → "Web Service"
+
+4. Conecta tu repositorio (autoriza Render si es la primera vez)
+
+5. Configuración:
+   • Name: pdf-extractor-service
+   • Region: Oregon (US West) o la más cercana
+   • Branch: main
+   • Root Directory: pdf-extractor-service (si está en subcarpeta)
+   • Runtime: Docker ⚠️ IMPORTANTE
+   • Dockerfile Path: Dockerfile
+   • Plan: Free (para probar) o Starter ($7/mes) para producción
+
+6. Variables de Entorno (opcional):
+   • MAX_OCR_PAGES=5
+
+7. "Create Web Service"
+
+8. Espera 5-10 minutos para el primer deploy
+
+9. Obtén la URL del servicio (ej: https://pdf-extractor-service-xxxx.onrender.com)
+
+10. Verifica: Abre https://tu-servicio.onrender.com/health
+    Deberías ver: {"status":"ok","service":"pdf-extractor"}
+
+═══════════════════════════════════════════════════════════════
+  PASO 2: CONFIGURAR VARIABLES DE ENTORNO
+═══════════════════════════════════════════════════════════════
+
+📝 EN .env.local (desarrollo local)
+═══════════════════════════════════════════════════════════════
+
+Crea/edita el archivo .env.local en la raíz del proyecto:
+
+PDF_EXTRACTOR_URL=https://tu-servicio.onrender.com/extract
+
+⚠️ IMPORTANTE: La URL debe incluir /extract al final
+
+═══════════════════════════════════════════════════════════════
+
+🌐 EN VERCEL (producción)
+═══════════════════════════════════════════════════════════════
+
+1. Ve a https://vercel.com → Tu proyecto
+
+2. Settings → Environment Variables
+
+3. Agrega:
+   • Name: PDF_EXTRACTOR_URL
+   • Value: https://tu-servicio.onrender.com/extract
+   • Environments: ✅ Production ✅ Preview ✅ Development
+
+4. Save
+
+5. Vuelve a desplegar si ya había un deployment anterior
+   (o haz git push para que se despliegue automáticamente)
+
+═══════════════════════════════════════════════════════════════
+  PASO 3: DESPLEGAR CAMBIOS A PRODUCCIÓN
+═══════════════════════════════════════════════════════════════
+
+Ejecuta estos comandos en PowerShell (desde C:\proyectos\gestor-cedulas):
+
+git add -A
+git commit -m "feat: integración con microservicio PDF extractor"
+git push origin main
+
+Vercel desplegará automáticamente cuando hagas push a main.
+
+═══════════════════════════════════════════════════════════════
+  PASO 4: VERIFICAR
+═══════════════════════════════════════════════════════════════
+
+✅ Microservicio:
+   • Abre https://tu-servicio.onrender.com/health
+   • Debe responder: {"status":"ok"}
+
+✅ Next.js:
+   • Espera que Vercel termine el deploy
+   • Abre la URL de producción
+   • Ve a /app/nueva
+   • Sube un PDF
+   • Los campos "Carátula" y "Juzgado" deberían autocompletarse
+
+═══════════════════════════════════════════════════════════════
+  TESTING
+═══════════════════════════════════════════════════════════════
+
+🧪 Testing con curl (PowerShell):
+
+$filePath = "C:\ruta\a\tu\archivo.pdf"
+
+# Probar microservicio directamente:
+curl -X POST https://tu-servicio.onrender.com/extract -F "file=@$filePath"
+
+# Probar endpoint Next.js (local):
+curl -X POST http://localhost:3000/api/extract-pdf -F "file=@$filePath"
+
+═══════════════════════════════════════════════════════════════
+  PROBLEMAS COMUNES
+═══════════════════════════════════════════════════════════════
+
+❌ "PDF_EXTRACTOR_URL no está configurada"
+   → Verifica que esté en .env.local y en Vercel
+
+❌ "No se pudo conectar al servicio"
+   → Verifica que el microservicio esté corriendo (abre /health)
+   → Si está en plan Free, puede estar "dormido" (primera petición tarda ~30s)
+
+❌ "No se detectó carátula"
+   → Esto NO es un error crítico - el usuario puede completar manualmente
+   → Verifica que el PDF tenga texto (no solo imágenes)
+
+❌ Build falla en Vercel
+   → Ejecuta "npm run build" localmente para ver el error
+   → Verifica que no haya errores de TypeScript
+
+═══════════════════════════════════════════════════════════════
+  LOGS
+═══════════════════════════════════════════════════════════════
+
+📊 Render (microservicio):
+   • Dashboard → Tu servicio → Pestaña "Logs"
+
+📊 Vercel (Next.js):
+   • Dashboard → Tu proyecto → Deployments → Último deployment → Logs
+
+═══════════════════════════════════════════════════════════════
+  COMPATIBILIDAD
+═══════════════════════════════════════════════════════════════
+
+✅ DOCX: Sigue usando los endpoints actuales (/api/extract-caratula, etc.)
+✅ PDF: Ahora usa el nuevo endpoint que reenvía al microservicio
+✅ Todo lo demás: Sin cambios, funciona igual
+
+═══════════════════════════════════════════════════════════════
+
+Para más detalles, ver: DEPLOY_PDF_EXTRACTOR.md

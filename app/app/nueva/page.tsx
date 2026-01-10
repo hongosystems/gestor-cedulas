@@ -4,6 +4,22 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
+// Componente de loader con animación
+function LoadingSpinner() {
+  return (
+    <div 
+      style={{
+        width: 24,
+        height: 24,
+        border: "3px solid rgba(0, 82, 156, 0.2)",
+        borderTop: "3px solid rgba(0, 82, 156, 0.8)",
+        borderRadius: "50%",
+        animation: "spin 0.8s linear infinite",
+      }}
+    />
+  );
+}
+
 function isoToday(): string {
   // Retornar la fecha completa con hora, minutos y segundos para poder ordenar correctamente
   // aunque en el frontend solo se muestre la fecha
@@ -41,6 +57,7 @@ export default function NuevaCedulaPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
+  const [extracting, setExtracting] = useState(false); // Estado para loader de extracción
 
   const [caratula, setCaratula] = useState("");
   const [juzgado, setJuzgado] = useState("");
@@ -118,35 +135,82 @@ export default function NuevaCedulaPage() {
     // Autorrelleno para archivos DOCX y PDF
     if (name.endsWith(".docx") || name.endsWith(".pdf")) {
       try {
-        // Extraer carátula
-        const formDataCaratula = new FormData();
-        formDataCaratula.append("file", f);
-        const caratulaRes = await fetch("/api/extract-caratula", {
-          method: "POST",
-          body: formDataCaratula,
-        });
-        if (caratulaRes.ok) {
-          const caratulaData = await caratulaRes.json();
-          if (caratulaData.caratula) {
-            setCaratula(caratulaData.caratula);
+        // Si es PDF, usar el microservicio extractor (endpoint que reenvía)
+        if (name.endsWith(".pdf")) {
+          setExtracting(true); // Mostrar loader
+          
+          const formDataPDF = new FormData();
+          formDataPDF.append("file", f);
+          
+          try {
+            const pdfRes = await fetch("/api/extract-pdf", {
+              method: "POST",
+              body: formDataPDF,
+            });
+            
+            if (pdfRes.ok) {
+              const pdfData = await pdfRes.json();
+              
+              // Setear carátula si viene del microservicio
+              if (pdfData.caratula) {
+                setCaratula(pdfData.caratula);
+              } else {
+                // Mostrar mensaje suave si no se detectó
+                setMsg("No pude detectar la carátula automáticamente. Completala manualmente.");
+              }
+              
+              // Setear juzgado si viene del microservicio
+              if (pdfData.juzgado) {
+                setJuzgado(pdfData.juzgado);
+              }
+              
+              // Si hubo un error en el servicio pero no es crítico, solo mostramos el mensaje suave
+              if (pdfData.error && !pdfData.caratula && !pdfData.juzgado) {
+                // El mensaje ya se mostró arriba, no duplicar
+              }
+            } else {
+              // Si el endpoint falla, mostrar mensaje suave
+              setMsg("No pude procesar el PDF automáticamente. Completá los campos manualmente.");
+            }
+          } catch (fetchError) {
+            console.error("Error en fetch:", fetchError);
+            setMsg("Error al procesar el PDF. Completá los campos manualmente.");
+          } finally {
+            setExtracting(false); // Ocultar loader
           }
-        }
+        } else {
+          // Si es DOCX, usar los endpoints actuales (mantener compatibilidad)
+          // Extraer carátula
+          const formDataCaratula = new FormData();
+          formDataCaratula.append("file", f);
+          const caratulaRes = await fetch("/api/extract-caratula", {
+            method: "POST",
+            body: formDataCaratula,
+          });
+          if (caratulaRes.ok) {
+            const caratulaData = await caratulaRes.json();
+            if (caratulaData.caratula) {
+              setCaratula(caratulaData.caratula);
+            }
+          }
 
-        // Extraer juzgado
-        const formDataJuzgado = new FormData();
-        formDataJuzgado.append("file", f);
-        const juzgadoRes = await fetch("/api/extract-juzgado", {
-          method: "POST",
-          body: formDataJuzgado,
-        });
-        if (juzgadoRes.ok) {
-          const juzgadoData = await juzgadoRes.json();
-          if (juzgadoData.juzgado) {
-            setJuzgado(juzgadoData.juzgado);
+          // Extraer juzgado
+          const formDataJuzgado = new FormData();
+          formDataJuzgado.append("file", f);
+          const juzgadoRes = await fetch("/api/extract-juzgado", {
+            method: "POST",
+            body: formDataJuzgado,
+          });
+          if (juzgadoRes.ok) {
+            const juzgadoData = await juzgadoRes.json();
+            if (juzgadoData.juzgado) {
+              setJuzgado(juzgadoData.juzgado);
+            }
           }
         }
 
         // Detectar tipo de documento (CÉDULA u OFICIO) para guardarlo en la BD
+        // Esto funciona tanto para PDF como DOCX
         const formDataTipo = new FormData();
         formDataTipo.append("file", f);
         const tipoRes = await fetch("/api/detect-type-upload", {
@@ -162,6 +226,7 @@ export default function NuevaCedulaPage() {
       } catch (err) {
         // Si falla el parseo, no es crítico - el usuario puede completar manualmente
         // Error silencioso: el usuario puede completar los campos manualmente
+        setMsg("No pude procesar el archivo automáticamente. Completá los campos manualmente.");
       }
     } else {
       // Para DOC u otros formatos, intentar detectar por nombre del archivo
@@ -353,6 +418,29 @@ export default function NuevaCedulaPage() {
           </div>
 
           {msg && <div className="error" style={{ marginBottom: 20 }}>{msg}</div>}
+
+          {/* Loader de extracción */}
+          {extracting && (
+            <div style={{
+              marginBottom: 20,
+              padding: "20px 24px",
+              borderRadius: 12,
+              background: "rgba(0, 82, 156, 0.12)",
+              border: "1px solid rgba(0, 82, 156, 0.25)",
+              display: "flex",
+              alignItems: "center",
+              gap: 16,
+            }}>
+              <LoadingSpinner />
+              <span style={{
+                color: "var(--text)",
+                fontSize: 14,
+                fontWeight: 500,
+              }}>
+                Recopilando Información de Documento Adjunto...
+              </span>
+            </div>
+          )}
 
           <div style={{ display: "grid", gap: 20 }}>
             <div>

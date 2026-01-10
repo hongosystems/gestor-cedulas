@@ -297,9 +297,9 @@ export default function SuperAdminPage() {
         // Si falla por columna tipo_documento inexistente, reintentar sin ella
         if (cErr.message?.includes("tipo_documento")) {
           const { data: cs2, error: cErr2 } = await supabase
-            .from("cedulas")
-            .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado")
-            .neq("estado", "CERRADA")
+        .from("cedulas")
+        .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado")
+        .neq("estado", "CERRADA")
             .order("fecha_carga", { ascending: true });
           
           if (cErr2) { 
@@ -656,7 +656,7 @@ export default function SuperAdminPage() {
             Salir
           </button>
         </div>
-      </header>
+        </header>
 
       <main style={{ 
         flex: 1, 
@@ -883,10 +883,13 @@ export default function SuperAdminPage() {
           }}>
             Métricas Generales
           </h2>
+          
+          {/* Fila 1: Totales */}
           <div style={{ 
             display: "grid", 
-            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-            gap: 20
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: 20,
+            marginBottom: 20
           }}>
             <KPICard
               title="Total Documentos Abiertos"
@@ -904,11 +907,40 @@ export default function SuperAdminPage() {
               value={metrics.totalOficios}
               color="blue"
             />
+          </div>
+          
+          {/* Fila 2: Continuación de Totales + Expedientes y Usuarios */}
+          <div style={{ 
+            display: "grid", 
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: 20,
+            marginBottom: 20
+          }}>
             <KPICard
               title="Total Expedientes"
               value={metrics.totalExpedientes}
               color="blue"
             />
+            <KPICard
+              title="Total de Usuarios"
+              value={metrics.totalUsuarios}
+              color="blue"
+            />
+            <KPICard
+              title="Promedio por Usuario"
+              value={metrics.promedioPorUsuario}
+              subValue="documentos"
+              color="orange"
+            />
+          </div>
+          
+          {/* Fila 3: Estados Generales (Rojo, Amarillo, Verde) */}
+          <div style={{ 
+            display: "grid", 
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: 20,
+            marginBottom: 20
+          }}>
             <KPICard
               title="Estado Crítico (Rojo)"
               value={metrics.totalRojas}
@@ -936,17 +968,14 @@ export default function SuperAdminPage() {
               change={`${metrics.pctVerdes}%`}
               changePositive={true}
             />
-            <KPICard
-              title="Total de Usuarios"
-              value={metrics.totalUsuarios}
-              color="blue"
-            />
-            <KPICard
-              title="Promedio por Usuario"
-              value={metrics.promedioPorUsuario}
-              subValue="documentos"
-              color="orange"
-            />
+          </div>
+          
+          {/* Fila 4: Estadísticas adicionales */}
+          <div style={{ 
+            display: "grid", 
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: 20
+          }}>
             <KPICard
               title="Máxima Antigüedad"
               value={metrics.maxDias}
@@ -960,6 +989,8 @@ export default function SuperAdminPage() {
               subValue="días"
               color="red"
             />
+            {/* Espacio vacío para mantener 3 columnas */}
+            <div></div>
           </div>
         </section>
 
@@ -974,12 +1005,14 @@ export default function SuperAdminPage() {
           }}>
             Métricas por Tipo de Documento
           </h2>
+          
+          {/* Fila 1: Cédulas - Rojo, Amarillo, Verde */}
           <div style={{ 
             display: "grid", 
-            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-            gap: 20
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: 20,
+            marginBottom: 20
           }}>
-            {/* Cédulas */}
             <KPICard
               title="Cédulas - Crítico (Rojo)"
               value={metrics.cedulasRojas}
@@ -999,8 +1032,15 @@ export default function SuperAdminPage() {
               subValue={`${metrics.totalCedulas > 0 ? `${metrics.pctCedulasVerdes}%` : '0%'}`}
               color="green"
             />
-            
-            {/* Oficios */}
+          </div>
+          
+          {/* Fila 2: Oficios - Rojo, Amarillo, Verde */}
+          <div style={{ 
+            display: "grid", 
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: 20,
+            marginBottom: 20
+          }}>
             <KPICard
               title="Oficios - Crítico (Rojo)"
               value={metrics.oficiosRojos}
@@ -1020,8 +1060,14 @@ export default function SuperAdminPage() {
               subValue={`${metrics.totalOficios > 0 ? `${metrics.pctOficiosVerdes}%` : '0%'}`}
               color="green"
             />
-            
-            {/* Expedientes */}
+          </div>
+          
+          {/* Fila 3: Expedientes - Rojo, Amarillo, Verde */}
+          <div style={{ 
+            display: "grid", 
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: 20
+          }}>
             <KPICard
               title="Expedientes - Crítico (Rojo)"
               value={metrics.expedientesRojos}
@@ -1087,7 +1133,7 @@ export default function SuperAdminPage() {
                 borderCollapse: "collapse",
                 minWidth: "800px"
               }}>
-                <thead>
+              <thead>
                   <tr style={{ background: "rgba(0,82,156,.12)" }}>
                     <th style={{
                       textAlign: "left",
@@ -1161,9 +1207,9 @@ export default function SuperAdminPage() {
                     }}>
                       Más antigua (días)
                     </th>
-                  </tr>
-                </thead>
-                <tbody>
+                </tr>
+              </thead>
+              <tbody>
                   {ranking.map((r, idx) => {
                     const isCritical = r.rojos > 0 || r.maxDias >= UMBRAL_ROJO;
                     return (
@@ -1234,10 +1280,10 @@ export default function SuperAdminPage() {
                         }}>
                           {r.maxDias < 0 ? "-" : r.maxDias}
                         </td>
-                      </tr>
+                  </tr>
                     );
                   })}
-                  {ranking.length === 0 && (
+                {ranking.length === 0 && (
                     <tr>
                       <td colSpan={6} style={{ 
                         padding: "32px 16px", 
@@ -1248,9 +1294,9 @@ export default function SuperAdminPage() {
                         No hay cédulas abiertas aún.
                       </td>
                     </tr>
-                  )}
-                </tbody>
-              </table>
+                )}
+              </tbody>
+            </table>
             </div>
           </div>
 
@@ -1264,8 +1310,8 @@ export default function SuperAdminPage() {
             El orden de prioridad es: más cédulas ROJAS, luego AMARILLAS, y finalmente mayor antigüedad desde la carga.
             Amarillo desde {UMBRAL_AMARILLO} días • Rojo desde {UMBRAL_ROJO} días
           </p>
-        </section>
-      </main>
+      </section>
+    </main>
     </div>
   );
 }

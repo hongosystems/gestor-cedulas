@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "build": "echo 'No build step required for Node.js service'"
   },
   "keywords": ["pdf", "extraction", "ocr", "tesseract", "poppler"],
   "author": "",
@@ -14,7 +15,8 @@
   "dependencies": {
     "express": "^4.18.2",
     "multer": "^1.4.5-lts.1",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "pdfjs-dist": "^4.0.379"
   },
   "engines": {
     "node": ">=20.0.0"

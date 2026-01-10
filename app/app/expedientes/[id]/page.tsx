@@ -47,8 +47,15 @@ export default function VerExpedientePage() {
         return;
       }
 
-      const { data: roleData } = await supabase.rpc("is_admin_expedientes");
-      if (!roleData) {
+      // Verificar rol usando consulta directa para evitar errores 400
+      const uid = sess.session.user.id;
+      const { data: roleData, error: roleErr } = await supabase
+        .from("user_roles")
+        .select("is_admin_expedientes")
+        .eq("user_id", uid)
+        .maybeSingle();
+      
+      if (roleErr || !roleData?.is_admin_expedientes) {
         window.location.href = "/app";
         return;
       }

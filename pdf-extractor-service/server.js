@@ -13,7 +13,10 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const MAX_OCR_PAGES = parseInt(process.env.MAX_OCR_PAGES || "5", 10);
+// La información SIEMPRE está en la primera página, así que solo procesamos esa
+// Timeouts optimizados: Render permite hasta ~30s, pero mejor ser conservadores
+const OCR_TIMEOUT = parseInt(process.env.OCR_TIMEOUT || "12000", 10); // 12 segundos timeout para OCR (muy agresivo)
+const ENDPOINT_TIMEOUT = parseInt(process.env.ENDPOINT_TIMEOUT || "28000", 10); // 28 segundos timeout total (debajo del límite de Render)
 
 // Configurar multer para manejar archivos en memoria
 const upload = multer({
@@ -30,6 +33,31 @@ app.use(express.json());
 app.get("/health", (req, res) => {
   res.json({ status: "ok", service: "pdf-extractor" });
 });
+
+/**
+ * Ejecuta un comando con timeout
+ */
+function execWithTimeout(command, timeoutMs = 10000) {
+  return new Promise((resolve, reject) => {
+    const child = exec(command, { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve(stdout);
+      }
+    });
+
+    // Timeout
+    const timeout = setTimeout(() => {
+      child.kill();
+      reject(new Error(`Command timeout after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    child.on('exit', () => {
+      clearTimeout(timeout);
+    });
+  });
+}
 
 /**
  * Extrae la Carátula del texto
@@ -183,73 +211,166 @@ function extractJuzgado(text) {
 
 /**
  * Extrae texto de PDF usando pdftotext
+ * Intenta múltiples estrategias agresivas para extraer texto embebido
+ * Si Chrome puede leerlo, el texto está ahí - solo hay que extraerlo correctamente
  */
 async function extractTextWithPoppler(pdfPath) {
+  // Estrategia 1: pdftotext con layout y encoding forzado
   try {
-    const { stdout } = await execAsync(`pdftotext "${pdfPath}" -`);
-    return stdout || "";
+    const stdout = await execWithTimeout(
+      `pdftotext -layout -nopgbrk -enc UTF-8 -f 1 -l 1 "${pdfPath}" -`,
+      8000  // 8 segundos por estrategia
+    );
+    if (stdout && stdout.trim().length > 30) {
+      console.log(`✅ pdftotext layout extrajo ${stdout.trim().length} caracteres`);
+      return stdout;
+    }
   } catch (error) {
-    console.error("Error ejecutando pdftotext:", error.message);
-    return null;
+    console.error("pdftotext layout falló:", error.message);
   }
+
+  // Estrategia 2: pdftotext raw (extrae orden exacto, a veces funciona mejor con texto oculto)
+  try {
+    const stdout = await execWithTimeout(
+      `pdftotext -raw -nopgbrk -enc UTF-8 -f 1 -l 1 "${pdfPath}" -`,
+      8000  // 8 segundos por estrategia
+    );
+    if (stdout && stdout.trim().length > 30) {
+      console.log(`✅ pdftotext raw extrajo ${stdout.trim().length} caracteres`);
+      return stdout;
+    }
+  } catch (error) {
+    console.error("pdftotext raw falló:", error.message);
+  }
+
+  // Estrategia 3: pdftotext con bbox (bounding box, puede extraer texto de capas ocultas)
+  try {
+    const stdout = await execWithTimeout(
+      `pdftotext -bbox -f 1 -l 1 "${pdfPath}" -`,
+      8000  // 8 segundos por estrategia
+    );
+    if (stdout && stdout.trim().length > 30) {
+      console.log(`✅ pdftotext bbox extrajo ${stdout.trim().length} caracteres`);
+      return stdout;
+    }
+  } catch (error) {
+    console.error("pdftotext bbox falló:", error.message);
+  }
+
+  // Estrategia 4: pdftotext estándar pero solo primera página
+  try {
+    const stdout = await execWithTimeout(
+      `pdftotext -f 1 -l 1 "${pdfPath}" -`,
+      8000  // 8 segundos por estrategia
+    );
+    if (stdout && stdout.trim().length > 30) {
+      console.log(`✅ pdftotext estándar extrajo ${stdout.trim().length} caracteres`);
+      return stdout;
+    }
+  } catch (error) {
+    console.error("pdftotext estándar falló:", error.message);
+  }
+
+  return "";
 }
 
 /**
- * Convierte PDF a imágenes usando pdftoppm
+ * Convierte SOLO la primera página del PDF a imagen usando pdftocairo (más rápido que pdftoppm)
+ * Alternativa: usar formato PBM (más simple y rápido) en lugar de PNG
  */
-async function pdfToImages(pdfPath, outputDir) {
+async function pdfFirstPageToImage(pdfPath, outputDir) {
+  const imagePath = path.join(outputDir, 'page-1.pbm');
+  
   try {
-    // Usar pdftocairo o pdftoppm para convertir a PNG
-    const { stdout } = await execAsync(`pdftoppm -png -r 300 "${pdfPath}" "${path.join(outputDir, 'page')}"`);
-    // Listar los archivos generados
+    // Estrategia 1: pdftocairo a PBM (formato más simple, más rápido que PNG)
+    // PBM es más rápido de generar y Tesseract lo acepta
+    try {
+      await execWithTimeout(
+        `pdftocairo -pbm -r 100 -f 1 -l 1 "${pdfPath}" "${imagePath.replace('.pbm', '')}"`,
+        8000  // 8 segundos para conversión
+      );
+      const files = await fs.readdir(outputDir);
+      const pbmFiles = files.filter(f => f.endsWith('.pbm')).sort();
+      if (pbmFiles.length > 0) {
+        return pbmFiles;
+      }
+    } catch (error) {
+      console.error("pdftocairo a PBM falló, intentando PNG:", error.message);
+    }
+
+    // Estrategia 2: pdftoppm a PNG con resolución muy baja (100 DPI)
+    // Resolución más baja = más rápido, pero suficiente para OCR
+    await execWithTimeout(
+      `pdftoppm -png -r 100 -f 1 -l 1 "${pdfPath}" "${path.join(outputDir, 'page')}"`,
+      30000  // 30 segundos para diagnóstico
+    );
     const files = await fs.readdir(outputDir);
     return files.filter(f => f.endsWith('.png')).sort();
   } catch (error) {
-    console.error("Error convirtiendo PDF a imágenes:", error.message);
+    console.error("Error convirtiendo primera página del PDF a imagen:", error.message);
     return [];
   }
 }
 
 /**
- * Ejecuta OCR en una imagen usando Tesseract
+ * Ejecuta OCR en una imagen usando Tesseract con timeout muy agresivo
+ * Usa configuración optimizada para velocidad máxima
  */
-async function ocrImage(imagePath) {
+async function ocrImage(imagePath, timeoutMs = OCR_TIMEOUT) {
   try {
-    // Usar español (spa) como idioma
-    const { stdout } = await execAsync(`tesseract "${imagePath}" stdout -l spa 2>/dev/null`);
-    return stdout || "";
+    // Estrategia: PSM 6 (bloque de texto uniforme) - más rápido que PSM 3
+    // Resolución ya reducida (100 DPI), así que no necesitamos PSM auto
+    // Solo un intento rápido, si falla no reintentamos
+    const stdout = await execWithTimeout(
+      `tesseract "${imagePath}" stdout -l spa --psm 6 --oem 1 -c tessedit_char_whitelist="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789ÁÉÍÓÚÑáéíóúñ.,/():\"- " 2>/dev/null`,
+      timeoutMs
+    );
+    if (stdout && stdout.trim().length > 30) {
+      return stdout;
+    }
+    return "";
   } catch (error) {
-    console.error(`Error ejecutando OCR en ${imagePath}:`, error.message);
+    if (error.message.includes('timeout')) {
+      console.error(`⏱️ OCR timeout después de ${timeoutMs}ms`);
+    } else {
+      console.error(`❌ Error OCR:`, error.message);
+    }
     return "";
   }
 }
 
 /**
- * Extrae texto usando OCR en las primeras N páginas del PDF
+ * Extrae texto usando OCR en la PRIMERA página del PDF
+ * La información siempre está en la primera página (Cédulas y Oficios)
  */
-async function extractTextWithOCR(pdfPath, maxPages = MAX_OCR_PAGES) {
+async function extractTextWithOCR(pdfPath) {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pdf-ocr-"));
-  let allText = "";
-  let pagesProcessed = 0;
+  let extractedText = "";
 
   try {
-    // Convertir PDF a imágenes
-    const imageFiles = await pdfToImages(pdfPath, tempDir);
+    // Convertir SOLO la primera página a imagen
+    const imageFiles = await pdfFirstPageToImage(pdfPath, tempDir);
     
     if (imageFiles.length === 0) {
+      console.log("No se pudo convertir la primera página a imagen");
       return null;
     }
 
-    // Procesar solo las primeras maxPages
-    const pagesToProcess = imageFiles.slice(0, maxPages);
+    // Procesar SOLO la primera imagen
+    const imagePath = path.join(tempDir, imageFiles[0]);
+    const startTime = Date.now();
     
-    for (const imageFile of pagesToProcess) {
-      const imagePath = path.join(tempDir, imageFile);
-      const ocrText = await ocrImage(imagePath);
-      if (ocrText.trim()) {
-        allText += ocrText + "\n";
-        pagesProcessed++;
+    try {
+      const ocrText = await ocrImage(imagePath, OCR_TIMEOUT);
+      if (ocrText && ocrText.trim()) {
+        extractedText = ocrText.trim();
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        console.log(`OCR completado en ${elapsed}s, extraídos ${extractedText.length} caracteres`);
+      } else {
+        console.log("OCR no extrajo texto de la primera página");
       }
+    } catch (error) {
+      console.error(`Error procesando primera página con OCR:`, error.message);
     }
 
     // Limpiar archivos temporales
@@ -262,9 +383,9 @@ async function extractTextWithOCR(pdfPath, maxPages = MAX_OCR_PAGES) {
     }
 
     return {
-      text: allText.trim(),
-      pagesProcessed,
-      totalPages: imageFiles.length,
+      text: extractedText,
+      pagesProcessed: extractedText ? 1 : 0,
+      totalPages: 1,
     };
   } catch (error) {
     console.error("Error en proceso OCR:", error.message);
@@ -272,7 +393,7 @@ async function extractTextWithOCR(pdfPath, maxPages = MAX_OCR_PAGES) {
   } finally {
     // Intentar eliminar el directorio temporal
     try {
-      await fs.rmdir(tempDir, { recursive: true });
+      await fs.rm(tempDir, { recursive: true, force: true });
     } catch (e) {
       // Ignorar errores de limpieza
     }
@@ -281,74 +402,111 @@ async function extractTextWithOCR(pdfPath, maxPages = MAX_OCR_PAGES) {
 
 /**
  * Endpoint principal: POST /extract
+ * Con timeout total para evitar que Render lo cancele
  */
 app.post("/extract", upload.single("file"), async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: "Falta el archivo (campo: file)" });
-  }
-
-  // Verificar que es PDF
-  if (!req.file.originalname.toLowerCase().endsWith(".pdf")) {
-    return res.status(400).json({ error: "Solo se aceptan archivos PDF" });
-  }
-
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pdf-extract-"));
-  const tempPdfPath = path.join(tempDir, `input_${Date.now()}.pdf`);
+  // Timeout total del endpoint
+  const endpointTimeout = setTimeout(() => {
+    if (!res.headersSent) {
+      res.status(504).json({
+        error: "El procesamiento del PDF tardó demasiado. Intenta con un PDF más pequeño o con texto seleccionable.",
+        caratula: null,
+        juzgado: null,
+      });
+    }
+  }, ENDPOINT_TIMEOUT);
 
   try {
-    // Guardar archivo temporalmente
-    await fs.writeFile(tempPdfPath, req.file.buffer);
-
-    // Intentar extraer texto con pdftotext primero
-    let extractedText = await extractTextWithPoppler(tempPdfPath);
-    let usedOCR = false;
-    let ocrInfo = null;
-
-    // Si el texto es vacío o muy corto (< 50 caracteres), usar OCR
-    if (!extractedText || extractedText.trim().length < 50) {
-      console.log("Texto extraído muy corto o vacío, intentando OCR...");
-      const ocrResult = await extractTextWithOCR(tempPdfPath, MAX_OCR_PAGES);
-      
-      if (ocrResult && ocrResult.text) {
-        extractedText = ocrResult.text;
-        usedOCR = true;
-        ocrInfo = {
-          pagesProcessed: ocrResult.pagesProcessed,
-          totalPages: ocrResult.totalPages,
-        };
-      }
+    if (!req.file) {
+      clearTimeout(endpointTimeout);
+      return res.status(400).json({ error: "Falta el archivo (campo: file)" });
     }
 
-    // Extraer Carátula y Juzgado
-    const caratula = extractCaratula(extractedText || "");
-    const juzgado = extractJuzgado(extractedText || "");
+    // Verificar que es PDF
+    if (!req.file.originalname.toLowerCase().endsWith(".pdf")) {
+      clearTimeout(endpointTimeout);
+      return res.status(400).json({ error: "Solo se aceptan archivos PDF" });
+    }
 
-    // Obtener preview del texto (primeros 500 caracteres)
-    const rawPreview = extractedText 
-      ? extractedText.substring(0, 500).replace(/\n/g, " ").trim()
-      : null;
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pdf-extract-"));
+    const tempPdfPath = path.join(tempDir, `input_${Date.now()}.pdf`);
 
-    // Respuesta
-    const response = {
-      caratula,
-      juzgado,
-      raw_preview: rawPreview,
-      ...(usedOCR && ocrInfo ? { debug: { ocr_used: true, ...ocrInfo } } : {}),
-    };
-
-    res.json(response);
-  } catch (error) {
-    console.error("Error procesando PDF:", error);
-    res.status(500).json({
-      error: "Error procesando PDF: " + error.message,
-    });
-  } finally {
-    // Limpiar archivo temporal
     try {
-      await fs.unlink(tempPdfPath);
-      await fs.rmdir(tempDir);
-    } catch (e) {
-      // Ignorar errores de limpieza
+      // Guardar archivo temporalmente
+      await fs.writeFile(tempPdfPath, req.file.buffer);
+
+      // Intentar extraer texto con pdftotext primero (múltiples estrategias)
+      let extractedText = await extractTextWithPoppler(tempPdfPath);
+      let usedOCR = false;
+      let ocrInfo = null;
+
+      // Si el texto es vacío o muy corto, usar OCR
+      // IMPORTANTE: La información SIEMPRE está en la primera página (Cédulas y Oficios)
+      const textLength = extractedText ? extractedText.trim().length : 0;
+      if (textLength < 100) {
+        console.log(`⚠️ Texto extraído muy corto (${textLength} caracteres), intentando OCR...`);
+        const ocrResult = await extractTextWithOCR(tempPdfPath);
+        
+        if (ocrResult && ocrResult.text && ocrResult.text.trim().length > 30) {
+          extractedText = ocrResult.text;
+          usedOCR = true;
+          ocrInfo = {
+            pagesProcessed: ocrResult.pagesProcessed,
+            totalPages: ocrResult.totalPages,
+          };
+        } else {
+          console.log("OCR no pudo extraer texto suficiente");
+        }
+      }
+
+      // Extraer Carátula y Juzgado
+      const caratula = extractCaratula(extractedText || "");
+      const juzgado = extractJuzgado(extractedText || "");
+
+      // Obtener preview del texto (primeros 500 caracteres)
+      const rawPreview = extractedText 
+        ? extractedText.substring(0, 500).replace(/\n/g, " ").trim()
+        : null;
+
+      clearTimeout(endpointTimeout);
+
+      // Respuesta
+      const response = {
+        caratula,
+        juzgado,
+        raw_preview: rawPreview,
+        ...(usedOCR && ocrInfo ? { debug: { ocr_used: true, ...ocrInfo } } : {}),
+      };
+
+      res.json(response);
+    } catch (error) {
+      clearTimeout(endpointTimeout);
+      console.error("Error procesando PDF:", error);
+      if (!res.headersSent) {
+        res.status(500).json({
+          error: "Error procesando PDF: " + error.message,
+          caratula: null,
+          juzgado: null,
+        });
+      }
+    } finally {
+      // Limpiar archivo temporal
+      try {
+        await fs.unlink(tempPdfPath);
+        await fs.rm(tempDir, { recursive: true, force: true });
+      } catch (e) {
+        // Ignorar errores de limpieza
+      }
+    }
+  } catch (error) {
+    clearTimeout(endpointTimeout);
+    console.error("Error en endpoint /extract:", error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: "Error inesperado: " + error.message,
+        caratula: null,
+        juzgado: null,
+      });
     }
   }
 });
@@ -364,5 +522,6 @@ app.use((err, req, res, next) => {
 // Iniciar servidor
 app.listen(PORT, () => {
   console.log(`PDF Extractor Service escuchando en puerto ${PORT}`);
-  console.log(`MAX_OCR_PAGES: ${MAX_OCR_PAGES}`);
+  console.log(`OCR: Solo primera página (información siempre está ahí)`);
+  console.log(`OCR Timeout: ${OCR_TIMEOUT}ms`);
 });
