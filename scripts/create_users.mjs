@@ -15,11 +15,12 @@ const supabase = createClient(url, serviceKey);
 
 /**
  * 👉 COMPLETÁ ACÁ TU LISTA REAL
- * role: "admin" | "superadmin"
+ * role: "admin" | "superadmin" | "admin_expedientes"
  *
  * IMPORTANTE:
  * - admins: password hola123
  * - superadmin: Contraseña1995!
+ * - admin_expedientes: password hola123 (o la que corresponda)
  */
 const users = [
   { email: "gfhisi@gmail.com", full_name: "Gustavo Hisi", role: "superadmin" },
@@ -40,9 +41,14 @@ function initialPassword(role) {
 async function upsertRole(userId, role) {
   // tabla user_roles debe existir (la creamos antes con is_superadmin)
   const is_superadmin = role === "superadmin";
+  const is_admin_expedientes = role === "admin_expedientes";
   const { error } = await supabase
     .from("user_roles")
-    .upsert({ user_id: userId, is_superadmin }, { onConflict: "user_id" });
+    .upsert({ 
+      user_id: userId, 
+      is_superadmin,
+      is_admin_expedientes: is_admin_expedientes || false
+    }, { onConflict: "user_id" });
   if (error) throw error;
 }
 

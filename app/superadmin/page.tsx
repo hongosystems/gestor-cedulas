@@ -11,6 +11,17 @@ type Cedula = {
   juzgado: string | null;
   fecha_carga: string | null;
   estado: string;
+  tipo_documento: "CEDULA" | "OFICIO" | null;
+};
+
+type Expediente = {
+  id: string;
+  owner_user_id: string;
+  caratula: string | null;
+  juzgado: string | null;
+  numero_expediente: string | null;
+  fecha_ultima_modificacion: string | null;
+  estado: string;
 };
 
 type Profile = { id: string; full_name: string | null; email: string | null };
@@ -18,8 +29,49 @@ type Profile = { id: string; full_name: string | null; email: string | null };
 const UMBRAL_AMARILLO = 30;
 const UMBRAL_ROJO = 60;
 
+type TimeFilter = "all" | "week" | "month" | "custom";
+
 function startOfDay(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function getDateRange(filter: TimeFilter, customStart?: string, customEnd?: string): { start: string | null; end: string | null } {
+  const now = new Date();
+  const today = startOfDay(now);
+  
+  switch (filter) {
+    case "week": {
+      const weekAgo = new Date(today);
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      return {
+        start: weekAgo.toISOString(),
+        end: now.toISOString(),
+      };
+    }
+    case "month": {
+      const monthAgo = new Date(today);
+      monthAgo.setMonth(monthAgo.getMonth() - 1);
+      return {
+        start: monthAgo.toISOString(),
+        end: now.toISOString(),
+      };
+    }
+    case "custom": {
+      if (customStart && customEnd) {
+        const start = new Date(customStart);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(customEnd);
+        end.setHours(23, 59, 59, 999);
+        return {
+          start: start.toISOString(),
+          end: end.toISOString(),
+        };
+      }
+      return { start: null, end: null };
+    }
+    default:
+      return { start: null, end: null };
+  }
 }
 
 function daysSince(fechaCargaISO: string | null) {
@@ -195,7 +247,14 @@ export default function SuperAdminPage() {
   const [checking, setChecking] = useState(true);
   const [msg, setMsg] = useState("");
   const [cedulas, setCedulas] = useState<Cedula[]>([]);
+  const [allCedulas, setAllCedulas] = useState<Cedula[]>([]); // Todas las cédulas sin filtrar
+  const [expedientes, setExpedientes] = useState<Expediente[]>([]);
+  const [allExpedientes, setAllExpedientes] = useState<Expediente[]>([]); // Todos los expedientes sin filtrar
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
+  const [timeFilter, setTimeFilter] = useState<TimeFilter>("all");
+  const [selectedUserId, setSelectedUserId] = useState<string>("all");
+  const [customStartDate, setCustomStartDate] = useState<string>("");
+  const [customEndDate, setCustomEndDate] = useState<string>("");
 
   useEffect(() => {
     (async () => {
@@ -225,18 +284,109 @@ export default function SuperAdminPage() {
       (profs ?? []).forEach((p: any) => { map[p.id] = p; });
       setProfiles(map);
 
-      const { data: cs, error: cErr } = await supabase
+      // Intentar obtener con tipo_documento, pero hacer fallback si no existe la columna
+      let query = supabase
         .from("cedulas")
-        .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado")
+        .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado, tipo_documento")
         .neq("estado", "CERRADA")
         .order("fecha_carga", { ascending: true });
 
-      if (cErr) { setMsg(cErr.message); setChecking(false); return; }
+      const { data: cs, error: cErr } = await query;
 
-      setCedulas((cs ?? []) as Cedula[]);
+      if (cErr) {
+        // Si falla por columna tipo_documento inexistente, reintentar sin ella
+        if (cErr.message?.includes("tipo_documento")) {
+          const { data: cs2, error: cErr2 } = await supabase
+            .from("cedulas")
+            .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado")
+            .neq("estado", "CERRADA")
+            .order("fecha_carga", { ascending: true });
+          
+          if (cErr2) { 
+            setMsg(cErr2.message); 
+            setChecking(false); 
+            return; 
+          }
+          
+          const csWithNull = (cs2 ?? []).map((c: any) => ({ ...c, tipo_documento: null }));
+          setAllCedulas(csWithNull as Cedula[]);
+        } else {
+          setMsg(cErr.message);
+          setChecking(false);
+          return;
+        }
+      } else {
+        setAllCedulas((cs ?? []) as Cedula[]);
+      }
+      
+      // Cargar expedientes
+      const { data: exps, error: eErr } = await supabase
+        .from("expedientes")
+        .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado")
+        .eq("estado", "ABIERTO")
+        .order("fecha_ultima_modificacion", { ascending: true });
+
+      if (eErr) {
+        // Si la tabla no existe, simplemente no cargar expedientes
+        if (!eErr.message?.includes("relation \"expedientes\" does not exist")) {
+          setMsg("Error cargando expedientes: " + eErr.message);
+        }
+        setAllExpedientes([]);
+      } else {
+        setAllExpedientes((exps ?? []) as Expediente[]);
+      }
+      
       setChecking(false);
     })();
   }, []);
+
+  // Filtrar cédulas según los filtros seleccionados
+  useEffect(() => {
+    let filtered = [...allCedulas];
+
+    // Filtro por usuario
+    if (selectedUserId !== "all") {
+      filtered = filtered.filter(c => c.owner_user_id === selectedUserId);
+    }
+
+    // Filtro por tiempo
+    if (timeFilter !== "all") {
+      const { start, end } = getDateRange(timeFilter, customStartDate, customEndDate);
+      if (start && end) {
+        filtered = filtered.filter(c => {
+          if (!c.fecha_carga) return false;
+          const fechaCarga = new Date(c.fecha_carga);
+          return fechaCarga >= new Date(start) && fechaCarga <= new Date(end);
+        });
+      }
+    }
+
+    setCedulas(filtered);
+  }, [allCedulas, timeFilter, selectedUserId, customStartDate, customEndDate]);
+
+  // Filtrar expedientes según los filtros seleccionados
+  useEffect(() => {
+    let filtered = [...allExpedientes];
+
+    // Filtro por usuario
+    if (selectedUserId !== "all") {
+      filtered = filtered.filter(e => e.owner_user_id === selectedUserId);
+    }
+
+    // Filtro por tiempo
+    if (timeFilter !== "all") {
+      const { start, end } = getDateRange(timeFilter, customStartDate, customEndDate);
+      if (start && end) {
+        filtered = filtered.filter(e => {
+          if (!e.fecha_ultima_modificacion) return false;
+          const fechaMod = new Date(e.fecha_ultima_modificacion);
+          return fechaMod >= new Date(start) && fechaMod <= new Date(end);
+        });
+      }
+    }
+
+    setExpedientes(filtered);
+  }, [allExpedientes, timeFilter, selectedUserId, customStartDate, customEndDate]);
 
   const ranking = useMemo(() => {
     const perUser: Record<string, { rojos: number; amarillos: number; verdes: number; total: number; maxDias: number }> = {};
@@ -266,11 +416,73 @@ export default function SuperAdminPage() {
     );
   }, [cedulas, profiles]);
 
+  const rankingExpedientes = useMemo(() => {
+    const perUser: Record<string, { rojos: number; amarillos: number; verdes: number; total: number; maxDias: number }> = {};
+
+    for (const e of expedientes) {
+      const dias = daysSince(e.fecha_ultima_modificacion);
+      const s = semaforoPorAntiguedad(dias);
+      const uid = e.owner_user_id;
+
+      perUser[uid] ||= { rojos: 0, amarillos: 0, verdes: 0, total: 0, maxDias: -1 };
+      perUser[uid].total++;
+      perUser[uid].maxDias = Math.max(perUser[uid].maxDias, dias);
+
+      if (s === "ROJO") perUser[uid].rojos++;
+      else if (s === "AMARILLO") perUser[uid].amarillos++;
+      else perUser[uid].verdes++;
+    }
+
+    return Object.entries(perUser).map(([uid, v]) => ({
+      uid,
+      ...v,
+      name: displayName(profiles[uid]),
+    })).sort((a, b) =>
+      (b.rojos - a.rojos) ||
+      (b.amarillos - a.amarillos) ||
+      (b.maxDias - a.maxDias)
+    );
+  }, [expedientes, profiles]);
+
   const metrics = useMemo(() => {
+    const cedulasFiltered = cedulas.filter(c => !c.tipo_documento || c.tipo_documento === "CEDULA");
+    const oficiosFiltered = cedulas.filter(c => c.tipo_documento === "OFICIO");
+    
     const totalAbiertas = cedulas.length;
+    const totalCedulas = cedulasFiltered.length;
+    const totalOficios = oficiosFiltered.length;
+    
     const totalRojas = ranking.reduce((a, r) => a + r.rojos, 0);
     const totalAmarillas = ranking.reduce((a, r) => a + r.amarillos, 0);
     const totalVerdes = ranking.reduce((a, r) => a + r.verdes, 0);
+    
+    // Calcular métricas por tipo de documento
+    const cedulasRojas = cedulasFiltered.filter(c => {
+      const dias = daysSince(c.fecha_carga);
+      return semaforoPorAntiguedad(dias) === "ROJO";
+    }).length;
+    const cedulasAmarillas = cedulasFiltered.filter(c => {
+      const dias = daysSince(c.fecha_carga);
+      return semaforoPorAntiguedad(dias) === "AMARILLO";
+    }).length;
+    const cedulasVerdes = cedulasFiltered.filter(c => {
+      const dias = daysSince(c.fecha_carga);
+      return semaforoPorAntiguedad(dias) === "VERDE";
+    }).length;
+    
+    const oficiosRojos = oficiosFiltered.filter(c => {
+      const dias = daysSince(c.fecha_carga);
+      return semaforoPorAntiguedad(dias) === "ROJO";
+    }).length;
+    const oficiosAmarillos = oficiosFiltered.filter(c => {
+      const dias = daysSince(c.fecha_carga);
+      return semaforoPorAntiguedad(dias) === "AMARILLO";
+    }).length;
+    const oficiosVerdes = oficiosFiltered.filter(c => {
+      const dias = daysSince(c.fecha_carga);
+      return semaforoPorAntiguedad(dias) === "VERDE";
+    }).length;
+    
     const totalUsuarios = ranking.length;
     const promedioPorUsuario = totalUsuarios > 0 ? (totalAbiertas / totalUsuarios).toFixed(1) : "0";
     
@@ -278,21 +490,72 @@ export default function SuperAdminPage() {
     const pctAmarillas = totalAbiertas > 0 ? ((totalAmarillas / totalAbiertas) * 100).toFixed(1) : "0";
     const pctVerdes = totalAbiertas > 0 ? ((totalVerdes / totalAbiertas) * 100).toFixed(1) : "0";
     
+    const pctCedulasRojas = totalCedulas > 0 ? ((cedulasRojas / totalCedulas) * 100).toFixed(1) : "0";
+    const pctCedulasAmarillas = totalCedulas > 0 ? ((cedulasAmarillas / totalCedulas) * 100).toFixed(1) : "0";
+    const pctCedulasVerdes = totalCedulas > 0 ? ((cedulasVerdes / totalCedulas) * 100).toFixed(1) : "0";
+    
+    const pctOficiosRojos = totalOficios > 0 ? ((oficiosRojos / totalOficios) * 100).toFixed(1) : "0";
+    const pctOficiosAmarillos = totalOficios > 0 ? ((oficiosAmarillos / totalOficios) * 100).toFixed(1) : "0";
+    const pctOficiosVerdes = totalOficios > 0 ? ((oficiosVerdes / totalOficios) * 100).toFixed(1) : "0";
+    
     const maxDias = ranking.length > 0 ? Math.max(...ranking.map(r => r.maxDias)) : 0;
+    
+    // Métricas de expedientes
+    const totalExpedientes = expedientes.length;
+    const expedientesRojos = expedientes.filter(e => {
+      const dias = daysSince(e.fecha_ultima_modificacion);
+      return semaforoPorAntiguedad(dias) === "ROJO";
+    }).length;
+    const expedientesAmarillos = expedientes.filter(e => {
+      const dias = daysSince(e.fecha_ultima_modificacion);
+      return semaforoPorAntiguedad(dias) === "AMARILLO";
+    }).length;
+    const expedientesVerdes = expedientes.filter(e => {
+      const dias = daysSince(e.fecha_ultima_modificacion);
+      return semaforoPorAntiguedad(dias) === "VERDE";
+    }).length;
+    
+    const pctExpedientesRojos = totalExpedientes > 0 ? ((expedientesRojos / totalExpedientes) * 100).toFixed(1) : "0";
+    const pctExpedientesAmarillos = totalExpedientes > 0 ? ((expedientesAmarillos / totalExpedientes) * 100).toFixed(1) : "0";
+    const pctExpedientesVerdes = totalExpedientes > 0 ? ((expedientesVerdes / totalExpedientes) * 100).toFixed(1) : "0";
+    
+    const maxDiasExpedientes = rankingExpedientes.length > 0 ? Math.max(...rankingExpedientes.map(r => r.maxDias)) : 0;
     
     return {
       totalAbiertas,
+      totalCedulas,
+      totalOficios,
+      totalExpedientes,
       totalRojas,
       totalAmarillas,
       totalVerdes,
+      cedulasRojas,
+      cedulasAmarillas,
+      cedulasVerdes,
+      oficiosRojos,
+      oficiosAmarillos,
+      oficiosVerdes,
+      expedientesRojos,
+      expedientesAmarillos,
+      expedientesVerdes,
       totalUsuarios,
       promedioPorUsuario,
       pctRojas,
       pctAmarillas,
       pctVerdes,
+      pctCedulasRojas,
+      pctCedulasAmarillas,
+      pctCedulasVerdes,
+      pctOficiosRojos,
+      pctOficiosAmarillos,
+      pctOficiosVerdes,
+      pctExpedientesRojos,
+      pctExpedientesAmarillos,
+      pctExpedientesVerdes,
       maxDias,
+      maxDiasExpedientes,
     };
-  }, [cedulas, ranking]);
+  }, [cedulas, expedientes, ranking, rankingExpedientes]);
 
   async function logout() {
     await supabase.auth.signOut();
@@ -416,6 +679,200 @@ export default function SuperAdminPage() {
           </div>
         )}
 
+        {/* Filtros */}
+        <section style={{ 
+          marginBottom: 32,
+          padding: "20px",
+          background: "#ffffff",
+          border: "1px solid rgba(0,0,0,.12)",
+          borderRadius: 16,
+          boxShadow: "0 4px 12px rgba(0,0,0,.08)"
+        }}>
+          <h3 style={{ 
+            margin: "0 0 16px 0", 
+            fontSize: 16, 
+            fontWeight: 600, 
+            color: "#1a1a1a",
+            letterSpacing: "0.3px"
+          }}>
+            Filtros
+          </h3>
+          <div style={{ 
+            display: "grid", 
+            gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
+            gap: 16
+          }}>
+            {/* Filtro por Usuario */}
+            <div>
+              <label style={{
+                display: "block",
+                marginBottom: 8,
+                fontSize: 13,
+                fontWeight: 500,
+                color: "#1a1a1a"
+              }}>
+                Usuario
+              </label>
+              <select
+                value={selectedUserId}
+                onChange={(e) => setSelectedUserId(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  background: "#ffffff",
+                  border: "1px solid rgba(0,0,0,.15)",
+                  borderRadius: 8,
+                  color: "#1a1a1a",
+                  fontSize: 14,
+                  cursor: "pointer",
+                  outline: "none",
+                  transition: "all 0.2s ease"
+                }}
+                onFocus={(e) => {
+                  e.currentTarget.style.borderColor = "rgba(0,82,156,.5)";
+                  e.currentTarget.style.boxShadow = "0 0 0 3px rgba(0,82,156,.1)";
+                }}
+                onBlur={(e) => {
+                  e.currentTarget.style.borderColor = "rgba(0,0,0,.15)";
+                  e.currentTarget.style.boxShadow = "none";
+                }}
+              >
+                <option value="all">Todos los usuarios</option>
+                {Object.entries(profiles).map(([uid, profile]) => (
+                  <option key={uid} value={uid}>
+                    {displayName(profile)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Filtro por Tiempo */}
+            <div>
+              <label style={{
+                display: "block",
+                marginBottom: 8,
+                fontSize: 13,
+                fontWeight: 500,
+                color: "#1a1a1a"
+              }}>
+                Período de tiempo
+              </label>
+              <select
+                value={timeFilter}
+                onChange={(e) => {
+                  setTimeFilter(e.target.value as TimeFilter);
+                  if (e.target.value !== "custom") {
+                    setCustomStartDate("");
+                    setCustomEndDate("");
+                  }
+                }}
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  background: "#ffffff",
+                  border: "1px solid rgba(0,0,0,.15)",
+                  borderRadius: 8,
+                  color: "#1a1a1a",
+                  fontSize: 14,
+                  cursor: "pointer",
+                  outline: "none",
+                  transition: "all 0.2s ease"
+                }}
+                onFocus={(e) => {
+                  e.currentTarget.style.borderColor = "rgba(0,82,156,.5)";
+                  e.currentTarget.style.boxShadow = "0 0 0 3px rgba(0,82,156,.1)";
+                }}
+                onBlur={(e) => {
+                  e.currentTarget.style.borderColor = "rgba(0,0,0,.15)";
+                  e.currentTarget.style.boxShadow = "none";
+                }}
+              >
+                <option value="all">Todos</option>
+                <option value="week">Última semana</option>
+                <option value="month">Último mes</option>
+                <option value="custom">Rango personalizado</option>
+              </select>
+            </div>
+
+            {/* Fechas personalizadas */}
+            {timeFilter === "custom" && (
+              <>
+                <div>
+                  <label style={{
+                    display: "block",
+                    marginBottom: 8,
+                    fontSize: 13,
+                    fontWeight: 500,
+                    color: "#1a1a1a"
+                  }}>
+                    Fecha inicio
+                  </label>
+                  <input
+                    type="date"
+                    value={customStartDate}
+                    onChange={(e) => setCustomStartDate(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "10px 12px",
+                      background: "#ffffff",
+                      border: "1px solid rgba(0,0,0,.15)",
+                      borderRadius: 8,
+                      color: "#1a1a1a",
+                      fontSize: 14,
+                      outline: "none",
+                      transition: "all 0.2s ease"
+                    }}
+                    onFocus={(e) => {
+                      e.currentTarget.style.borderColor = "rgba(0,82,156,.5)";
+                      e.currentTarget.style.boxShadow = "0 0 0 3px rgba(0,82,156,.1)";
+                    }}
+                    onBlur={(e) => {
+                      e.currentTarget.style.borderColor = "rgba(0,0,0,.15)";
+                      e.currentTarget.style.boxShadow = "none";
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{
+                    display: "block",
+                    marginBottom: 8,
+                    fontSize: 13,
+                    fontWeight: 500,
+                    color: "#1a1a1a"
+                  }}>
+                    Fecha fin
+                  </label>
+                  <input
+                    type="date"
+                    value={customEndDate}
+                    onChange={(e) => setCustomEndDate(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "10px 12px",
+                      background: "#ffffff",
+                      border: "1px solid rgba(0,0,0,.15)",
+                      borderRadius: 8,
+                      color: "#1a1a1a",
+                      fontSize: 14,
+                      outline: "none",
+                      transition: "all 0.2s ease"
+                    }}
+                    onFocus={(e) => {
+                      e.currentTarget.style.borderColor = "rgba(0,82,156,.5)";
+                      e.currentTarget.style.boxShadow = "0 0 0 3px rgba(0,82,156,.1)";
+                    }}
+                    onBlur={(e) => {
+                      e.currentTarget.style.borderColor = "rgba(0,0,0,.15)";
+                      e.currentTarget.style.boxShadow = "none";
+                    }}
+                  />
+                </div>
+              </>
+            )}
+          </div>
+        </section>
+
+        {/* Métricas Generales */}
         <section style={{ marginBottom: 32 }}>
           <h2 style={{ 
             margin: "0 0 20px 0", 
@@ -424,7 +881,7 @@ export default function SuperAdminPage() {
             color: "var(--text)",
             letterSpacing: "0.3px"
           }}>
-            Métricas generales
+            Métricas Generales
           </h2>
           <div style={{ 
             display: "grid", 
@@ -432,10 +889,25 @@ export default function SuperAdminPage() {
             gap: 20
           }}>
             <KPICard
-              title="Cédulas Abiertas"
+              title="Total Documentos Abiertos"
               value={metrics.totalAbiertas}
               color="blue"
               trend={metrics.totalAbiertas > 0 ? "up" : undefined}
+            />
+            <KPICard
+              title="Total Cédulas"
+              value={metrics.totalCedulas}
+              color="blue"
+            />
+            <KPICard
+              title="Total Oficios"
+              value={metrics.totalOficios}
+              color="blue"
+            />
+            <KPICard
+              title="Total Expedientes"
+              value={metrics.totalExpedientes}
+              color="blue"
             />
             <KPICard
               title="Estado Crítico (Rojo)"
@@ -472,7 +944,7 @@ export default function SuperAdminPage() {
             <KPICard
               title="Promedio por Usuario"
               value={metrics.promedioPorUsuario}
-              subValue="cédulas"
+              subValue="documentos"
               color="orange"
             />
             <KPICard
@@ -487,6 +959,87 @@ export default function SuperAdminPage() {
               value={UMBRAL_ROJO}
               subValue="días"
               color="red"
+            />
+          </div>
+        </section>
+
+        {/* Métricas por Tipo de Documento */}
+        <section style={{ marginBottom: 32 }}>
+          <h2 style={{ 
+            margin: "0 0 20px 0", 
+            fontSize: 18, 
+            fontWeight: 600, 
+            color: "var(--text)",
+            letterSpacing: "0.3px"
+          }}>
+            Métricas por Tipo de Documento
+          </h2>
+          <div style={{ 
+            display: "grid", 
+            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+            gap: 20
+          }}>
+            {/* Cédulas */}
+            <KPICard
+              title="Cédulas - Crítico (Rojo)"
+              value={metrics.cedulasRojas}
+              subValue={`${metrics.totalCedulas > 0 ? `${metrics.pctCedulasRojas}%` : '0%'}`}
+              color="red"
+              trend={metrics.cedulasRojas > 0 ? "up" : undefined}
+            />
+            <KPICard
+              title="Cédulas - Advertencia (Amarillo)"
+              value={metrics.cedulasAmarillas}
+              subValue={`${metrics.totalCedulas > 0 ? `${metrics.pctCedulasAmarillas}%` : '0%'}`}
+              color="yellow"
+            />
+            <KPICard
+              title="Cédulas - Normal (Verde)"
+              value={metrics.cedulasVerdes}
+              subValue={`${metrics.totalCedulas > 0 ? `${metrics.pctCedulasVerdes}%` : '0%'}`}
+              color="green"
+            />
+            
+            {/* Oficios */}
+            <KPICard
+              title="Oficios - Crítico (Rojo)"
+              value={metrics.oficiosRojos}
+              subValue={`${metrics.totalOficios > 0 ? `${metrics.pctOficiosRojos}%` : '0%'}`}
+              color="red"
+              trend={metrics.oficiosRojos > 0 ? "up" : undefined}
+            />
+            <KPICard
+              title="Oficios - Advertencia (Amarillo)"
+              value={metrics.oficiosAmarillos}
+              subValue={`${metrics.totalOficios > 0 ? `${metrics.pctOficiosAmarillos}%` : '0%'}`}
+              color="yellow"
+            />
+            <KPICard
+              title="Oficios - Normal (Verde)"
+              value={metrics.oficiosVerdes}
+              subValue={`${metrics.totalOficios > 0 ? `${metrics.pctOficiosVerdes}%` : '0%'}`}
+              color="green"
+            />
+            
+            {/* Expedientes */}
+            <KPICard
+              title="Expedientes - Crítico (Rojo)"
+              value={metrics.expedientesRojos}
+              subValue={`${metrics.totalExpedientes > 0 ? `${metrics.pctExpedientesRojos}%` : '0%'}`}
+              color="red"
+              trend={metrics.expedientesRojos > 0 ? "up" : undefined}
+            />
+            <KPICard
+              title="Expedientes - Advertencia (Amarillo)"
+              value={metrics.expedientesAmarillos}
+              subValue={`${metrics.totalExpedientes > 0 ? `${metrics.pctExpedientesAmarillos}%` : '0%'}`}
+              color="yellow"
+            />
+            <KPICard
+              title="Expedientes - Normal (Verde)"
+              value={metrics.expedientesVerdes}
+              subValue={`${metrics.totalExpedientes > 0 ? `${metrics.pctExpedientesVerdes}%` : '0%'}`}
+              color="green"
             />
           </div>
         </section>

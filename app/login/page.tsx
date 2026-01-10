@@ -24,8 +24,37 @@ export default function LoginPage() {
         return;
       }
 
-      const { data: ok } = await supabase.rpc("is_superadmin");
-      window.location.href = ok ? "/superadmin" : "/app";
+      const { data: ok, error: superadminErr } = await supabase.rpc("is_superadmin");
+      if (!superadminErr && ok) {
+        window.location.href = "/superadmin";
+        return;
+      }
+      
+      // Verificar si es admin_expedientes (intentar función RPC primero, si falla verificar directamente)
+      let isAdminExp = false;
+      const { data: rpcResult, error: adminExpErr } = await supabase.rpc("is_admin_expedientes");
+      
+      if (adminExpErr) {
+        // Si la función RPC no existe o falla, verificar directamente en la tabla
+        const { data: roleData, error: roleErr } = await supabase
+          .from("user_roles")
+          .select("is_admin_expedientes")
+          .eq("user_id", uid)
+          .maybeSingle();
+        
+        if (!roleErr && roleData) {
+          isAdminExp = roleData.is_admin_expedientes === true;
+        }
+      } else {
+        isAdminExp = rpcResult === true;
+      }
+      
+      if (isAdminExp) {
+        window.location.href = "/app/expedientes";
+        return;
+      }
+      
+      window.location.href = "/app";
     })();
   }, []);
 
@@ -53,8 +82,38 @@ export default function LoginPage() {
       return;
     }
 
-    const { data: ok } = await supabase.rpc("is_superadmin");
-    window.location.href = ok ? "/superadmin" : "/app";
+    const { data: ok, error: superadminErr } = await supabase.rpc("is_superadmin");
+    if (!superadminErr && ok) {
+      window.location.href = "/superadmin";
+      return;
+    }
+    
+    // Verificar si es admin_expedientes (intentar función RPC primero, si falla verificar directamente)
+    let isAdminExp = false;
+    const { data: rpcResult, error: adminExpErr } = await supabase.rpc("is_admin_expedientes");
+    
+    if (adminExpErr) {
+      // Si la función RPC no existe o falla, verificar directamente en la tabla
+      console.warn("Función is_admin_expedientes falló, verificando directamente en tabla:", adminExpErr.message);
+      const { data: roleData, error: roleErr } = await supabase
+        .from("user_roles")
+        .select("is_admin_expedientes")
+        .eq("user_id", uid)
+        .maybeSingle();
+      
+      if (!roleErr && roleData) {
+        isAdminExp = roleData.is_admin_expedientes === true;
+      }
+    } else {
+      isAdminExp = rpcResult === true;
+    }
+    
+    if (isAdminExp) {
+      window.location.href = "/app/expedientes";
+      return;
+    }
+    
+    window.location.href = "/app";
   }
 
   return (
