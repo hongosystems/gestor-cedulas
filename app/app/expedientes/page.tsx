@@ -191,9 +191,14 @@ export default function MisExpedientesPage() {
       const { data: exps, error: eErr } = await query;
 
       if (eErr) {
-        // Si falla por columna observaciones inexistente, reintentar sin ella (silenciosamente)
+        // Si falla por columna observaciones inexistente, reintentar sin ella
         const errorMsg = eErr.message || String(eErr);
-        if (errorMsg.includes("observaciones") || (errorMsg.includes("column") && errorMsg.includes("does not exist"))) {
+        const errorCode = eErr.code || "";
+        
+        if (errorMsg.includes("observaciones") || 
+            (errorMsg.includes("column") && errorMsg.includes("does not exist")) ||
+            errorCode === "PGRST116") {
+          // Reintentar sin observaciones
           const { data: exps2, error: eErr2 } = await supabase
             .from("expedientes")
             .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado")
@@ -202,7 +207,28 @@ export default function MisExpedientesPage() {
             .order("fecha_ultima_modificacion", { ascending: false });
           
           if (eErr2) {
-            setMsg(eErr2.message || String(eErr2));
+            // Si aún falla, intentar sin el ordenamiento por fecha_ultima_modificacion
+            const { data: exps3, error: eErr3 } = await supabase
+              .from("expedientes")
+              .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado")
+              .eq("owner_user_id", uid)
+              .eq("estado", "ABIERTO");
+            
+            if (eErr3) {
+              setMsg(`Error al cargar expedientes: ${eErr3.message || String(eErr3)}`);
+              setLoading(false);
+              return;
+            }
+            
+            // Ordenar manualmente por fecha
+            const sorted = (exps3 ?? []).sort((a: any, b: any) => {
+              const dateA = a.fecha_ultima_modificacion ? new Date(a.fecha_ultima_modificacion).getTime() : 0;
+              const dateB = b.fecha_ultima_modificacion ? new Date(b.fecha_ultima_modificacion).getTime() : 0;
+              return dateB - dateA;
+            });
+            
+            const expsWithNull = sorted.map((e: any) => ({ ...e, observaciones: null }));
+            setExpedientes(expsWithNull as Expediente[]);
             setLoading(false);
             return;
           }
@@ -213,7 +239,9 @@ export default function MisExpedientesPage() {
           setLoading(false);
           return;
         } else {
-          setMsg(errorMsg);
+          // Otro tipo de error - mostrar mensaje detallado
+          console.error("Error al cargar expedientes:", eErr);
+          setMsg(`Error al cargar expedientes: ${errorMsg} (Código: ${errorCode})`);
           setLoading(false);
           return;
         }
@@ -276,6 +304,14 @@ export default function MisExpedientesPage() {
   }
 
   async function logout() {
+    // Limpiar estado de conexión PJN
+    try {
+      localStorage.removeItem("pjnConnected");
+      localStorage.removeItem("pjnConnectedTimestamp");
+    } catch (e) {
+      // Ignorar errores de localStorage
+    }
+    
     await supabase.auth.signOut();
     window.location.href = "/login";
   }
@@ -325,15 +361,34 @@ export default function MisExpedientesPage() {
           
           if (eErr) {
             // Si falla por columna observaciones inexistente, reintentar sin ella
-            if (eErr.message?.includes("observaciones")) {
-              const { data: exps2 } = await supabase
+            const errorMsg = eErr.message || String(eErr);
+            if (errorMsg.includes("observaciones") || 
+                (errorMsg.includes("column") && errorMsg.includes("does not exist"))) {
+              const { data: exps2, error: eErr2 } = await supabase
                 .from("expedientes")
                 .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado")
                 .eq("owner_user_id", uid)
                 .eq("estado", "ABIERTO")
                 .order("fecha_ultima_modificacion", { ascending: false });
               
-              if (exps2) {
+              if (eErr2) {
+                // Si aún falla, intentar sin ordenamiento
+                const { data: exps3 } = await supabase
+                  .from("expedientes")
+                  .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado")
+                  .eq("owner_user_id", uid)
+                  .eq("estado", "ABIERTO");
+                
+                if (exps3) {
+                  const sorted = exps3.sort((a: any, b: any) => {
+                    const dateA = a.fecha_ultima_modificacion ? new Date(a.fecha_ultima_modificacion).getTime() : 0;
+                    const dateB = b.fecha_ultima_modificacion ? new Date(b.fecha_ultima_modificacion).getTime() : 0;
+                    return dateB - dateA;
+                  });
+                  const expsWithNull = sorted.map((e: any) => ({ ...e, observaciones: null }));
+                  setExpedientes(expsWithNull as Expediente[]);
+                }
+              } else if (exps2) {
                 const expsWithNull = exps2.map((e: any) => ({ ...e, observaciones: null }));
                 setExpedientes(expsWithNull as Expediente[]);
               }

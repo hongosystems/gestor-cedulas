@@ -63,9 +63,11 @@ export default function NuevaExpedientePage() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
 
+  const [jurisdiccion, setJurisdiccion] = useState("");
+  const [numeroExpediente, setNumeroExpediente] = useState("");
+  const [añoExpediente, setAñoExpediente] = useState("");
   const [caratula, setCaratula] = useState("");
   const [juzgado, setJuzgado] = useState("");
-  const [numeroExpediente, setNumeroExpediente] = useState("");
   const [fechaUltimaModificacion, setFechaUltimaModificacion] = useState(todayDDMMAAAA());
   const [observaciones, setObservaciones] = useState("");
 
@@ -121,12 +123,16 @@ export default function NuevaExpedientePage() {
   async function onSave() {
     setMsg("");
 
-    if (!caratula.trim()) {
-      setMsg("Falta completar Carátula.");
-      return;
-    }
     if (!numeroExpediente.trim()) {
       setMsg("Falta completar Número de Expediente.");
+      return;
+    }
+    if (!añoExpediente.trim() || añoExpediente.length !== 4) {
+      setMsg("Falta completar el Año del Expediente (4 dígitos).");
+      return;
+    }
+    if (!caratula.trim()) {
+      setMsg("Falta completar Carátula.");
       return;
     }
     if (!fechaUltimaModificacion || fechaUltimaModificacion.trim() === "") {
@@ -148,11 +154,14 @@ export default function NuevaExpedientePage() {
 
       const uid = session.user.id;
 
+      // Combinar número y año en formato NUMERO/AÑO
+      const numeroCompleto = `${numeroExpediente.trim()}/${añoExpediente.trim()}`;
+
       let insertData: any = {
         owner_user_id: uid,
         caratula: caratula.trim(),
         juzgado: juzgado.trim() || null,
-        numero_expediente: numeroExpediente.trim(),
+        numero_expediente: numeroCompleto,
         fecha_ultima_modificacion: fechaISO,
         estado: "ABIERTO",
       };
@@ -231,6 +240,75 @@ export default function NuevaExpedientePage() {
             }}
           >
             <div className="field">
+              <label className="label">Jurisdicción</label>
+              <select
+                className="input"
+                value={jurisdiccion}
+                onChange={(e) => setJurisdiccion(e.target.value)}
+                disabled={saving}
+              >
+                <option value="">Seleccione una jurisdiccion</option>
+                <option value="CSJ">CSJ - Corte Suprema de Justicia de la Nación</option>
+                <option value="CIV">CIV - Cámara Nacional de Apelaciones en lo Civil</option>
+                <option value="CAF">CAF - Cámara Nacional de Apelaciones en lo Contencioso Administrativo Federal</option>
+                <option value="CCF">CCF - Cámara Nacional de Apelaciones en lo Civil y Comercial Federal</option>
+                <option value="CNE">CNE - Cámara Nacional Electoral</option>
+                <option value="CSS">CSS - Camara Federal de la Seguridad Social</option>
+                <option value="CPE">CPE - Cámara Nacional de Apelaciones en lo Penal Económico</option>
+                <option value="CNT">CNT - Cámara Nacional de Apelaciones del Trabajo</option>
+                <option value="CFP">CFP - Camara Criminal y Correccional Federal</option>
+                <option value="CCC">CCC - Camara Nacional de Apelaciones en lo Criminal y Correccional</option>
+                <option value="COM">COM - Camara Nacional de Apelaciones en lo Comercial</option>
+                <option value="CPF">CPF - Camara Federal de Casación Penal</option>
+                <option value="CPN">CPN - Camara Nacional Casacion Penal</option>
+              </select>
+            </div>
+
+            <div className="field">
+              <label className="label">Número/Año</label>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                }}
+              >
+                <input
+                  type="text"
+                  placeholder="Ej: 068809"
+                  value={numeroExpediente}
+                  onChange={(e) => {
+                    // Solo permitir números
+                    const value = e.target.value.replace(/[^\d]/g, "");
+                    setNumeroExpediente(value);
+                  }}
+                  disabled={saving}
+                  className="input"
+                  style={{
+                    flex: 1,
+                  }}
+                />
+                <span style={{ color: "var(--text)", fontSize: "16px", fontWeight: 500 }}>/</span>
+                <input
+                  type="text"
+                  placeholder="2017"
+                  value={añoExpediente}
+                  onChange={(e) => {
+                    // Solo permitir números y máximo 4 dígitos
+                    const value = e.target.value.replace(/[^\d]/g, "").slice(0, 4);
+                    setAñoExpediente(value);
+                  }}
+                  disabled={saving}
+                  maxLength={4}
+                  className="input"
+                  style={{
+                    width: "80px",
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="field">
               <label className="label">Carátula (obligatorio)</label>
               <input
                 className="input"
@@ -250,18 +328,6 @@ export default function NuevaExpedientePage() {
                 placeholder="Opcional"
                 value={juzgado}
                 onChange={(e) => setJuzgado(e.target.value)}
-                disabled={saving}
-              />
-            </div>
-
-            <div className="field">
-              <label className="label">Número de Expediente (obligatorio)</label>
-              <input
-                className="input"
-                type="text"
-                placeholder="Ej: 12345/2024"
-                value={numeroExpediente}
-                onChange={(e) => setNumeroExpediente(e.target.value)}
                 disabled={saving}
               />
             </div>

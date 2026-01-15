@@ -42,3 +42,8 @@ next-env.d.ts
 
 .vercel
 .env*.local
+
+# PJN Scraper
+pjn-storage.json
+snapshots/
+downloads/

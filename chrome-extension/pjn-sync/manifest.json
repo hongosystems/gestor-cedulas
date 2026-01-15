@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Gestor Cédulas - Sync PJN",
+  "version": "1.0.0",
+  "description": "Sincroniza expedientes favoritos del PJN con Gestor Cédulas",
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting",
+    "notifications"
+  ],
+  "host_permissions": [
+    "https://scw.pjn.gov.ar/*",
+    "https://gestor-cedulas.vercel.app/*",
+    "http://localhost:3000/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://scw.pjn.gov.ar/scw/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "options.html",
+  "action": {
+    "default_title": "Gestor Cédulas - Sync PJN",
+    "default_popup": "popup.html"
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}

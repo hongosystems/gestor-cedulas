@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Gestor Cédulas Sync</title>
+    <style>
+        body {
+            width: 300px;
+            padding: 16px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            margin: 0;
+        }
+        h3 {
+            margin: 0 0 12px 0;
+            color: #0052a3;
+            font-size: 16px;
+        }
+        p {
+            margin: 0 0 16px 0;
+            font-size: 13px;
+            color: #666;
+            line-height: 1.5;
+        }
+        a {
+            color: #0052a3;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        button {
+            width: 100%;
+            padding: 10px;
+            background: #0052a3;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-bottom: 8px;
+        }
+        button:hover {
+            background: #003d7a;
+        }
+    </style>
+</head>
+<body>
+    <h3>🔄 Gestor Cédulas Sync</h3>
+    <p>Esta extensión sincroniza tus expedientes favoritos del PJN con Gestor Cédulas.</p>
+    <button onclick="openOptions()">⚙️ Configurar</button>
+    <p style="margin-top: 12px; font-size: 12px;">
+        <a href="https://scw.pjn.gov.ar/scw/" target="_blank">Ir a PJN →</a>
+    </p>
+</body>
+<script>
+function openOptions() {
+    chrome.runtime.openOptionsPage();
+}
+</script>
+</html>
