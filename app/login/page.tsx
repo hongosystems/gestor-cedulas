@@ -24,20 +24,37 @@ export default function LoginPage() {
         return;
       }
 
-      const { data: ok, error: superadminErr } = await supabase.rpc("is_superadmin");
-      if (!superadminErr && ok) {
+      // Verificar todos los roles del usuario
+      const { data: roleData, error: roleErr } = await supabase
+        .from("user_roles")
+        .select("is_superadmin, is_admin_expedientes, is_abogado")
+        .eq("user_id", uid)
+        .maybeSingle();
+
+      if (roleErr || !roleData) {
+        window.location.href = "/app";
+        return;
+      }
+
+      const isSuperadmin = roleData.is_superadmin === true;
+      const isAdminExp = roleData.is_admin_expedientes === true;
+      const isAbogado = roleData.is_abogado === true;
+
+      // Contar cuántos roles tiene
+      const roleCount = [isSuperadmin, isAdminExp, isAbogado].filter(Boolean).length;
+
+      // Si tiene múltiples roles, redirigir a selección de rol
+      if (roleCount > 1) {
+        window.location.href = "/select-role";
+        return;
+      }
+
+      // Si solo tiene un rol, redirigir directamente
+      // Todos los ABOGADO son SuperAdmin y todos los SuperAdmin son ABOGADO
+      if (isSuperadmin || isAbogado) {
         window.location.href = "/superadmin";
         return;
       }
-      
-      // Verificar si es admin_expedientes - usar consulta directa para evitar errores 400
-      const { data: roleData, error: roleErr } = await supabase
-        .from("user_roles")
-        .select("is_admin_expedientes")
-        .eq("user_id", uid)
-        .maybeSingle();
-      
-      const isAdminExp = !roleErr && roleData?.is_admin_expedientes === true;
       
       if (isAdminExp) {
         window.location.href = "/app/expedientes";
@@ -72,22 +89,37 @@ export default function LoginPage() {
       return;
     }
 
-    const { data: ok, error: superadminErr } = await supabase.rpc("is_superadmin");
-    if (!superadminErr && ok) {
+    // Verificar todos los roles del usuario
+    const { data: roleData, error: roleErr } = await supabase
+      .from("user_roles")
+      .select("is_superadmin, is_admin_expedientes, is_abogado")
+      .eq("user_id", uid)
+      .maybeSingle();
+
+    if (roleErr || !roleData) {
+      window.location.href = "/app";
+      return;
+    }
+
+    const isSuperadmin = roleData.is_superadmin === true;
+    const isAdminExp = roleData.is_admin_expedientes === true;
+    const isAbogado = roleData.is_abogado === true;
+
+    // Contar cuántos roles tiene
+    const roleCount = [isSuperadmin, isAdminExp, isAbogado].filter(Boolean).length;
+
+    // Si tiene múltiples roles, redirigir a selección de rol
+    if (roleCount > 1) {
+      window.location.href = "/select-role";
+      return;
+    }
+
+    // Si solo tiene un rol, redirigir directamente
+    // Todos los ABOGADO son SuperAdmin y todos los SuperAdmin son ABOGADO
+    if (isSuperadmin || isAbogado) {
       window.location.href = "/superadmin";
       return;
     }
-    
-    // Verificar si es admin_expedientes (intentar función RPC primero, si falla verificar directamente)
-    let isAdminExp = false;
-    // Usar consulta directa para evitar errores 400
-    const { data: roleData, error: roleErr } = await supabase
-      .from("user_roles")
-      .select("is_admin_expedientes")
-      .eq("user_id", uid)
-      .maybeSingle();
-    
-    isAdminExp = !roleErr && roleData?.is_admin_expedientes === true;
     
     if (isAdminExp) {
       window.location.href = "/app/expedientes";

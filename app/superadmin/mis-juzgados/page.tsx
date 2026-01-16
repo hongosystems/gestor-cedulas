@@ -1,0 +1,1080 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabase";
+import { daysSince } from "@/lib/semaforo";
+
+type Cedula = {
+  id: string;
+  owner_user_id: string;
+  caratula: string | null;
+  juzgado: string | null;
+  fecha_carga: string | null;
+  estado: string;
+  tipo_documento: "CEDULA" | "OFICIO" | null;
+  created_by_user_id?: string | null;
+  created_by_name?: string | null;
+};
+
+type Expediente = {
+  id: string;
+  owner_user_id: string;
+  caratula: string | null;
+  juzgado: string | null;
+  numero_expediente: string | null;
+  fecha_ultima_modificacion: string | null;
+  estado: string;
+  observaciones: string | null;
+  created_by_user_id: string | null;
+  created_by_name: string | null;
+};
+
+function isoToDDMMAAAA(iso: string | null): string {
+  if (!iso || iso.trim() === "") return "";
+  const datePart = iso.substring(0, 10);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(datePart);
+  if (!m) return iso;
+  return `${m[3]}/${m[2]}/${m[1]}`;
+}
+
+type Semaforo = "VERDE" | "AMARILLO" | "ROJO";
+
+const UMBRAL_AMARILLO = 30;
+const UMBRAL_ROJO = 60;
+
+function semaforoByAge(dias: number): Semaforo {
+  if (dias >= UMBRAL_ROJO) return "ROJO";
+  if (dias >= UMBRAL_AMARILLO) return "AMARILLO";
+  return "VERDE";
+}
+
+function SemaforoChip({ value }: { value: Semaforo }) {
+  const style: React.CSSProperties =
+    value === "VERDE"
+      ? {
+          background: "rgba(46, 204, 113, 0.16)",
+          border: "1px solid rgba(46, 204, 113, 0.35)",
+          color: "rgba(210, 255, 226, 0.95)",
+        }
+      : value === "AMARILLO"
+      ? {
+          background: "rgba(241, 196, 15, 0.14)",
+          border: "1px solid rgba(241, 196, 15, 0.35)",
+          color: "rgba(255, 246, 205, 0.95)",
+        }
+      : {
+          background: "rgba(231, 76, 60, 0.14)",
+          border: "1px solid rgba(231, 76, 60, 0.35)",
+          color: "rgba(255, 220, 216, 0.95)",
+        };
+
+  return (
+    <span
+      style={{
+        ...style,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "6px 12px",
+        borderRadius: 999,
+        fontWeight: 700,
+        fontSize: 12,
+        letterSpacing: 0.4,
+        minWidth: 88,
+      }}
+    >
+      {value}
+    </span>
+  );
+}
+
+async function requireSessionOrRedirect() {
+  const { data } = await supabase.auth.getSession();
+  if (!data.session) {
+    window.location.href = "/login";
+    return null;
+  }
+  return data.session;
+}
+
+type SortField = "semaforo" | "fecha" | "dias" | null;
+type SortDirection = "asc" | "desc";
+
+export default function MisJuzgadosPage() {
+  const [loading, setLoading] = useState(true);
+  const [msg, setMsg] = useState("");
+  const [cedulas, setCedulas] = useState<Cedula[]>([]);
+  const [expedientes, setExpedientes] = useState<Expediente[]>([]);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<"expedientes" | "cedulas" | "oficios">("expedientes");
+  const [sortField, setSortField] = useState<SortField>(null);
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc"); // Por defecto: más viejo primero
+  const [juzgadoFilter, setJuzgadoFilter] = useState<"mis_juzgados" | "todos">("mis_juzgados");
+  const [userJuzgados, setUserJuzgados] = useState<string[]>([]);
+
+  const loadData = async () => {
+    try {
+      setMsg("");
+
+      const session = await requireSessionOrRedirect();
+      if (!session) return;
+
+      const uid = session.user.id;
+
+      // Verificar que es superadmin/abogado
+      const { data: roleData, error: roleErr } = await supabase
+        .from("user_roles")
+        .select("is_superadmin, is_abogado")
+        .eq("user_id", uid)
+        .maybeSingle();
+      
+      const isSuperadmin = !roleErr && roleData?.is_superadmin === true;
+      const isAbogado = !roleErr && roleData?.is_abogado === true;
+      
+      if (!isSuperadmin && !isAbogado) {
+        window.location.href = "/app";
+        return;
+      }
+
+      // Obtener juzgados asignados al usuario
+      const { data: juzgadosData, error: juzgadosErr } = await supabase
+        .from("user_juzgados")
+        .select("juzgado")
+        .eq("user_id", uid);
+      
+      const juzgadosAsignados = juzgadosData && juzgadosData.length > 0 
+        ? juzgadosData.map(j => j.juzgado)
+        : [];
+      
+      setUserJuzgados(juzgadosAsignados);
+      
+      // Normalizar juzgados solo si el filtro es "mis_juzgados"
+      let juzgadosNormalizados: string[] = [];
+      if (juzgadoFilter === "mis_juzgados") {
+        // Si no hay juzgados asignados y el filtro es "mis_juzgados", mostrar mensaje
+        if (juzgadosAsignados.length === 0) {
+          setMsg("No tienes juzgados asignados. Contacta al administrador o selecciona 'Todos los Juzgados'.");
+          setLoading(false);
+          return;
+        }
+        
+        // Normalizar juzgados (eliminar espacios extra, normalizar a mayúsculas)
+        juzgadosNormalizados = juzgadosAsignados.map(j => 
+          j?.trim().replace(/\s+/g, " ").toUpperCase()
+        );
+        
+        // Debug: mostrar juzgados asignados
+        console.log(`[Mis Juzgados] Juzgados asignados (${juzgadosNormalizados.length}):`, juzgadosNormalizados);
+      } else {
+        console.log(`[Mis Juzgados] Filtro: "Todos los Juzgados" - Mostrando todos los datos sin filtrar por juzgados`);
+      }
+
+      // Función para normalizar juzgado para comparación
+      const normalizarJuzgado = (j: string | null) => {
+        if (!j) return "";
+        return j.trim().replace(/\s+/g, " ").toUpperCase();
+      };
+
+      // Cargar todos los expedientes abiertos y filtrar por juzgados asignados
+      // Intentar primero con todas las columnas (observaciones y created_by_user_id)
+      let queryExps = supabase
+        .from("expedientes")
+        .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado, observaciones, created_by_user_id")
+        .eq("estado", "ABIERTO")
+        .order("fecha_ultima_modificacion", { ascending: true }); // Por defecto: más viejo primero
+      
+      const { data: allExps, error: eErr } = await queryExps;
+      
+      // Debug: verificar qué expedientes se están recibiendo
+      console.log(`[Mis Juzgados] Total expedientes recibidos de BD: ${allExps?.length || 0}`);
+      if (allExps && allExps.length > 0) {
+        const uniqueOwners = [...new Set(allExps.map((e: any) => e.owner_user_id))];
+        const currentUserId = uid;
+        console.log(`[Mis Juzgados] Current user ID: ${currentUserId}`);
+        console.log(`[Mis Juzgados] Expedientes de diferentes usuarios: ${uniqueOwners.length}`);
+        console.log(`[Mis Juzgados] Owner IDs:`, uniqueOwners);
+        console.log(`[Mis Juzgados] Expedientes propios: ${allExps.filter((e: any) => e.owner_user_id === currentUserId).length}`);
+        console.log(`[Mis Juzgados] Expedientes de otros usuarios: ${allExps.filter((e: any) => e.owner_user_id !== currentUserId).length}`);
+        
+        // Mostrar algunos ejemplos de juzgados
+        const juzgadosEjemplos = [...new Set(allExps.map((e: any) => e.juzgado).filter(Boolean).slice(0, 5))];
+        console.log(`[Mis Juzgados] Ejemplos de juzgados en expedientes:`, juzgadosEjemplos);
+      }
+      
+      // Si hay error por columna observaciones faltante, reintentar sin ella
+      let allExpsData = allExps;
+      if (eErr) {
+        const errorMsg = eErr.message || String(eErr) || "";
+        const errorCode = (eErr as any).code || "";
+        
+        // Detectar si es un error de columna observaciones faltante
+        const isObservacionesError = 
+          errorMsg.includes("observaciones") || 
+          errorMsg.includes("does not exist") ||
+          errorCode === "PGRST116";
+        
+        if (isObservacionesError) {
+          console.warn(`[Mis Juzgados] Columna observaciones no existe en BD, cargando sin observaciones`);
+          
+          // Reintentar sin observaciones, pero mantener created_by_user_id
+          const { data: allExps2, error: eErr2 } = await supabase
+            .from("expedientes")
+            .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado, created_by_user_id")
+            .eq("estado", "ABIERTO")
+            .order("fecha_ultima_modificacion", { ascending: true }); // Por defecto: más viejo primero
+          
+          if (eErr2) {
+            setMsg(`Error al cargar expedientes: ${eErr2.message}`);
+            setLoading(false);
+            return;
+          }
+          
+          // Establecer observaciones como null para todos los registros
+          allExpsData = allExps2?.map((e: any) => ({
+            ...e,
+            observaciones: null
+          })) || [];
+        } else {
+          setMsg(`Error al cargar expedientes: ${errorMsg}`);
+          setLoading(false);
+          return;
+        }
+      }
+      
+      // Verificar que observaciones se están cargando correctamente (si no hubo error)
+      if (!eErr) {
+        const expsWithObservaciones = allExpsData?.filter((e: any) => e.observaciones) || [];
+        console.log(`[Mis Juzgados] Expedientes con observaciones cargadas: ${expsWithObservaciones.length}/${allExpsData?.length || 0}`);
+      }
+      
+      // Filtrar expedientes según el filtro seleccionado
+      let exps = allExpsData ?? [];
+      
+      // Solo filtrar por juzgados si el filtro es "mis_juzgados" y hay juzgados asignados
+      if (juzgadoFilter === "mis_juzgados" && juzgadosNormalizados.length > 0) {
+        exps = allExpsData?.filter((e: any) => {
+          const juzgadoNormalizado = normalizarJuzgado(e.juzgado);
+          return juzgadosNormalizados.some(jAsignado => {
+            // Comparación exacta normalizada
+            if (juzgadoNormalizado === jAsignado) return true;
+            // Comparación parcial (por si hay pequeñas diferencias en formato)
+            const numAsignado = jAsignado.match(/N[°º]\s*(\d+)/i)?.[1];
+            const numExpediente = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
+            if (numAsignado && numExpediente && numAsignado === numExpediente) {
+              // Verificar que ambos contengan "Juzgado Nacional" y el mismo número
+              if (jAsignado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
+                return true;
+              }
+            }
+            return false;
+          }) ?? false;
+        }) ?? [];
+        console.log(`[Mis Juzgados] Expedientes filtrados por juzgados: ${exps.length} de ${allExpsData?.length || 0}`);
+      } else if (juzgadoFilter === "todos") {
+        // No filtrar, mostrar todos los expedientes
+        exps = allExpsData ?? [];
+        console.log(`[Mis Juzgados] Mostrando TODOS los expedientes: ${exps.length}`);
+      }
+
+      // Debug: verificar created_by_user_id en los expedientes
+      console.log(`[Mis Juzgados] Expedientes encontrados: ${exps.length}`);
+      console.log(`[Mis Juzgados] Expedientes con created_by_user_id:`, exps.filter((e: any) => e.created_by_user_id).length);
+      
+      if (exps && exps.length > 0) {
+        // Obtener nombres de usuarios que crearon los expedientes
+        const userIds = [...new Set((exps ?? []).map((e: any) => e.created_by_user_id).filter(Boolean))];
+        console.log(`[Mis Juzgados] UserIds únicos encontrados:`, userIds);
+        
+        let userNames: Record<string, string> = {};
+        if (userIds.length > 0) {
+          console.log(`[Mis Juzgados] Buscando profiles para ${userIds.length} userIds:`, userIds);
+          
+          const { data: profiles, error: profilesErr } = await supabase
+            .from("profiles")
+            .select("id, full_name, email")
+            .in("id", userIds);
+          
+          if (profilesErr) {
+            console.error(`[Mis Juzgados] Error al obtener profiles:`, profilesErr);
+            console.error(`[Mis Juzgados] Error details:`, {
+              message: profilesErr.message,
+              code: (profilesErr as any).code,
+              details: (profilesErr as any).details,
+              hint: (profilesErr as any).hint
+            });
+          }
+          
+          if (profiles && profiles.length > 0) {
+            console.log(`[Mis Juzgados] Profiles encontrados (${profiles.length}):`, profiles);
+            userNames = profiles.reduce((acc: Record<string, string>, p: any) => {
+              const name = p.full_name || p.email || "Sin nombre";
+              acc[p.id] = name;
+              console.log(`[Mis Juzgados] Mapeado userId ${p.id} -> ${name}`);
+              return acc;
+            }, {});
+          } else {
+            console.warn(`[Mis Juzgados] No se encontraron profiles para los userIds:`, userIds);
+            console.warn(`[Mis Juzgados] profiles data:`, profiles);
+            console.warn(`[Mis Juzgados] profiles error:`, profilesErr);
+          }
+        } else {
+          console.warn(`[Mis Juzgados] No hay userIds para buscar nombres`);
+        }
+        
+        const processedExps = (exps ?? []).map((e: any) => {
+          const createdByName = e.created_by_user_id ? (userNames[e.created_by_user_id] || null) : null;
+          if (!createdByName && e.created_by_user_id) {
+            console.warn(`[Mis Juzgados] No se encontró nombre para userId: ${e.created_by_user_id}`);
+          }
+          return {
+            ...e,
+            observaciones: e.observaciones || null, // Mantener observaciones si existe
+            created_by_name: createdByName,
+          };
+        });
+        
+        console.log(`[Mis Juzgados] Expedientes procesados con nombres:`, processedExps.filter((e: any) => e.created_by_name).length);
+        
+        setExpedientes(processedExps as Expediente[]);
+      } else {
+        setExpedientes([]);
+      }
+
+      // Cargar todas las cédulas y oficios y filtrar por juzgados asignados
+      // Intentar incluir tipo_documento y created_by_user_id, pero si no existen, usar select sin ellas
+      let queryCedulas = supabase
+        .from("cedulas")
+        .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado, tipo_documento, created_by_user_id")
+        .neq("estado", "CERRADA")
+        .order("fecha_carga", { ascending: true }); // Por defecto: más viejo primero
+      
+      const { data: allCs, error: cErr } = await queryCedulas;
+      
+      // Si el error es porque las columnas no existen, intentar sin ellas
+      let allCsData = allCs;
+      if (cErr) {
+        const errorMsg = cErr.message || String(cErr) || "";
+        const errorCode = (cErr as any).code || "";
+        const errorDetails = (cErr as any).details || "";
+        
+        // Detectar si es un error de columna faltante
+        const isColumnError = 
+          errorMsg.includes("tipo_documento") || 
+          errorMsg.includes("created_by_user_id") ||
+          errorMsg.includes("does not exist") ||
+          errorMsg.includes("column") ||
+          errorCode === "PGRST116" ||
+          errorDetails?.includes("tipo_documento") ||
+          errorDetails?.includes("created_by_user_id");
+        
+        if (isColumnError) {
+          const { data: allCs2, error: cErr2 } = await supabase
+            .from("cedulas")
+            .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado")
+            .neq("estado", "CERRADA")
+            .order("fecha_carga", { ascending: true }); // Por defecto: más viejo primero
+          
+          if (cErr2) {
+            setMsg(msg ? `${msg} Error al cargar cédulas: ${cErr2.message}` : `Error al cargar cédulas: ${cErr2.message}`);
+          } else {
+            allCsData = allCs2;
+          }
+        } else {
+          setMsg(msg ? `${msg} Error al cargar cédulas: ${errorMsg}` : `Error al cargar cédulas: ${errorMsg}`);
+        }
+      }
+      
+      // Filtrar cédulas/oficios según el filtro seleccionado
+      let cs = allCsData ?? [];
+      
+      // Solo filtrar por juzgados si el filtro es "mis_juzgados" y hay juzgados asignados
+      if (juzgadoFilter === "mis_juzgados" && juzgadosNormalizados.length > 0) {
+        cs = allCsData?.filter((c: any) => {
+          if (!c.juzgado) return false;
+          
+          const juzgadoNormalizado = normalizarJuzgado(c.juzgado);
+          
+          // Debug: log para ver qué se está comparando
+          const matched = juzgadosNormalizados.some(jAsignado => {
+            // Comparación exacta normalizada
+            if (juzgadoNormalizado === jAsignado) {
+              return true;
+            }
+            
+            // Comparación por número de juzgado (más flexible)
+            const numAsignado = jAsignado.match(/N[°º]\s*(\d+)/i)?.[1];
+            const numCedula = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
+            
+            if (numAsignado && numCedula && numAsignado === numCedula) {
+              // Si ambos tienen el mismo número y contienen "Juzgado", considerarlos iguales
+              const hasJuzgado = jAsignado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO");
+              if (hasJuzgado) {
+                return true;
+              }
+            }
+            
+            return false;
+          });
+          
+          return matched;
+        }) ?? [];
+        console.log(`[Mis Juzgados] Cédulas filtradas por juzgados: ${cs.length} de ${allCsData?.length || 0}`);
+      } else if (juzgadoFilter === "todos") {
+        // No filtrar, mostrar todas las cédulas
+        cs = allCsData ?? [];
+        console.log(`[Mis Juzgados] Mostrando TODAS las cédulas: ${cs.length}`);
+      }
+      
+      // Debug: mostrar cantidad de cédulas encontradas
+      console.log(`[Mis Juzgados] Total cédulas cargadas: ${allCsData?.length || 0}, Filtradas por juzgados: ${cs.length}`);
+      
+      if (cs && cs.length > 0) {
+        // Obtener nombres de usuarios que crearon las cédulas
+        const userIds = [...new Set((cs ?? []).map((c: any) => c.created_by_user_id).filter(Boolean))];
+        console.log(`[Mis Juzgados] Cédulas con created_by_user_id: ${userIds.length}/${cs.length}`);
+        console.log(`[Mis Juzgados] UserIds únicos en cédulas:`, userIds);
+        
+        let userNames: Record<string, string> = {};
+        if (userIds.length > 0) {
+          console.log(`[Mis Juzgados] Buscando profiles para cédulas (${userIds.length} userIds):`, userIds);
+          
+          const { data: profiles, error: profilesErr } = await supabase
+            .from("profiles")
+            .select("id, full_name, email")
+            .in("id", userIds);
+          
+          if (profilesErr) {
+            console.error(`[Mis Juzgados] Error al obtener profiles para cédulas:`, profilesErr);
+            console.error(`[Mis Juzgados] Error details (cédulas):`, {
+              message: profilesErr.message,
+              code: (profilesErr as any).code,
+              details: (profilesErr as any).details,
+              hint: (profilesErr as any).hint
+            });
+          }
+          
+          if (profiles && profiles.length > 0) {
+            console.log(`[Mis Juzgados] Profiles encontrados para cédulas (${profiles.length}):`, profiles);
+            userNames = profiles.reduce((acc: Record<string, string>, p: any) => {
+              const name = p.full_name || p.email || "Sin nombre";
+              acc[p.id] = name;
+              console.log(`[Mis Juzgados] Mapeado userId cédula ${p.id} -> ${name}`);
+              return acc;
+            }, {});
+          } else {
+            console.warn(`[Mis Juzgados] No se encontraron profiles para los userIds de cédulas:`, userIds);
+            console.warn(`[Mis Juzgados] profiles data (cédulas):`, profiles);
+            console.warn(`[Mis Juzgados] profiles error (cédulas):`, profilesErr);
+          }
+        }
+        
+        const processedCedulas = (cs ?? []).map((c: any) => {
+          const createdByName = c.created_by_user_id ? (userNames[c.created_by_user_id] || null) : null;
+          if (!createdByName && c.created_by_user_id) {
+            console.warn(`[Mis Juzgados] No se encontró nombre para userId de cédula: ${c.created_by_user_id}`);
+          }
+          return {
+            ...c,
+            tipo_documento: c.tipo_documento || null, // Será null si la columna no existe
+            created_by_user_id: c.created_by_user_id || null, // Será null si la columna no existe
+            created_by_name: createdByName,
+          };
+        });
+        
+        console.log(`[Mis Juzgados] Cédulas procesadas con nombres:`, processedCedulas.filter((c: any) => c.created_by_name).length);
+        
+        setCedulas(processedCedulas as Cedula[]);
+        
+        setCedulas(processedCedulas as Cedula[]);
+      } else {
+        setCedulas([]);
+      }
+
+      setLoading(false);
+    } catch (err) {
+      console.error("Error loading data:", err);
+      setMsg("Error al cargar los datos. Por favor intenta nuevamente.");
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  // Recargar datos cuando cambia el filtro de juzgados
+  useEffect(() => {
+    if (!loading) {
+      loadData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [juzgadoFilter]);
+
+  // Cerrar menú al hacer clic fuera
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleClickOutside = () => setMenuOpen(false);
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
+  }, [menuOpen]);
+
+  const cedulasFiltered = useMemo(() => {
+    return cedulas.filter(c => !c.tipo_documento || c.tipo_documento === "CEDULA");
+  }, [cedulas]);
+
+  const oficiosFiltered = useMemo(() => {
+    return cedulas.filter(c => c.tipo_documento === "OFICIO");
+  }, [cedulas]);
+
+  // Preparar y ordenar items según sortField y sortDirection
+  // Por defecto: ordenar por fecha ascendente (más viejo primero)
+  // IMPORTANTE: Este useMemo debe estar ANTES del return condicional para cumplir las reglas de Hooks
+  const sortedItems = useMemo(() => {
+    // Preparar items según el tab activo
+    const itemsToShow = activeTab === "expedientes" 
+      ? expedientes.map(e => ({
+          type: "expediente" as const,
+          id: e.id,
+          caratula: e.caratula,
+          juzgado: e.juzgado,
+          fecha: e.fecha_ultima_modificacion,
+          numero: e.numero_expediente,
+          created_by: e.created_by_name,
+          observaciones: e.observaciones,
+          dias: e.fecha_ultima_modificacion ? daysSince(e.fecha_ultima_modificacion) : null,
+          semaforo: e.fecha_ultima_modificacion ? semaforoByAge(daysSince(e.fecha_ultima_modificacion)) : "VERDE" as Semaforo,
+        }))
+      : activeTab === "cedulas"
+      ? cedulasFiltered.map(c => ({
+          type: "cedula" as const,
+          id: c.id,
+          caratula: c.caratula,
+          juzgado: c.juzgado,
+          fecha: c.fecha_carga,
+          numero: null,
+          created_by: c.created_by_name,
+          dias: c.fecha_carga ? daysSince(c.fecha_carga) : null,
+          semaforo: c.fecha_carga ? semaforoByAge(daysSince(c.fecha_carga)) : "VERDE" as Semaforo,
+        }))
+      : oficiosFiltered.map(o => ({
+          type: "oficio" as const,
+          id: o.id,
+          caratula: o.caratula,
+          juzgado: o.juzgado,
+          fecha: o.fecha_carga,
+          numero: null,
+          created_by: o.created_by_name,
+          observaciones: null,
+          dias: o.fecha_carga ? daysSince(o.fecha_carga) : null,
+          semaforo: o.fecha_carga ? semaforoByAge(daysSince(o.fecha_carga)) : "VERDE" as Semaforo,
+        }));
+    
+    // Preparar items para mostrar (agregar observaciones si faltan)
+    const itemsWithObservations = itemsToShow.map(item => ({
+      ...item,
+      observaciones: 'observaciones' in item ? item.observaciones : null
+    }));
+
+    // Ordenar items
+    const sorted = [...itemsWithObservations];
+    
+    sorted.sort((a, b) => {
+      let compareA: number;
+      let compareB: number;
+
+      // Si no hay sortField, usar fecha ascendente por defecto
+      const currentSortField = sortField || "fecha";
+      const currentSortDirection = sortField ? sortDirection : "asc";
+
+      if (currentSortField === "dias") {
+        compareA = a.dias ?? -1;
+        compareB = b.dias ?? -1;
+      } else if (currentSortField === "semaforo") {
+        const semOrder: Record<Semaforo, number> = { ROJO: 2, AMARILLO: 1, VERDE: 0 };
+        compareA = semOrder[a.semaforo as Semaforo] ?? 0;
+        compareB = semOrder[b.semaforo as Semaforo] ?? 0;
+      } else if (currentSortField === "fecha") {
+        if (!a.fecha && !b.fecha) return 0;
+        if (!a.fecha) return 1; // Los sin fecha van al final
+        if (!b.fecha) return -1;
+        compareA = new Date(a.fecha).getTime();
+        compareB = new Date(b.fecha).getTime();
+      } else {
+        return 0;
+      }
+
+      const diff = compareA - compareB;
+      return currentSortDirection === "asc" ? diff : -diff;
+    });
+
+    return sorted;
+  }, [activeTab, expedientes, cedulasFiltered, oficiosFiltered, sortField, sortDirection]);
+
+  async function logout() {
+    await supabase.auth.signOut();
+    window.location.href = "/login";
+  }
+
+  function handleSort(field: SortField) {
+    if (sortField === field) {
+      // Si ya está ordenado por este campo, cambiar dirección
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+    } else {
+      // Si es un campo nuevo, empezar con ascendente
+      setSortField(field);
+      setSortDirection("asc");
+    }
+  }
+
+  async function refreshData() {
+    setLoading(true);
+    setMsg("");
+    await loadData();
+  }
+
+  if (loading) {
+    return (
+      <main className="container">
+        <section className="card">
+          <div className="page">
+            <p className="helper">Cargando…</p>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <main className="container">
+      <section className="card">
+        <header style={{
+          background: "linear-gradient(135deg, rgba(0,82,156,.25), rgba(0,82,156,.08))",
+          borderBottom: "1px solid rgba(255,255,255,.12)",
+          padding: "16px 24px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 16,
+          flexWrap: "wrap",
+          position: "relative"
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            {/* Menú Hamburguesa */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenuOpen(!menuOpen);
+              }}
+              style={{
+                background: "rgba(255,255,255,.08)",
+                border: "1px solid rgba(255,255,255,.16)",
+                borderRadius: 8,
+                padding: "8px 10px",
+                cursor: "pointer",
+                display: "flex",
+                flexDirection: "column",
+                gap: 4,
+                alignItems: "center",
+                justifyContent: "center",
+                transition: "all 0.2s ease",
+                minWidth: 40,
+                minHeight: 40
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "rgba(255,255,255,.12)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "rgba(255,255,255,.08)";
+              }}
+            >
+              <div style={{ width: 20, height: 2, background: "var(--text)", borderRadius: 1 }} />
+              <div style={{ width: 20, height: 2, background: "var(--text)", borderRadius: 1 }} />
+              <div style={{ width: 20, height: 2, background: "var(--text)", borderRadius: 1 }} />
+            </button>
+
+            {/* Menú desplegable */}
+            {menuOpen && (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  position: "absolute",
+                  top: "100%",
+                  left: 24,
+                  marginTop: 8,
+                  background: "linear-gradient(180deg, rgba(11,47,85,.98), rgba(7,28,46,.98))",
+                  border: "1px solid rgba(255,255,255,.16)",
+                  borderRadius: 12,
+                  padding: "12px 0",
+                  minWidth: 220,
+                  boxShadow: "0 8px 24px rgba(0,0,0,.4)",
+                  zIndex: 1000,
+                  backdropFilter: "blur(10px)"
+                }}
+              >
+                <Link
+                  href="/superadmin"
+                  onClick={() => setMenuOpen(false)}
+                  style={{
+                    display: "block",
+                    padding: "12px 20px",
+                    color: "var(--text)",
+                    textDecoration: "none",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    transition: "background 0.2s ease",
+                    borderLeft: "3px solid transparent"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                    e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.borderLeftColor = "transparent";
+                  }}
+                >
+                  📊 Dashboard SuperAdmin
+                </Link>
+                <Link
+                  href="/superadmin/mis-juzgados"
+                  onClick={() => setMenuOpen(false)}
+                  style={{
+                    display: "block",
+                    padding: "12px 20px",
+                    color: "var(--text)",
+                    textDecoration: "none",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    transition: "background 0.2s ease",
+                    borderLeft: "3px solid rgba(96,141,186,1)",
+                    background: "rgba(255,255,255,.05)"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "rgba(255,255,255,.05)";
+                  }}
+                >
+                  📋 Mis Juzgados
+                </Link>
+                <Link
+                  href="/app/expedientes/nueva"
+                  onClick={() => setMenuOpen(false)}
+                  style={{
+                    display: "block",
+                    padding: "12px 20px",
+                    color: "var(--text)",
+                    textDecoration: "none",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    transition: "background 0.2s ease",
+                    borderLeft: "3px solid transparent"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                    e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.borderLeftColor = "transparent";
+                  }}
+                >
+                  ➕ Carga Expedientes
+                </Link>
+              </div>
+            )}
+
+            <div>
+              <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "var(--text)", letterSpacing: "0.2px" }}>
+                Mis Juzgados
+              </h1>
+              <p style={{ margin: "4px 0 0 0", fontSize: 13, color: "rgba(234,243,255,.65)", fontWeight: 400 }}>
+                {juzgadoFilter === "todos" 
+                  ? "Expedientes, cédulas y oficios de todos los juzgados" 
+                  : "Expedientes, cédulas y oficios de mis juzgados asignados"}
+              </p>
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {/* Filtro de Juzgados */}
+            <select
+              value={juzgadoFilter}
+              onChange={(e) => {
+                const newFilter = e.target.value as "mis_juzgados" | "todos";
+                setJuzgadoFilter(newFilter);
+                // El useEffect se encargará de recargar los datos
+              }}
+              style={{
+                padding: "10px 16px",
+                background: "rgba(255,255,255,.08)",
+                border: "1px solid rgba(255,255,255,.16)",
+                borderRadius: 10,
+                color: "var(--text)",
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: "pointer",
+                outline: "none",
+                transition: "all 0.2s ease",
+                minWidth: 200
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.background = "rgba(255,255,255,.12)";
+                e.currentTarget.style.borderColor = "rgba(96,141,186,.5)";
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                e.currentTarget.style.borderColor = "rgba(255,255,255,.16)";
+              }}
+            >
+              <option value="mis_juzgados">
+                Mis Juzgados {userJuzgados.length > 0 ? `(${userJuzgados.length})` : ""}
+              </option>
+              <option value="todos">Todos los Juzgados</option>
+            </select>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button
+            onClick={refreshData}
+            disabled={loading}
+            style={{
+              padding: "10px 16px",
+              background: "rgba(96,141,186,.15)",
+              border: "1px solid rgba(96,141,186,.35)",
+              borderRadius: 10,
+              color: "var(--brand-blue-2)",
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: loading ? "wait" : "pointer",
+              transition: "all 0.2s ease",
+              opacity: loading ? 0.6 : 1
+            }}
+            onMouseEnter={(e) => {
+              if (!loading) {
+                e.currentTarget.style.background = "rgba(96,141,186,.25)";
+                e.currentTarget.style.borderColor = "rgba(96,141,186,.45)";
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!loading) {
+                e.currentTarget.style.background = "rgba(96,141,186,.15)";
+                e.currentTarget.style.borderColor = "rgba(96,141,186,.35)";
+              }
+            }}
+            title="Actualizar datos"
+          >
+            🔄 Refresh
+          </button>
+          <button 
+            onClick={logout}
+            style={{
+              padding: "10px 16px",
+              background: "rgba(225,57,64,.15)",
+              border: "1px solid rgba(225,57,64,.35)",
+              borderRadius: 10,
+              color: "var(--text)",
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: "pointer",
+              transition: "all 0.2s ease",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "rgba(225,57,64,.25)";
+              e.currentTarget.style.borderColor = "rgba(225,57,64,.45)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "rgba(225,57,64,.15)";
+              e.currentTarget.style.borderColor = "rgba(225,57,64,.35)";
+            }}
+          >
+            Salir
+          </button>
+          </div>
+        </header>
+
+        <div className="page">
+          <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+            <span style={{ color: "var(--muted)", fontSize: 13 }}>
+              Semáforo automático por antigüedad:
+            </span>
+            <SemaforoChip value="VERDE" />
+            <span style={{ color: "var(--muted)", fontSize: 13 }}>0–29</span>
+            <SemaforoChip value="AMARILLO" />
+            <span style={{ color: "var(--muted)", fontSize: 13 }}>30–59</span>
+            <SemaforoChip value="ROJO" />
+            <span style={{ color: "var(--muted)", fontSize: 13 }}>60+ días</span>
+          </div>
+
+          {msg && <div className="error">{msg}</div>}
+
+          {/* Tabs */}
+          <div style={{ 
+            display: "flex", 
+            gap: 8, 
+            marginBottom: 24,
+            borderBottom: "1px solid rgba(255,255,255,.1)"
+          }}>
+            <button
+              onClick={() => setActiveTab("expedientes")}
+              style={{
+                padding: "12px 20px",
+                background: activeTab === "expedientes" ? "rgba(255,255,255,.1)" : "transparent",
+                border: "none",
+                borderBottom: activeTab === "expedientes" ? "2px solid var(--brand-blue-2)" : "2px solid transparent",
+                color: "var(--text)",
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: "pointer",
+                transition: "all 0.2s ease"
+              }}
+            >
+              Expedientes ({expedientes.length})
+            </button>
+            <button
+              onClick={() => setActiveTab("cedulas")}
+              style={{
+                padding: "12px 20px",
+                background: activeTab === "cedulas" ? "rgba(255,255,255,.1)" : "transparent",
+                border: "none",
+                borderBottom: activeTab === "cedulas" ? "2px solid var(--brand-blue-2)" : "2px solid transparent",
+                color: "var(--text)",
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: "pointer",
+                transition: "all 0.2s ease"
+              }}
+            >
+              Cédulas ({cedulasFiltered.length})
+            </button>
+            <button
+              onClick={() => setActiveTab("oficios")}
+              style={{
+                padding: "12px 20px",
+                background: activeTab === "oficios" ? "rgba(255,255,255,.1)" : "transparent",
+                border: "none",
+                borderBottom: activeTab === "oficios" ? "2px solid var(--brand-blue-2)" : "2px solid transparent",
+                color: "var(--text)",
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: "pointer",
+                transition: "all 0.2s ease"
+              }}
+            >
+              Oficios ({oficiosFiltered.length})
+            </button>
+          </div>
+
+          {/* Tabla */}
+          <div className="tableWrap" style={{ marginTop: 10 }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th 
+                    style={{ width: 130, cursor: "pointer" }}
+                    onClick={() => handleSort("semaforo")}
+                    title="Haz clic para ordenar"
+                  >
+                    Semáforo{" "}
+                    <span style={{ opacity: sortField === "semaforo" ? 1 : 0.4 }}>
+                      {sortField === "semaforo" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
+                    </span>
+                  </th>
+                  <th>Carátula</th>
+                  <th>Juzgado</th>
+                  <th 
+                    style={{ width: 200, cursor: "pointer" }}
+                    onClick={() => handleSort("fecha")}
+                    title="Haz clic para ordenar"
+                  >
+                    {activeTab === "expedientes" ? "Fecha Última Modificación" : "Fecha de Carga"}{" "}
+                    <span style={{ opacity: 1 }}>
+                      {sortField === "fecha" ? (sortDirection === "asc" ? "↑" : "↓") : "↑"}
+                    </span>
+                  </th>
+                  <th 
+                    style={{ width: 80, textAlign: "right", cursor: "pointer" }}
+                    onClick={() => handleSort("dias")}
+                    title="Haz clic para ordenar"
+                  >
+                    Días{" "}
+                    <span style={{ opacity: sortField === "dias" ? 1 : 0.4 }}>
+                      {sortField === "dias" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
+                    </span>
+                  </th>
+                  {activeTab === "expedientes" && (
+                    <th style={{ width: 170 }}>Expediente</th>
+                  )}
+                  <th style={{ width: 150 }}>Cargado por</th>
+                  {activeTab === "expedientes" && (
+                    <th style={{ width: 250 }}>Observaciones</th>
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {sortedItems.map((item: any) => {
+                  const dias = item.dias ?? null;
+                  const sem = item.semaforo || (dias !== null ? semaforoByAge(dias) : "VERDE");
+                  
+                  return (
+                    <tr key={item.id} style={{ verticalAlign: "top" }}>
+                      <td>
+                        <SemaforoChip value={sem as Semaforo} />
+                      </td>
+                      <td style={{ fontWeight: 650 }}>
+                        {item.caratula?.trim() ? item.caratula : <span className="muted">Sin carátula</span>}
+                      </td>
+                      <td>{item.juzgado?.trim() ? item.juzgado : <span className="muted">—</span>}</td>
+                      <td>
+                        {item.fecha ? isoToDDMMAAAA(item.fecha) : <span className="muted">—</span>}
+                      </td>
+                      <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                        {typeof dias === "number" && !isNaN(dias) ? dias : <span className="muted">—</span>}
+                      </td>
+                      {activeTab === "expedientes" && (
+                        <td>
+                          {item.numero?.trim() ? item.numero : <span className="muted">—</span>}
+                        </td>
+                      )}
+                      <td>
+                        {item.created_by ? (
+                          <span style={{ fontSize: 13 }}>{item.created_by}</span>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </td>
+                      {activeTab === "expedientes" && (
+                        <td style={{ fontSize: 13, maxWidth: 250, wordBreak: "break-word" }}>
+                          {item.observaciones?.trim() ? (
+                            <div style={{ 
+                              padding: "4px 8px",
+                              background: "rgba(255,255,255,.04)",
+                              borderRadius: 6,
+                              border: "1px solid rgba(255,255,255,.08)",
+                              lineHeight: 1.5
+                            }}>
+                              {item.observaciones}
+                            </div>
+                          ) : (
+                            <span className="muted">—</span>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+                {sortedItems.length === 0 && (
+                  <tr>
+                    <td colSpan={activeTab === "expedientes" ? 8 : 6} className="muted">
+                      No hay {activeTab === "expedientes" ? "expedientes" : activeTab === "cedulas" ? "cédulas" : "oficios"} cargados para tus juzgados asignados.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  );
+}

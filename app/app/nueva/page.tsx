@@ -273,6 +273,7 @@ export default function NuevaCedulaPage() {
         fecha_vencimiento: vencISO || null,         // ✅ guarda vencimiento (carga + 30)
         estado: "NUEVA",
         pdf_path: null,
+        created_by_user_id: uid,                    // ✅ guarda quién creó la cédula
       };
       
       // Intentar insertar con tipo_documento primero

@@ -14,6 +14,8 @@ type Expediente = {
   fecha_ultima_modificacion: string | null;
   estado: string;
   observaciones: string | null;
+  created_by_user_id: string | null;
+  created_by_name: string | null;
 };
 
 function isoToDDMMAAAA(iso: string | null): string {
@@ -140,6 +142,15 @@ export default function MisExpedientesPage() {
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [editingFecha, setEditingFecha] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [userRoles, setUserRoles] = useState<{
+    isSuperadmin: boolean;
+    isAdminExpedientes: boolean;
+    isAbogado: boolean;
+  }>({
+    isSuperadmin: false,
+    isAdminExpedientes: false,
+    isAbogado: false,
+  });
 
   useEffect(() => {
     (async () => {
@@ -150,19 +161,28 @@ export default function MisExpedientesPage() {
 
       const uid = session.user.id;
 
-      // Verificar que el usuario tenga el rol de admin_expedientes - usar consulta directa para evitar errores 400
+      // Verificar roles del usuario
       const { data: roleData, error: roleErr } = await supabase
         .from("user_roles")
-        .select("is_admin_expedientes")
+        .select("is_admin_expedientes, is_abogado")
         .eq("user_id", uid)
         .maybeSingle();
       
-      const hasRole = !roleErr && roleData?.is_admin_expedientes === true;
+      const isAdminExp = !roleErr && roleData?.is_admin_expedientes === true;
+      const isAbogado = !roleErr && roleData?.is_abogado === true;
+      const isSuperadmin = !roleErr && roleData?.is_superadmin === true;
       
-      if (!hasRole) {
+      if (!isAdminExp && !isAbogado) {
         window.location.href = "/app";
         return;
       }
+
+      // Guardar roles para mostrar botones de navegación
+      setUserRoles({
+        isSuperadmin: isSuperadmin || false,
+        isAdminExpedientes: isAdminExp || false,
+        isAbogado: isAbogado || false,
+      });
 
       // must_change_password guard
       const { data: prof, error: pErr } = await supabase
@@ -180,74 +200,132 @@ export default function MisExpedientesPage() {
         return;
       }
 
-      // listar expedientes del usuario (intentar incluir observaciones, hacer fallback si no existe)
-      let query = supabase
-        .from("expedientes")
-        .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado, observaciones")
-        .eq("owner_user_id", uid)
-        .eq("estado", "ABIERTO")
-        .order("fecha_ultima_modificacion", { ascending: false });
+      // Si es ABOGADO, obtener juzgados asignados y filtrar por ellos
+      let juzgadosAsignados: string[] = [];
+      if (isAbogado) {
+        const { data: juzgadosData, error: juzgadosErr } = await supabase
+          .from("user_juzgados")
+          .select("juzgado")
+          .eq("user_id", uid);
+        
+        if (!juzgadosErr && juzgadosData) {
+          juzgadosAsignados = juzgadosData.map(j => j.juzgado);
+        }
+      }
+
+      // Construir query según el rol (sin join para evitar errores)
+      // Intentar incluir observaciones, pero si no existe la columna, usar select sin ella
+      let query;
+      if (isAbogado && juzgadosAsignados.length > 0) {
+        // ABOGADO: ver todos los expedientes de sus juzgados asignados
+        query = supabase
+          .from("expedientes")
+          .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado, observaciones, created_by_user_id")
+          .in("juzgado", juzgadosAsignados)
+          .eq("estado", "ABIERTO")
+          .order("fecha_ultima_modificacion", { ascending: false });
+      } else if (isAdminExp) {
+        // ADMIN_EXPEDIENTES: ver todos los expedientes (o solo los propios, según política RLS)
+        query = supabase
+          .from("expedientes")
+          .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado, observaciones, created_by_user_id")
+          .eq("estado", "ABIERTO")
+          .order("fecha_ultima_modificacion", { ascending: false });
+      } else {
+        // Fallback: solo propios
+        query = supabase
+          .from("expedientes")
+          .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado, observaciones, created_by_user_id")
+          .eq("owner_user_id", uid)
+          .eq("estado", "ABIERTO")
+          .order("fecha_ultima_modificacion", { ascending: false });
+      }
 
       const { data: exps, error: eErr } = await query;
-
-      if (eErr) {
-        // Si falla por columna observaciones inexistente, reintentar sin ella
-        const errorMsg = eErr.message || String(eErr);
-        const errorCode = eErr.code || "";
+      
+      // Si el error es porque la columna observaciones no existe, intentar sin ella
+      let expsData = exps;
+      if (eErr && (eErr.message?.includes("observaciones") || eErr.message?.includes("does not exist"))) {
+        console.warn(`[Expedientes] Columna observaciones no existe, reintentando sin observaciones`);
         
-        if (errorMsg.includes("observaciones") || 
-            (errorMsg.includes("column") && errorMsg.includes("does not exist")) ||
-            errorCode === "PGRST116") {
-          // Reintentar sin observaciones
-          const { data: exps2, error: eErr2 } = await supabase
+        let query2;
+        if (isAbogado && juzgadosAsignados.length > 0) {
+          query2 = supabase
             .from("expedientes")
-            .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado")
+            .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado, created_by_user_id")
+            .in("juzgado", juzgadosAsignados)
+            .eq("estado", "ABIERTO")
+            .order("fecha_ultima_modificacion", { ascending: false });
+        } else if (isAdminExp) {
+          query2 = supabase
+            .from("expedientes")
+            .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado, created_by_user_id")
+            .eq("estado", "ABIERTO")
+            .order("fecha_ultima_modificacion", { ascending: false });
+        } else {
+          query2 = supabase
+            .from("expedientes")
+            .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado, created_by_user_id")
             .eq("owner_user_id", uid)
             .eq("estado", "ABIERTO")
             .order("fecha_ultima_modificacion", { ascending: false });
-          
-          if (eErr2) {
-            // Si aún falla, intentar sin el ordenamiento por fecha_ultima_modificacion
-            const { data: exps3, error: eErr3 } = await supabase
-              .from("expedientes")
-              .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado")
-              .eq("owner_user_id", uid)
-              .eq("estado", "ABIERTO");
-            
-            if (eErr3) {
-              setMsg(`Error al cargar expedientes: ${eErr3.message || String(eErr3)}`);
-              setLoading(false);
-              return;
-            }
-            
-            // Ordenar manualmente por fecha
-            const sorted = (exps3 ?? []).sort((a: any, b: any) => {
-              const dateA = a.fecha_ultima_modificacion ? new Date(a.fecha_ultima_modificacion).getTime() : 0;
-              const dateB = b.fecha_ultima_modificacion ? new Date(b.fecha_ultima_modificacion).getTime() : 0;
-              return dateB - dateA;
-            });
-            
-            const expsWithNull = sorted.map((e: any) => ({ ...e, observaciones: null }));
-            setExpedientes(expsWithNull as Expediente[]);
-            setLoading(false);
-            return;
-          }
-          
-          // Agregar observaciones como null para mantener consistencia
-          const expsWithNull = (exps2 ?? []).map((e: any) => ({ ...e, observaciones: null }));
-          setExpedientes(expsWithNull as Expediente[]);
-          setLoading(false);
-          return;
-        } else {
-          // Otro tipo de error - mostrar mensaje detallado
-          console.error("Error al cargar expedientes:", eErr);
-          setMsg(`Error al cargar expedientes: ${errorMsg} (Código: ${errorCode})`);
+        }
+        
+        const { data: exps2, error: eErr2 } = await query2;
+        
+        if (eErr2) {
+          setMsg(`Error al cargar expedientes: ${eErr2.message}`);
           setLoading(false);
           return;
         }
+        
+        // Establecer observaciones como null para todos
+        expsData = (exps2 ?? []).map((e: any) => ({
+          ...e,
+          observaciones: null
+        }));
+      } else if (eErr) {
+        setMsg(`Error al cargar expedientes: ${eErr.message}`);
+        setLoading(false);
+        return;
+      } else {
+        // Si no hubo error, verificar que observaciones se están cargando
+        const expsWithObservaciones = (expsData ?? []).filter((e: any) => e.observaciones && e.observaciones.trim());
+        console.log(`[Expedientes] Expedientes con observaciones: ${expsWithObservaciones.length}/${expsData?.length || 0}`);
+        if (expsData && expsData.length > 0) {
+          console.log(`[Expedientes] Primer expediente tiene observaciones:`, expsData[0].observaciones || "null/vacío");
+        }
+      }
+
+      // Obtener nombres de usuarios que crearon los expedientes
+      const userIds = [...new Set((expsData ?? []).map((e: any) => e.created_by_user_id).filter(Boolean))];
+      let userNames: Record<string, string> = {};
+      if (userIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from("profiles")
+          .select("id, full_name, email")
+          .in("id", userIds);
+        
+        if (profiles) {
+          userNames = profiles.reduce((acc: Record<string, string>, p: any) => {
+            acc[p.id] = p.full_name || p.email || "Sin nombre";
+            return acc;
+          }, {});
+        }
       }
       
-      setExpedientes((exps ?? []) as Expediente[]);
+      // Procesar expedientes y agregar nombres de usuarios
+      const processedExps = (expsData ?? []).map((e: any) => {
+        // Asegurarse de que observaciones esté presente
+        const observaciones = e.observaciones !== undefined ? e.observaciones : null;
+        return {
+          ...e,
+          observaciones: observaciones || null,
+          created_by_name: e.created_by_user_id ? (userNames[e.created_by_user_id] || null) : null,
+        };
+      });
+      
+      setExpedientes(processedExps as Expediente[]);
       setLoading(false);
     })();
   }, []);
@@ -433,9 +511,21 @@ export default function MisExpedientesPage() {
           <img className="logoMini" src="/logo.png" alt="Logo" />
           <h1>Mis Expedientes</h1>
           <div className="spacer" />
-          <Link className="btn primary" href="/app/expedientes/nueva">
-            Nueva
-          </Link>
+          {userRoles.isSuperadmin && (
+            <Link className="btn" href="/superadmin" style={{ marginRight: 8 }}>
+              DASHBOARD
+            </Link>
+          )}
+          {userRoles.isAbogado && (
+            <Link className="btn" href="/app/abogado" style={{ marginRight: 8 }}>
+              HOME
+            </Link>
+          )}
+          {(userRoles.isAdminExpedientes || userRoles.isAbogado) && (
+            <Link className="btn primary" href="/app/expedientes/nueva" style={{ marginRight: 8 }}>
+              Cargar
+            </Link>
+          )}
           <button className="btn danger" onClick={logout}>
             Salir
           </button>
@@ -496,6 +586,7 @@ export default function MisExpedientesPage() {
                     </span>
                   </th>
                   <th style={{ width: 170 }}>Expediente</th>
+                  <th style={{ width: 150 }}>Cargado por</th>
                   <th style={{ width: 250 }}>Observaciones</th>
                 </tr>
               </thead>
@@ -593,6 +684,14 @@ export default function MisExpedientesPage() {
                       {e.numero_expediente?.trim() ? e.numero_expediente : <span className="muted">—</span>}
                     </td>
 
+                    <td>
+                      {e.created_by_name ? (
+                        <span style={{ fontSize: 13 }}>{e.created_by_name}</span>
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                    </td>
+
                     <td style={{ fontSize: 13, maxWidth: 250, wordBreak: "break-word" }}>
                       {e.observaciones?.trim() ? (
                         <div style={{ 
@@ -613,8 +712,10 @@ export default function MisExpedientesPage() {
 
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="muted">
-                      Todavía no cargaste expedientes.
+                    <td colSpan={8} className="muted">
+                      {isAbogado 
+                        ? "No hay expedientes cargados para tus juzgados asignados."
+                        : "Todavía no cargaste expedientes."}
                     </td>
                   </tr>
                 )}

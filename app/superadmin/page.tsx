@@ -12,6 +12,7 @@ type Cedula = {
   fecha_carga: string | null;
   estado: string;
   tipo_documento: "CEDULA" | "OFICIO" | null;
+  created_by_user_id?: string | null;
 };
 
 type Expediente = {
@@ -22,6 +23,7 @@ type Expediente = {
   numero_expediente: string | null;
   fecha_ultima_modificacion: string | null;
   estado: string;
+  created_by_user_id?: string | null;
 };
 
 type Profile = { id: string; full_name: string | null; email: string | null };
@@ -130,9 +132,10 @@ function KPICard({
   
   const renderTrend = () => {
     if (!trend) return null;
+    // polyline points debe ser formato "x1,y1 x2,y2 x3,y3..." no un path SVG
     const points = trend === "up" 
-      ? "M 2 18 L 8 12 L 14 10 L 20 6 L 26 4"
-      : "M 2 4 L 8 8 L 14 10 L 20 14 L 26 16";
+      ? "2,18 8,12 14,10 20,6 26,4"
+      : "2,4 8,8 14,10 20,14 26,16";
     const strokeColor = trend === "up" ? "#00a952" : "#e13940";
     
     return (
@@ -253,8 +256,23 @@ export default function SuperAdminPage() {
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("all");
   const [selectedUserId, setSelectedUserId] = useState<string>("all");
+  const [juzgadoFilter, setJuzgadoFilter] = useState<"mis_juzgados" | "todos">("todos");
+  const [userJuzgados, setUserJuzgados] = useState<string[]>([]);
   const [customStartDate, setCustomStartDate] = useState<string>("");
   const [customEndDate, setCustomEndDate] = useState<string>("");
+  const [hasExpedientesRole, setHasExpedientesRole] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Cerrar menú al hacer clic fuera
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleClickOutside = () => setMenuOpen(false);
+    // Usar setTimeout para que el click del botón no cierre inmediatamente el menú
+    setTimeout(() => {
+      document.addEventListener("click", handleClickOutside);
+    }, 100);
+    return () => document.removeEventListener("click", handleClickOutside);
+  }, [menuOpen]);
 
   useEffect(() => {
     (async () => {
@@ -271,8 +289,49 @@ export default function SuperAdminPage() {
       if (pErr) { window.location.href = "/login"; return; }
       if (prof?.must_change_password) { window.location.href = "/cambiar-password"; return; }
 
-      const { data: ok, error: rpcErr } = await supabase.rpc("is_superadmin");
-      if (rpcErr || !ok) { window.location.href = "/app"; return; }
+      // Verificar roles del usuario (superadmin, abogado, expedientes)
+      const { data: roleData, error: roleErr } = await supabase
+        .from("user_roles")
+        .select("is_superadmin, is_abogado, is_admin_expedientes")
+        .eq("user_id", uid)
+        .maybeSingle();
+      
+      const isSuperadmin = roleData?.is_superadmin === true;
+      const isAbogado = roleData?.is_abogado === true;
+      const isAdminExpedientes = roleData?.is_admin_expedientes === true;
+      
+      console.log(`[Dashboard] Roles del usuario:`, {
+        isSuperadmin,
+        isAbogado,
+        isAdminExpedientes,
+        userId: uid
+      });
+      
+      if (!isSuperadmin && !isAbogado) { 
+        window.location.href = "/app"; 
+        return; 
+      }
+
+      // Verificar si también tiene rol de expedientes
+      const hasExpRole = isAdminExpedientes || isAbogado;
+      setHasExpedientesRole(hasExpRole);
+
+      // Obtener juzgados asignados al usuario (si es abogado o superadmin)
+      // Los superadmins que también son abogados pueden tener juzgados asignados
+      if (isAbogado || isSuperadmin) {
+        const { data: juzgadosData, error: juzgadosErr } = await supabase
+          .from("user_juzgados")
+          .select("juzgado")
+          .eq("user_id", uid);
+        
+        if (!juzgadosErr && juzgadosData && juzgadosData.length > 0) {
+          const juzgadosAsignados = juzgadosData.map(j => j.juzgado);
+          setUserJuzgados(juzgadosAsignados);
+          console.log(`[Dashboard] Juzgados asignados al usuario:`, juzgadosAsignados);
+        } else {
+          console.log(`[Dashboard] Usuario no tiene juzgados asignados o error:`, juzgadosErr);
+        }
+      }
 
       const { data: profs, error: profsErr } = await supabase
         .from("profiles")
@@ -284,18 +343,18 @@ export default function SuperAdminPage() {
       (profs ?? []).forEach((p: any) => { map[p.id] = p; });
       setProfiles(map);
 
-      // Intentar obtener con tipo_documento, pero hacer fallback si no existe la columna
+      // Intentar obtener con tipo_documento y created_by_user_id, pero hacer fallback si no existe la columna
       let query = supabase
         .from("cedulas")
-        .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado, tipo_documento")
+        .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado, tipo_documento, created_by_user_id")
         .neq("estado", "CERRADA")
         .order("fecha_carga", { ascending: true });
 
       const { data: cs, error: cErr } = await query;
 
       if (cErr) {
-        // Si falla por columna tipo_documento inexistente, reintentar sin ella
-        if (cErr.message?.includes("tipo_documento")) {
+        // Si falla por columna tipo_documento o created_by_user_id inexistente, reintentar sin ellas
+        if (cErr.message?.includes("tipo_documento") || cErr.message?.includes("created_by_user_id")) {
           const { data: cs2, error: cErr2 } = await supabase
         .from("cedulas")
         .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado")
@@ -308,7 +367,7 @@ export default function SuperAdminPage() {
             return; 
           }
           
-          const csWithNull = (cs2 ?? []).map((c: any) => ({ ...c, tipo_documento: null }));
+          const csWithNull = (cs2 ?? []).map((c: any) => ({ ...c, tipo_documento: null, created_by_user_id: null }));
           setAllCedulas(csWithNull as Cedula[]);
         } else {
           setMsg(cErr.message);
@@ -317,12 +376,22 @@ export default function SuperAdminPage() {
         }
       } else {
         setAllCedulas((cs ?? []) as Cedula[]);
+        console.log(`[Dashboard] Cédulas cargadas inicialmente: ${(cs ?? []).length}`, {
+          isSuperadmin,
+          isAbogado,
+          juzgadoFilter: "todos (carga inicial)"
+        });
+        // Log de juzgados únicos en las cédulas cargadas
+        const juzgadosUnicos = [...new Set((cs ?? []).map((c: any) => c.juzgado).filter(Boolean))];
+        const usuariosUnicos = [...new Set((cs ?? []).map((c: any) => c.owner_user_id))];
+        console.log(`[Dashboard] Juzgados únicos en cédulas: ${juzgadosUnicos.length}`, juzgadosUnicos.slice(0, 10));
+        console.log(`[Dashboard] Usuarios únicos en cédulas: ${usuariosUnicos.length}`, usuariosUnicos);
       }
       
-      // Cargar expedientes
+      // Cargar expedientes (incluyendo created_by_user_id)
       const { data: exps, error: eErr } = await supabase
         .from("expedientes")
-        .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado")
+        .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado, created_by_user_id")
         .eq("estado", "ABIERTO")
         .order("fecha_ultima_modificacion", { ascending: true });
 
@@ -334,19 +403,90 @@ export default function SuperAdminPage() {
         setAllExpedientes([]);
       } else {
         setAllExpedientes((exps ?? []) as Expediente[]);
+        console.log(`[Dashboard] Expedientes cargados inicialmente: ${(exps ?? []).length}`, {
+          isSuperadmin,
+          isAbogado,
+          juzgadoFilter: "todos (carga inicial)"
+        });
+        // Log de juzgados únicos en los expedientes cargados
+        const juzgadosUnicos = [...new Set((exps ?? []).map((e: any) => e.juzgado).filter(Boolean))];
+        const usuariosUnicos = [...new Set((exps ?? []).map((e: any) => e.owner_user_id))];
+        console.log(`[Dashboard] Juzgados únicos en expedientes: ${juzgadosUnicos.length}`, juzgadosUnicos.slice(0, 10));
+        console.log(`[Dashboard] Usuarios únicos en expedientes: ${usuariosUnicos.length}`, usuariosUnicos);
       }
       
       setChecking(false);
     })();
   }, []);
 
+  // Función para normalizar juzgado para comparación
+  const normalizarJuzgado = (j: string | null) => {
+    if (!j) return "";
+    return j.trim().replace(/\s+/g, " ").toUpperCase();
+  };
+
+  // Asegurar que si no hay juzgados asignados, el filtro vuelva a "todos"
+  useEffect(() => {
+    if (juzgadoFilter === "mis_juzgados" && userJuzgados.length === 0) {
+      console.log(`[Dashboard] Usuario no tiene juzgados asignados, cambiando filtro a "todos"`);
+      setJuzgadoFilter("todos");
+    }
+  }, [juzgadoFilter, userJuzgados.length]);
+
   // Filtrar cédulas según los filtros seleccionados
   useEffect(() => {
     let filtered = [...allCedulas];
+    const initialCount = filtered.length;
+    
+    console.log(`[Dashboard] Filtrando cédulas - Inicial: ${initialCount}, Filtro juzgados: ${juzgadoFilter}`, {
+      allCedulasCount: allCedulas.length,
+      juzgadoFilter,
+      userJuzgadosCount: userJuzgados.length
+    });
 
     // Filtro por usuario
     if (selectedUserId !== "all") {
+      const beforeUserFilter = filtered.length;
       filtered = filtered.filter(c => c.owner_user_id === selectedUserId);
+      console.log(`[Dashboard] Filtro por usuario: ${beforeUserFilter} -> ${filtered.length}`);
+    }
+
+    // Filtro por juzgados - SOLO si está en "mis_juzgados"
+    if (juzgadoFilter === "mis_juzgados" && userJuzgados.length > 0) {
+      const juzgadosNormalizados = userJuzgados.map(j => 
+        j?.trim().replace(/\s+/g, " ").toUpperCase()
+      );
+      
+      const beforeJuzgadoFilter = filtered.length;
+      
+      filtered = filtered.filter(c => {
+        if (!c.juzgado) return false;
+        const juzgadoNormalizado = normalizarJuzgado(c.juzgado);
+        
+        // Comparación exacta normalizada
+        if (juzgadosNormalizados.includes(juzgadoNormalizado)) return true;
+        
+        // Comparación por número de juzgado (más flexible) - misma lógica que mis-juzgados
+        return juzgadosNormalizados.some(jAsignado => {
+          const numAsignado = jAsignado.match(/N[°º]\s*(\d+)/i)?.[1];
+          const numJuzgado = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
+          if (numAsignado && numJuzgado && numAsignado === numJuzgado) {
+            // Verificar que ambos contengan "JUZGADO" y el mismo número
+            if (jAsignado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
+              return true;
+            }
+          }
+          return false;
+        });
+      });
+      
+      console.log(`[Dashboard] Filtro cédulas por juzgados (mis_juzgados): ${beforeJuzgadoFilter} -> ${filtered.length}`, {
+        juzgadoFilter,
+        userJuzgadosCount: userJuzgados.length,
+        juzgadosNormalizados: juzgadosNormalizados.slice(0, 5) // Solo primeros 5 para no saturar
+      });
+    } else if (juzgadoFilter === "todos") {
+      console.log(`[Dashboard] Filtro juzgados = "todos" - NO aplicando filtro de juzgados. Cédulas: ${filtered.length}`);
     }
 
     // Filtro por tiempo
@@ -362,15 +502,62 @@ export default function SuperAdminPage() {
     }
 
     setCedulas(filtered);
-  }, [allCedulas, timeFilter, selectedUserId, customStartDate, customEndDate]);
+  }, [allCedulas, timeFilter, selectedUserId, juzgadoFilter, userJuzgados, customStartDate, customEndDate]);
 
   // Filtrar expedientes según los filtros seleccionados
   useEffect(() => {
     let filtered = [...allExpedientes];
+    const initialCount = filtered.length;
+    
+    console.log(`[Dashboard] Filtrando expedientes - Inicial: ${initialCount}, Filtro juzgados: ${juzgadoFilter}`, {
+      allExpedientesCount: allExpedientes.length,
+      juzgadoFilter,
+      userJuzgadosCount: userJuzgados.length
+    });
 
     // Filtro por usuario
     if (selectedUserId !== "all") {
+      const beforeUserFilter = filtered.length;
       filtered = filtered.filter(e => e.owner_user_id === selectedUserId);
+      console.log(`[Dashboard] Filtro por usuario: ${beforeUserFilter} -> ${filtered.length}`);
+    }
+
+    // Filtro por juzgados - SOLO si está en "mis_juzgados"
+    if (juzgadoFilter === "mis_juzgados" && userJuzgados.length > 0) {
+      const juzgadosNormalizados = userJuzgados.map(j => 
+        j?.trim().replace(/\s+/g, " ").toUpperCase()
+      );
+      
+      const beforeJuzgadoFilter = filtered.length;
+      
+      filtered = filtered.filter(e => {
+        if (!e.juzgado) return false;
+        const juzgadoNormalizado = normalizarJuzgado(e.juzgado);
+        
+        // Comparación exacta normalizada
+        if (juzgadosNormalizados.includes(juzgadoNormalizado)) return true;
+        
+        // Comparación por número de juzgado (más flexible) - misma lógica que mis-juzgados
+        return juzgadosNormalizados.some(jAsignado => {
+          const numAsignado = jAsignado.match(/N[°º]\s*(\d+)/i)?.[1];
+          const numJuzgado = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
+          if (numAsignado && numJuzgado && numAsignado === numJuzgado) {
+            // Verificar que ambos contengan "JUZGADO" y el mismo número
+            if (jAsignado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
+              return true;
+            }
+          }
+          return false;
+        });
+      });
+      
+      console.log(`[Dashboard] Filtro expedientes por juzgados (mis_juzgados): ${beforeJuzgadoFilter} -> ${filtered.length}`, {
+        juzgadoFilter,
+        userJuzgadosCount: userJuzgados.length,
+        juzgadosNormalizados: juzgadosNormalizados.slice(0, 5) // Solo primeros 5 para no saturar
+      });
+    } else if (juzgadoFilter === "todos") {
+      console.log(`[Dashboard] Filtro juzgados = "todos" - NO aplicando filtro de juzgados. Expedientes: ${filtered.length}`);
     }
 
     // Filtro por tiempo
@@ -386,7 +573,7 @@ export default function SuperAdminPage() {
     }
 
     setExpedientes(filtered);
-  }, [allExpedientes, timeFilter, selectedUserId, customStartDate, customEndDate]);
+  }, [allExpedientes, timeFilter, selectedUserId, juzgadoFilter, userJuzgados, customStartDate, customEndDate]);
 
   const ranking = useMemo(() => {
     const perUser: Record<string, { rojos: number; amarillos: number; verdes: number; total: number; maxDias: number }> = {};
@@ -585,26 +772,174 @@ export default function SuperAdminPage() {
         alignItems: "center",
         justifyContent: "space-between",
         gap: 16,
-        flexWrap: "wrap"
+        flexWrap: "wrap",
+        position: "relative"
       }}>
-        <div>
-          <h1 style={{ 
-            margin: 0, 
-            fontSize: 22, 
-            fontWeight: 700, 
-            color: "var(--text)",
-            letterSpacing: "0.2px"
-          }}>
-            Dashboard SuperAdmin
-          </h1>
-          <p style={{ 
-            margin: "4px 0 0 0", 
-            fontSize: 13, 
-            color: "rgba(234,243,255,.65)",
-            fontWeight: 400
-          }}>
-            Visión general de rendimiento
-          </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          {/* Menú Hamburguesa */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen(!menuOpen);
+            }}
+            style={{
+              background: "rgba(255,255,255,.08)",
+              border: "1px solid rgba(255,255,255,.16)",
+              borderRadius: 8,
+              padding: "8px 10px",
+              cursor: "pointer",
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+              alignItems: "center",
+              justifyContent: "center",
+              transition: "all 0.2s ease",
+              minWidth: 40,
+              minHeight: 40
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "rgba(255,255,255,.12)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "rgba(255,255,255,.08)";
+            }}
+          >
+            <div style={{
+              width: 20,
+              height: 2,
+              background: "var(--text)",
+              borderRadius: 1,
+              transition: "all 0.3s ease"
+            }} />
+            <div style={{
+              width: 20,
+              height: 2,
+              background: "var(--text)",
+              borderRadius: 1,
+              transition: "all 0.3s ease"
+            }} />
+            <div style={{
+              width: 20,
+              height: 2,
+              background: "var(--text)",
+              borderRadius: 1,
+              transition: "all 0.3s ease"
+            }} />
+          </button>
+
+          {/* Menú desplegable */}
+          {menuOpen && (
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                position: "absolute",
+                top: "100%",
+                left: 24,
+                marginTop: 8,
+                background: "linear-gradient(180deg, rgba(11,47,85,.98), rgba(7,28,46,.98))",
+                border: "1px solid rgba(255,255,255,.16)",
+                borderRadius: 12,
+                padding: "12px 0",
+                minWidth: 220,
+                boxShadow: "0 8px 24px rgba(0,0,0,.4)",
+                zIndex: 1000,
+                backdropFilter: "blur(10px)"
+              }}
+            >
+              <Link
+                href="/superadmin"
+                onClick={() => setMenuOpen(false)}
+                style={{
+                  display: "block",
+                  padding: "12px 20px",
+                  color: "var(--text)",
+                  textDecoration: "none",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  transition: "background 0.2s ease",
+                  borderLeft: "3px solid transparent"
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                  e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "transparent";
+                  e.currentTarget.style.borderLeftColor = "transparent";
+                }}
+              >
+                📊 Dashboard SuperAdmin
+              </Link>
+              <Link
+                href="/superadmin/mis-juzgados"
+                onClick={() => setMenuOpen(false)}
+                style={{
+                  display: "block",
+                  padding: "12px 20px",
+                  color: "var(--text)",
+                  textDecoration: "none",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  transition: "background 0.2s ease",
+                  borderLeft: "3px solid transparent"
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                  e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "transparent";
+                  e.currentTarget.style.borderLeftColor = "transparent";
+                }}
+              >
+                📋 Mis Juzgados
+              </Link>
+              <Link
+                href="/app/expedientes/nueva"
+                onClick={() => setMenuOpen(false)}
+                style={{
+                  display: "block",
+                  padding: "12px 20px",
+                  color: "var(--text)",
+                  textDecoration: "none",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  transition: "background 0.2s ease",
+                  borderLeft: "3px solid transparent"
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                  e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "transparent";
+                  e.currentTarget.style.borderLeftColor = "transparent";
+                }}
+              >
+                ➕ Carga Expedientes
+              </Link>
+            </div>
+          )}
+
+          <div>
+            <h1 style={{ 
+              margin: 0, 
+              fontSize: 22, 
+              fontWeight: 700, 
+              color: "var(--text)",
+              letterSpacing: "0.2px"
+            }}>
+              Dashboard SuperAdmin
+            </h1>
+            <p style={{ 
+              margin: "4px 0 0 0", 
+              fontSize: 13, 
+              color: "rgba(234,243,255,.65)",
+              fontWeight: 400
+            }}>
+              Visión general de rendimiento
+            </p>
+          </div>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <Link 
@@ -743,6 +1078,55 @@ export default function SuperAdminPage() {
                     {displayName(profile)}
                   </option>
                 ))}
+              </select>
+            </div>
+
+            {/* Filtro por Juzgados */}
+            <div>
+              <label style={{
+                display: "block",
+                marginBottom: 8,
+                fontSize: 13,
+                fontWeight: 500,
+                color: "#1a1a1a"
+              }}>
+                Juzgados
+              </label>
+              <select
+                value={juzgadoFilter}
+                onChange={(e) => {
+                  const newFilter = e.target.value as "mis_juzgados" | "todos";
+                  setJuzgadoFilter(newFilter);
+                  console.log(`[Dashboard] Filtro de juzgados cambiado a: ${newFilter}`, {
+                    userJuzgadosCount: userJuzgados.length,
+                    userJuzgados: userJuzgados
+                  });
+                }}
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  background: "#ffffff",
+                  border: "1px solid rgba(0,0,0,.15)",
+                  borderRadius: 8,
+                  color: "#1a1a1a",
+                  fontSize: 14,
+                  cursor: "pointer",
+                  outline: "none",
+                  transition: "all 0.2s ease"
+                }}
+                onFocus={(e) => {
+                  e.currentTarget.style.borderColor = "rgba(0,82,156,.5)";
+                  e.currentTarget.style.boxShadow = "0 0 0 3px rgba(0,82,156,.1)";
+                }}
+                onBlur={(e) => {
+                  e.currentTarget.style.borderColor = "rgba(0,0,0,.15)";
+                  e.currentTarget.style.boxShadow = "none";
+                }}
+              >
+                <option value="todos">Todos los Juzgados</option>
+                <option value="mis_juzgados" disabled={userJuzgados.length === 0}>
+                  Mis Juzgados {userJuzgados.length === 0 ? "(sin asignar)" : `(${userJuzgados.length})`}
+                </option>
               </select>
             </div>
 

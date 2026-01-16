@@ -62,6 +62,15 @@ export default function NuevaExpedientePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
+  const [userRoles, setUserRoles] = useState<{
+    isSuperadmin: boolean;
+    isAdminExpedientes: boolean;
+    isAbogado: boolean;
+  }>({
+    isSuperadmin: false,
+    isAdminExpedientes: false,
+    isAbogado: false,
+  });
 
   const [jurisdiccion, setJurisdiccion] = useState("");
   const [numeroExpediente, setNumeroExpediente] = useState("");
@@ -87,19 +96,28 @@ export default function NuevaExpedientePage() {
 
       const uid = session.user.id;
 
-      // Verificar que el usuario tenga el rol de admin_expedientes - usar consulta directa para evitar errores 400
+      // Verificar roles del usuario
       const { data: roleData, error: roleErr } = await supabase
         .from("user_roles")
-        .select("is_admin_expedientes")
+        .select("is_superadmin, is_admin_expedientes, is_abogado")
         .eq("user_id", uid)
         .maybeSingle();
       
-      const hasRole = !roleErr && roleData?.is_admin_expedientes === true;
+      const isAdminExp = !roleErr && roleData?.is_admin_expedientes === true;
+      const isAbogado = !roleErr && roleData?.is_abogado === true;
+      const isSuperadmin = !roleErr && roleData?.is_superadmin === true;
       
-      if (!hasRole) {
+      if (!isAdminExp && !isAbogado) {
         window.location.href = "/app";
         return;
       }
+
+      // Guardar roles para mostrar botones de navegación
+      setUserRoles({
+        isSuperadmin: isSuperadmin || false,
+        isAdminExpedientes: isAdminExp || false,
+        isAbogado: isAbogado || false,
+      });
 
       const { data: prof, error: pErr } = await supabase
         .from("profiles")
@@ -164,23 +182,31 @@ export default function NuevaExpedientePage() {
         numero_expediente: numeroCompleto,
         fecha_ultima_modificacion: fechaISO,
         estado: "ABIERTO",
+        created_by_user_id: uid,
       };
 
-      // Intentar incluir observaciones
+      // Incluir observaciones siempre (incluso si está vacío, será null)
+      // La columna debería existir después de ejecutar la migración
       if (observaciones.trim()) {
         insertData.observaciones = observaciones.trim();
       } else {
         insertData.observaciones = null;
       }
 
+      console.log(`[Nueva Expediente] Guardando con observaciones:`, observaciones.trim() || "(vacío)");
+      
       let { data: created, error: insErr } = await supabase
         .from("expedientes")
         .insert(insertData)
         .select("id")
         .single();
 
-      // Si falla por columna observaciones inexistente, reintentar sin ella
-      if (insErr && insErr.message?.includes("observaciones")) {
+      // Si falla por columna observaciones inexistente, mostrar mensaje pero intentar sin ella
+      if (insErr && (insErr.message?.includes("observaciones") || insErr.message?.includes("does not exist"))) {
+        console.warn(`[Nueva Expediente] Columna observaciones no existe, guardando sin observaciones`);
+        console.warn(`[Nueva Expediente] Error:`, insErr.message);
+        
+        // Guardar sin observaciones pero advertir al usuario
         delete insertData.observaciones;
         const { data: createdRetry, error: insErrRetry } = await supabase
           .from("expedientes")
@@ -192,8 +218,18 @@ export default function NuevaExpedientePage() {
           setMsg(insErrRetry?.message || "No se pudo crear el expediente.");
           return;
         }
+        
+        // Advertir que las observaciones no se guardaron
+        if (observaciones.trim()) {
+          setMsg(`Expediente creado, pero las observaciones no se guardaron porque la columna no existe en la base de datos. Por favor ejecuta la migración para agregar la columna observaciones.`);
+        }
+        
         created = createdRetry;
         insErr = null;
+      } else if (insErr) {
+        console.error(`[Nueva Expediente] Error al guardar:`, insErr);
+      } else {
+        console.log(`[Nueva Expediente] Expediente guardado exitosamente con ID:`, created?.id);
       }
 
       if (insErr || !created?.id) {
@@ -201,7 +237,12 @@ export default function NuevaExpedientePage() {
         return;
       }
 
-      window.location.href = "/app/expedientes";
+      // Redirigir según el rol del usuario
+      if (userRoles.isAbogado) {
+        window.location.href = "/app/abogado";
+      } else {
+        window.location.href = "/app/expedientes";
+      }
     } finally {
       setSaving(false);
     }
@@ -223,11 +264,23 @@ export default function NuevaExpedientePage() {
     <main className="container">
       <section className="card">
         <div className="page">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-            <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700 }}>Nueva carga</h1>
-            <Link href="/app/expedientes" className="btn">
-              Volver
-            </Link>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24, flexWrap: "wrap", gap: 8 }}>
+            <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700 }}>Cargar Expediente</h1>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {userRoles.isSuperadmin && (
+                <Link className="btn" href="/superadmin">
+                  DASHBOARD
+                </Link>
+              )}
+              {userRoles.isAbogado && (
+                <Link className="btn" href="/app/abogado">
+                  HOME
+                </Link>
+              )}
+              <Link href={userRoles.isAbogado ? "/app/abogado" : "/app/expedientes"} className="btn">
+                Volver
+              </Link>
+            </div>
           </div>
 
           {msg && <div className="error">{msg}</div>}
@@ -379,7 +432,7 @@ export default function NuevaExpedientePage() {
 
             <div className="actions">
               <button type="submit" className="btn primary" disabled={saving}>
-                {saving ? "Guardando…" : "Guardar"}
+                {saving ? "Cargando…" : "Cargar"}
               </button>
               <Link href="/app/expedientes" className="btn">
                 Cancelar
