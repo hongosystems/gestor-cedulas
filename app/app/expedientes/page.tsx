@@ -164,7 +164,7 @@ export default function MisExpedientesPage() {
       // Verificar roles del usuario
       const { data: roleData, error: roleErr } = await supabase
         .from("user_roles")
-        .select("is_admin_expedientes, is_abogado")
+        .select("is_admin_expedientes, is_abogado, is_superadmin")
         .eq("user_id", uid)
         .maybeSingle();
       
