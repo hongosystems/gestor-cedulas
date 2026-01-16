@@ -378,7 +378,12 @@ export default function MisJuzgadosPage() {
           if (cErr2) {
             setMsg(msg ? `${msg} Error al cargar cédulas: ${cErr2.message}` : `Error al cargar cédulas: ${cErr2.message}`);
           } else {
-            allCsData = allCs2;
+            // Agregar propiedades faltantes como null para mantener el tipo correcto
+            allCsData = allCs2?.map((c: any) => ({ 
+              ...c, 
+              tipo_documento: null, 
+              created_by_user_id: null 
+            })) ?? [];
           }
         } else {
           setMsg(msg ? `${msg} Error al cargar cédulas: ${errorMsg}` : `Error al cargar cédulas: ${errorMsg}`);
