@@ -713,7 +713,7 @@ export default function MisExpedientesPage() {
                 {rows.length === 0 && (
                   <tr>
                     <td colSpan={8} className="muted">
-                      {isAbogado 
+                      {userRoles.isAbogado 
                         ? "No hay expedientes cargados para tus juzgados asignados."
                         : "Todavía no cargaste expedientes."}
                     </td>
