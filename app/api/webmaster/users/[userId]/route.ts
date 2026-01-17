@@ -102,24 +102,36 @@ export async function PUT(
       return NextResponse.json({ error: `Error al actualizar perfil: ${profileError.message}` }, { status: 500 });
     }
 
-    // Actualizar roles
+    // Actualizar roles - siempre actualizar si se envía en el body
+    // Usar valores explícitos false si están definidos, para asegurar que se actualicen
+    const roleData: any = { user_id: targetUserId };
+    
+    if (is_superadmin !== undefined) {
+      roleData.is_superadmin = is_superadmin;
+    }
+    if (is_admin_expedientes !== undefined) {
+      roleData.is_admin_expedientes = is_admin_expedientes;
+    }
+    if (is_admin_cedulas !== undefined) {
+      roleData.is_admin_cedulas = is_admin_cedulas;
+    }
+    if (is_abogado !== undefined) {
+      roleData.is_abogado = is_abogado;
+    }
+
     const { error: roleError } = await supabaseAdmin
       .from("user_roles")
-      .upsert({
-        user_id: targetUserId,
-        is_superadmin: is_superadmin !== undefined ? is_superadmin : undefined,
-        is_admin_expedientes: is_admin_expedientes !== undefined ? is_admin_expedientes : undefined,
-        is_admin_cedulas: is_admin_cedulas !== undefined ? is_admin_cedulas : undefined,
-        is_abogado: is_abogado !== undefined ? is_abogado : undefined,
-      }, { onConflict: "user_id" });
+      .upsert(roleData, { onConflict: "user_id" });
 
     if (roleError) {
       return NextResponse.json({ error: `Error al actualizar roles: ${roleError.message}` }, { status: 500 });
     }
 
-    // Actualizar juzgados si es abogado
-    if (is_abogado !== undefined) {
-      // Eliminar todos los juzgados actuales
+    // Actualizar juzgados solo si se envía explícitamente en el body
+    // Esto permite actualizar otros campos sin afectar los juzgados existentes
+    if (juzgados !== undefined) {
+      // Si juzgados está en el body, actualizar la lista completa
+      // Primero eliminar todos los juzgados actuales
       const { error: deleteError } = await supabaseAdmin
         .from("user_juzgados")
         .delete()
@@ -129,14 +141,20 @@ export async function PUT(
         console.error("Error al eliminar juzgados:", deleteError);
       }
 
-      // Insertar nuevos juzgados si es abogado
-      if (is_abogado && juzgados && Array.isArray(juzgados) && juzgados.length > 0) {
-        const juzgadosToInsert = juzgados
+      // Insertar nuevos juzgados si el array no está vacío
+      if (Array.isArray(juzgados) && juzgados.length > 0) {
+        // Normalizar y eliminar duplicados
+        const juzgadosNormalizados = juzgados
           .filter((j: string) => j && j.trim())
-          .map((j: string) => ({
-            user_id: targetUserId,
-            juzgado: j.trim().toUpperCase(),
-          }));
+          .map((j: string) => j.trim().toUpperCase());
+        
+        // Eliminar duplicados usando Set
+        const juzgadosUnicos = [...new Set(juzgadosNormalizados)];
+        
+        const juzgadosToInsert = juzgadosUnicos.map((j: string) => ({
+          user_id: targetUserId,
+          juzgado: j,
+        }));
 
         if (juzgadosToInsert.length > 0) {
           const { error: juzgadosError } = await supabaseAdmin
@@ -145,9 +163,20 @@ export async function PUT(
 
           if (juzgadosError) {
             console.error("Error al asignar juzgados:", juzgadosError);
-            // No fallar si los juzgados fallan
+            return NextResponse.json({ error: `Error al asignar juzgados: ${juzgadosError.message}` }, { status: 500 });
           }
         }
+      }
+      // Si juzgados es un array vacío, simplemente se borraron todos (comportamiento esperado)
+    } else if (is_abogado === false) {
+      // Si se desmarca el rol de abogado, eliminar todos los juzgados
+      const { error: deleteError } = await supabaseAdmin
+        .from("user_juzgados")
+        .delete()
+        .eq("user_id", targetUserId);
+
+      if (deleteError) {
+        console.error("Error al eliminar juzgados:", deleteError);
       }
     }
 

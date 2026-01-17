@@ -34,6 +34,7 @@ export default function WebMasterPage() {
   const [formIsAbogado, setFormIsAbogado] = useState(false);
   const [formJuzgados, setFormJuzgados] = useState<string[]>([]);
   const [newJuzgado, setNewJuzgado] = useState("");
+  const [csvJuzgados, setCsvJuzgados] = useState("");
 
   useEffect(() => {
     checkAuthAndLoadUsers();
@@ -119,6 +120,7 @@ export default function WebMasterPage() {
       setFormJuzgados([]);
     }
     setNewJuzgado("");
+    setCsvJuzgados("");
     setShowModal(true);
   }
 
@@ -137,6 +139,35 @@ export default function WebMasterPage() {
 
   function removeJuzgado(index: number) {
     setFormJuzgados(formJuzgados.filter((_, i) => i !== index));
+  }
+
+  function loadJuzgadosFromCSV() {
+    if (!csvJuzgados.trim()) return;
+
+    // Procesar la lista separada por comas
+    const juzgados = csvJuzgados
+      .split(",")
+      .map(j => j.trim())
+      .filter(j => j.length > 0)
+      .map(j => j.toUpperCase());
+
+    // Eliminar duplicados dentro de la lista CSV
+    const juzgadosUnicos = [...new Set(juzgados)];
+
+    // Agregar solo los que no estén ya en la lista
+    const nuevosJuzgados = juzgadosUnicos.filter(j => !formJuzgados.includes(j));
+    
+    if (nuevosJuzgados.length > 0) {
+      // También eliminar duplicados del estado actual por si acaso
+      const juzgadosActualizados = [...new Set([...formJuzgados, ...nuevosJuzgados])];
+      setFormJuzgados(juzgadosActualizados);
+      setCsvJuzgados("");
+      setMsg(`Se agregaron ${nuevosJuzgados.length} juzgado(s) correctamente.`);
+      setTimeout(() => setMsg(""), 3000);
+    } else {
+      setMsg("Todos los juzgados ya están agregados.");
+      setTimeout(() => setMsg(""), 3000);
+    }
   }
 
   async function saveUser(e: React.FormEvent) {
@@ -180,8 +211,11 @@ export default function WebMasterPage() {
         body.password = formPassword;
       }
 
+      // Siempre enviar juzgados si es abogado (incluso si está vacío)
+      // Eliminar duplicados antes de enviar para evitar errores en la API
       if (formIsAbogado) {
-        body.juzgados = formJuzgados;
+        const juzgadosUnicos = formJuzgados ? [...new Set(formJuzgados)] : [];
+        body.juzgados = juzgadosUnicos;
       }
 
       const response = await fetch(url, {
@@ -568,6 +602,52 @@ export default function WebMasterPage() {
                 {formIsAbogado && (
                   <div className="field">
                     <div className="label">Juzgados Asignados</div>
+                    
+                    {/* Carga masiva desde CSV/texto separado por comas */}
+                    <div style={{ marginBottom: 16 }}>
+                      <div className="label" style={{ fontSize: 13, marginBottom: 6, color: "rgba(234,243,255,.7)" }}>
+                        Cargar múltiples juzgados (separados por coma):
+                      </div>
+                      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                        <textarea
+                          className="input"
+                          placeholder="Ej: JUZGADO CIVIL 21, JUZGADO CIVIL 45, JUZGADO NACIONAL EN LO CIVIL N° 89, ..."
+                          value={csvJuzgados}
+                          onChange={(e) => setCsvJuzgados(e.target.value)}
+                          style={{ 
+                            flex: 1, 
+                            minHeight: 80, 
+                            fontFamily: "monospace",
+                            fontSize: 13,
+                            resize: "vertical"
+                          }}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={loadJuzgadosFromCSV}
+                        disabled={!csvJuzgados.trim()}
+                        style={{ marginBottom: 16 }}
+                      >
+                        📥 Cargar Juzgados desde Lista
+                      </button>
+                    </div>
+
+                    {/* Separador visual */}
+                    <div style={{ 
+                      display: "flex", 
+                      alignItems: "center", 
+                      gap: 12, 
+                      marginBottom: 12,
+                      marginTop: 8
+                    }}>
+                      <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,.1)" }} />
+                      <span style={{ fontSize: 12, color: "rgba(234,243,255,.5)" }}>O agregar uno por uno</span>
+                      <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,.1)" }} />
+                    </div>
+
+                    {/* Agregar juzgado individual */}
                     <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
                       <input
                         className="input"
