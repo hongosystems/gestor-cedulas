@@ -8,10 +8,12 @@ export default function SelectRolePage() {
   const [roles, setRoles] = useState<{
     isSuperadmin: boolean;
     isAdminExpedientes: boolean;
+    isAdminCedulas: boolean;
     isAbogado: boolean;
   }>({
     isSuperadmin: false,
     isAdminExpedientes: false,
+    isAdminCedulas: false,
     isAbogado: false,
   });
   const router = useRouter();
@@ -29,7 +31,7 @@ export default function SelectRolePage() {
       // Verificar roles del usuario
       const { data: roleData, error: roleErr } = await supabase
         .from("user_roles")
-        .select("is_superadmin, is_admin_expedientes, is_abogado")
+        .select("is_superadmin, is_admin_expedientes, is_admin_cedulas, is_abogado")
         .eq("user_id", uid)
         .maybeSingle();
 
@@ -40,13 +42,13 @@ export default function SelectRolePage() {
 
       const isSuperadmin = roleData.is_superadmin === true;
       const isAdminExpedientes = roleData.is_admin_expedientes === true;
+      const isAdminCedulas = roleData.is_admin_cedulas === true;
       const isAbogado = roleData.is_abogado === true;
 
       // Contar cuántos roles tiene
-      const roleCount = [isSuperadmin, isAdminExpedientes, isAbogado].filter(Boolean).length;
+      const roleCount = [isSuperadmin, isAdminExpedientes, isAdminCedulas, isAbogado].filter(Boolean).length;
 
       // Si solo tiene un rol, redirigir automáticamente
-      // Todos los ABOGADO son SuperAdmin y todos los SuperAdmin son ABOGADO
       if (roleCount === 1) {
         if (isSuperadmin || isAbogado) {
           router.push("/superadmin");
@@ -54,6 +56,10 @@ export default function SelectRolePage() {
         }
         if (isAdminExpedientes) {
           router.push("/app/expedientes");
+          return;
+        }
+        if (isAdminCedulas) {
+          router.push("/app");
           return;
         }
         router.push("/app");
@@ -64,13 +70,14 @@ export default function SelectRolePage() {
       setRoles({
         isSuperadmin,
         isAdminExpedientes,
+        isAdminCedulas,
         isAbogado,
       });
       setLoading(false);
     })();
   }, [router]);
 
-  function selectRole(role: "superadmin" | "expedientes" | "abogado") {
+  function selectRole(role: "superadmin" | "expedientes" | "cedulas" | "abogado") {
     // Guardar rol seleccionado en localStorage
     localStorage.setItem("selectedRole", role);
     
@@ -78,6 +85,8 @@ export default function SelectRolePage() {
       router.push("/superadmin");
     } else if (role === "expedientes") {
       router.push("/app/expedientes");
+    } else if (role === "cedulas") {
+      router.push("/app");
     } else {
       router.push("/app");
     }
@@ -95,7 +104,7 @@ export default function SelectRolePage() {
     );
   }
 
-  const roleCount = [roles.isSuperadmin, roles.isAdminExpedientes, roles.isAbogado].filter(Boolean).length;
+  const roleCount = [roles.isSuperadmin, roles.isAdminExpedientes, roles.isAdminCedulas, roles.isAbogado].filter(Boolean).length;
 
   if (roleCount <= 1) {
     return null; // Ya se redirigió
@@ -103,7 +112,14 @@ export default function SelectRolePage() {
 
   return (
     <main className="container">
-      <section className="card">
+      <section 
+        className="card"
+        style={{
+          background: "linear-gradient(180deg, #0b2f55 0%, #071c2e 100%)",
+          border: "1px solid rgba(255,255,255,.2)",
+          boxShadow: "0 24px 48px rgba(0,0,0,.8), 0 8px 16px rgba(0,0,0,.6)",
+        }}
+      >
         <header className="nav">
           <img className="logoMini" src="/logo.png" alt="Logo" />
           <h1>Seleccionar Vista</h1>
@@ -118,14 +134,20 @@ export default function SelectRolePage() {
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            {roles.isSuperadmin && (
+            {(roles.isSuperadmin || roles.isAbogado) && (
               <button
                 className="btn primary"
                 onClick={() => selectRole("superadmin")}
                 style={{ padding: "16px 24px", fontSize: 16, textAlign: "left" }}
               >
                 <div style={{ fontWeight: 700, marginBottom: 4 }}>DASHBOARD</div>
-                <div style={{ fontSize: 13, opacity: 0.8 }}>Vista de Superadmin</div>
+                <div style={{ fontSize: 13, opacity: 0.8 }}>
+                  {roles.isSuperadmin && roles.isAbogado 
+                    ? "Vista de Superadmin / Abogado" 
+                    : roles.isSuperadmin 
+                    ? "Vista de Superadmin" 
+                    : "Vista de Abogado"}
+                </div>
               </button>
             )}
 
@@ -139,14 +161,15 @@ export default function SelectRolePage() {
                 <div style={{ fontSize: 13, opacity: 0.8 }}>Gestionar expedientes</div>
               </button>
             )}
-            {roles.isAbogado && (
+
+            {roles.isAdminCedulas && (
               <button
                 className="btn primary"
-                onClick={() => selectRole("superadmin")}
+                onClick={() => selectRole("cedulas")}
                 style={{ padding: "16px 24px", fontSize: 16, textAlign: "left" }}
               >
-                <div style={{ fontWeight: 700, marginBottom: 4 }}>DASHBOARD</div>
-                <div style={{ fontSize: 13, opacity: 0.8 }}>Dashboard SuperAdmin (página principal)</div>
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>MIS CÉDULAS</div>
+                <div style={{ fontSize: 13, opacity: 0.8 }}>Gestionar cédulas y oficios</div>
               </button>
             )}
           </div>

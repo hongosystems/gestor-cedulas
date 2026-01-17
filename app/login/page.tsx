@@ -27,7 +27,7 @@ export default function LoginPage() {
       // Verificar todos los roles del usuario
       const { data: roleData, error: roleErr } = await supabase
         .from("user_roles")
-        .select("is_superadmin, is_admin_expedientes, is_abogado")
+        .select("is_superadmin, is_admin_expedientes, is_admin_cedulas, is_abogado")
         .eq("user_id", uid)
         .maybeSingle();
 
@@ -38,10 +38,11 @@ export default function LoginPage() {
 
       const isSuperadmin = roleData.is_superadmin === true;
       const isAdminExp = roleData.is_admin_expedientes === true;
+      const isAdminCedulas = roleData.is_admin_cedulas === true;
       const isAbogado = roleData.is_abogado === true;
 
       // Contar cuántos roles tiene
-      const roleCount = [isSuperadmin, isAdminExp, isAbogado].filter(Boolean).length;
+      const roleCount = [isSuperadmin, isAdminExp, isAdminCedulas, isAbogado].filter(Boolean).length;
 
       // Si tiene múltiples roles, redirigir a selección de rol
       if (roleCount > 1) {
@@ -50,7 +51,6 @@ export default function LoginPage() {
       }
 
       // Si solo tiene un rol, redirigir directamente
-      // Todos los ABOGADO son SuperAdmin y todos los SuperAdmin son ABOGADO
       if (isSuperadmin || isAbogado) {
         window.location.href = "/superadmin";
         return;
@@ -58,6 +58,11 @@ export default function LoginPage() {
       
       if (isAdminExp) {
         window.location.href = "/app/expedientes";
+        return;
+      }
+
+      if (isAdminCedulas) {
+        window.location.href = "/app";
         return;
       }
       
@@ -92,7 +97,7 @@ export default function LoginPage() {
     // Verificar todos los roles del usuario
     const { data: roleData, error: roleErr } = await supabase
       .from("user_roles")
-      .select("is_superadmin, is_admin_expedientes, is_abogado")
+      .select("is_superadmin, is_admin_expedientes, is_admin_cedulas, is_abogado")
       .eq("user_id", uid)
       .maybeSingle();
 
@@ -103,10 +108,11 @@ export default function LoginPage() {
 
     const isSuperadmin = roleData.is_superadmin === true;
     const isAdminExp = roleData.is_admin_expedientes === true;
+    const isAdminCedulas = roleData.is_admin_cedulas === true;
     const isAbogado = roleData.is_abogado === true;
 
     // Contar cuántos roles tiene
-    const roleCount = [isSuperadmin, isAdminExp, isAbogado].filter(Boolean).length;
+    const roleCount = [isSuperadmin, isAdminExp, isAdminCedulas, isAbogado].filter(Boolean).length;
 
     // Si tiene múltiples roles, redirigir a selección de rol
     if (roleCount > 1) {
@@ -115,7 +121,6 @@ export default function LoginPage() {
     }
 
     // Si solo tiene un rol, redirigir directamente
-    // Todos los ABOGADO son SuperAdmin y todos los SuperAdmin son ABOGADO
     if (isSuperadmin || isAbogado) {
       window.location.href = "/superadmin";
       return;
@@ -123,6 +128,11 @@ export default function LoginPage() {
     
     if (isAdminExp) {
       window.location.href = "/app/expedientes";
+      return;
+    }
+
+    if (isAdminCedulas) {
+      window.location.href = "/app";
       return;
     }
     
