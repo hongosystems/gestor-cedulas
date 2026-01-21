@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import jsPDF from "jspdf";
 
 type Cedula = {
   id: string;
@@ -785,6 +786,234 @@ export default function SuperAdminPage() {
     window.location.href = "/login";
   }
 
+  function imprimirDashboard() {
+    const doc = new jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: "a4"
+    });
+
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 15;
+    let yPos = margin;
+
+    // Colores (RGB como números individuales para jsPDF)
+    const colorPrimaryR = 0, colorPrimaryG = 82, colorPrimaryB = 156;
+    const colorRedR = 225, colorRedG = 57, colorRedB = 64;
+    const colorYellowR = 255, colorYellowG = 200, colorYellowB = 60;
+    const colorGreenR = 0, colorGreenG = 169, colorGreenB = 82;
+    const colorGrayR = 100, colorGrayG = 100, colorGrayB = 100;
+
+    // Función helper para agregar nueva página si es necesario
+    const checkNewPage = (requiredSpace: number) => {
+      if (yPos + requiredSpace > pageHeight - margin) {
+        doc.addPage();
+        yPos = margin;
+        return true;
+      }
+      return false;
+    };
+
+    // Título principal
+    doc.setFontSize(20);
+    doc.setTextColor(colorPrimaryR, colorPrimaryG, colorPrimaryB);
+    doc.setFont("helvetica", "bold");
+    doc.text("Dashboard - Reporte de Gestión", pageWidth / 2, yPos, { align: "center" });
+    yPos += 10;
+
+    // Fecha de generación
+    const fecha = new Date().toLocaleString("es-AR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+    doc.setFontSize(10);
+    doc.setTextColor(colorGrayR, colorGrayG, colorGrayB);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Generado el: ${fecha}`, pageWidth / 2, yPos, { align: "center" });
+    yPos += 15;
+
+    // Sección: Métricas Generales
+    doc.setFontSize(14);
+    doc.setTextColor(colorPrimaryR, colorPrimaryG, colorPrimaryB);
+    doc.setFont("helvetica", "bold");
+    doc.text("Métricas Generales", margin, yPos);
+    yPos += 8;
+
+    doc.setFontSize(10);
+    doc.setTextColor(0, 0, 0);
+    doc.setFont("helvetica", "normal");
+    
+    // Totales
+    doc.setFont("helvetica", "bold");
+    doc.text("Totales:", margin, yPos);
+    yPos += 6;
+    doc.setFont("helvetica", "normal");
+    doc.text(`  • Total Documentos Abiertos: ${metrics.totalAbiertas}`, margin + 5, yPos);
+    yPos += 5;
+    doc.text(`  • Total Cédulas: ${metrics.totalCedulas}`, margin + 5, yPos);
+    yPos += 5;
+    doc.text(`  • Total Oficios: ${metrics.totalOficios}`, margin + 5, yPos);
+    yPos += 5;
+    doc.text(`  • Total Expedientes: ${metrics.totalExpedientes}`, margin + 5, yPos);
+    yPos += 5;
+    doc.text(`  • Total Usuarios: ${metrics.totalUsuarios}`, margin + 5, yPos);
+    yPos += 5;
+    doc.text(`  • Promedio por Usuario: ${metrics.promedioPorUsuario} documentos`, margin + 5, yPos);
+    yPos += 10;
+
+    checkNewPage(30);
+
+    // Estados por Semáforo
+    doc.setFont("helvetica", "bold");
+    doc.text("Estados por Semáforo:", margin, yPos);
+    yPos += 6;
+    doc.setFont("helvetica", "normal");
+    
+    doc.setTextColor(colorRedR, colorRedG, colorRedB);
+    doc.text(`  • Estado Crítico (Rojo): ${metrics.totalRojas} (${metrics.pctRojas}%)`, margin + 5, yPos);
+    yPos += 5;
+    
+    doc.setTextColor(colorYellowR, colorYellowG, colorYellowB);
+    doc.text(`  • Estado Advertencia (Amarillo): ${metrics.totalAmarillas} (${metrics.pctAmarillas}%)`, margin + 5, yPos);
+    yPos += 5;
+    
+    doc.setTextColor(colorGreenR, colorGreenG, colorGreenB);
+    doc.text(`  • Estado Normal (Verde): ${metrics.totalVerdes} (${metrics.pctVerdes}%)`, margin + 5, yPos);
+    yPos += 10;
+
+    checkNewPage(40);
+
+    // Desglose por Tipo
+    doc.setTextColor(0, 0, 0);
+    doc.setFont("helvetica", "bold");
+    doc.text("Desglose por Tipo de Documento:", margin, yPos);
+    yPos += 6;
+    doc.setFont("helvetica", "normal");
+    
+    doc.text("Cédulas:", margin + 5, yPos);
+    yPos += 5;
+    doc.setTextColor(colorRedR, colorRedG, colorRedB);
+    doc.text(`  - Rojas: ${metrics.cedulasRojas} (${metrics.pctCedulasRojas}%)`, margin + 10, yPos);
+    yPos += 5;
+    doc.setTextColor(colorYellowR, colorYellowG, colorYellowB);
+    doc.text(`  - Amarillas: ${metrics.cedulasAmarillas} (${metrics.pctCedulasAmarillas}%)`, margin + 10, yPos);
+    yPos += 5;
+    doc.setTextColor(colorGreenR, colorGreenG, colorGreenB);
+    doc.text(`  - Verdes: ${metrics.cedulasVerdes} (${metrics.pctCedulasVerdes}%)`, margin + 10, yPos);
+    yPos += 8;
+
+    doc.setTextColor(0, 0, 0);
+    doc.text("Oficios:", margin + 5, yPos);
+    yPos += 5;
+    doc.setTextColor(colorRedR, colorRedG, colorRedB);
+    doc.text(`  - Rojos: ${metrics.oficiosRojos} (${metrics.pctOficiosRojos}%)`, margin + 10, yPos);
+    yPos += 5;
+    doc.setTextColor(colorYellowR, colorYellowG, colorYellowB);
+    doc.text(`  - Amarillos: ${metrics.oficiosAmarillos} (${metrics.pctOficiosAmarillos}%)`, margin + 10, yPos);
+    yPos += 5;
+    doc.setTextColor(colorGreenR, colorGreenG, colorGreenB);
+    doc.text(`  - Verdes: ${metrics.oficiosVerdes} (${metrics.pctOficiosVerdes}%)`, margin + 10, yPos);
+    yPos += 8;
+
+    doc.setTextColor(0, 0, 0);
+    doc.text("Expedientes:", margin + 5, yPos);
+    yPos += 5;
+    doc.setTextColor(colorRedR, colorRedG, colorRedB);
+    doc.text(`  - Rojos: ${metrics.expedientesRojos} (${metrics.pctExpedientesRojos}%)`, margin + 10, yPos);
+    yPos += 5;
+    doc.setTextColor(colorYellowR, colorYellowG, colorYellowB);
+    doc.text(`  - Amarillos: ${metrics.expedientesAmarillos} (${metrics.pctExpedientesAmarillos}%)`, margin + 10, yPos);
+    yPos += 5;
+    doc.setTextColor(colorGreenR, colorGreenG, colorGreenB);
+    doc.text(`  - Verdes: ${metrics.expedientesVerdes} (${metrics.pctExpedientesVerdes}%)`, margin + 10, yPos);
+    yPos += 15;
+
+    checkNewPage(50);
+
+    // Tabla de Rendimiento por Usuario
+    doc.setFontSize(14);
+    doc.setTextColor(colorPrimaryR, colorPrimaryG, colorPrimaryB);
+    doc.setFont("helvetica", "bold");
+    doc.text("Rendimiento por Usuario", margin, yPos);
+    yPos += 10;
+
+    // Encabezados de tabla
+    doc.setFontSize(9);
+    doc.setTextColor(255, 255, 255);
+    doc.setFillColor(colorPrimaryR, colorPrimaryG, colorPrimaryB);
+    doc.rect(margin, yPos - 5, pageWidth - 2 * margin, 8, "F");
+    
+    doc.setFont("helvetica", "bold");
+    doc.text("Usuario", margin + 2, yPos);
+    doc.text("ROJO", margin + 60, yPos, { align: "right" });
+    doc.text("AMARILLO", margin + 75, yPos, { align: "right" });
+    doc.text("VERDE", margin + 95, yPos, { align: "right" });
+    doc.text("TOTAL", margin + 110, yPos, { align: "right" });
+    doc.text("MÁS ANTIGUA", margin + 130, yPos, { align: "right" });
+    yPos += 10;
+
+    // Filas de datos
+    doc.setFontSize(9);
+    doc.setTextColor(0, 0, 0);
+    doc.setFont("helvetica", "normal");
+    
+    ranking.forEach((r, idx) => {
+      checkNewPage(8);
+      
+      // Alternar color de fondo
+      if (idx % 2 === 0) {
+        doc.setFillColor(245, 245, 245);
+        doc.rect(margin, yPos - 4, pageWidth - 2 * margin, 6, "F");
+      }
+      
+      // Resaltar si es crítico
+      if (r.rojos > 0 || r.maxDias >= UMBRAL_ROJO) {
+        doc.setFillColor(255, 240, 240);
+        doc.rect(margin, yPos - 4, pageWidth - 2 * margin, 6, "F");
+      }
+
+      doc.setTextColor(0, 0, 0);
+      doc.text(r.name.length > 25 ? r.name.substring(0, 22) + "..." : r.name, margin + 2, yPos);
+      
+      doc.setTextColor(colorRedR, colorRedG, colorRedB);
+      doc.text(r.rojos.toString(), margin + 60, yPos, { align: "right" });
+      
+      doc.setTextColor(colorYellowR, colorYellowG, colorYellowB);
+      doc.text(r.amarillos.toString(), margin + 75, yPos, { align: "right" });
+      
+      doc.setTextColor(colorGreenR, colorGreenG, colorGreenB);
+      doc.text(r.verdes.toString(), margin + 95, yPos, { align: "right" });
+      
+      doc.setTextColor(0, 0, 0);
+      doc.text(r.total.toString(), margin + 110, yPos, { align: "right" });
+      doc.text(r.maxDias >= 0 ? r.maxDias.toString() : "-", margin + 130, yPos, { align: "right" });
+      
+      yPos += 6;
+    });
+
+    // Pie de página
+    const totalPages = doc.getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setTextColor(colorGrayR, colorGrayG, colorGrayB);
+      doc.text(
+        `Página ${i} de ${totalPages}`,
+        pageWidth / 2,
+        pageHeight - 10,
+        { align: "center" }
+      );
+    }
+
+    // Descargar PDF
+    const fileName = `dashboard-reporte-${new Date().toISOString().split("T")[0]}.pdf`;
+    doc.save(fileName);
+  }
+
   if (checking) {
     return (
       <div style={{ 
@@ -978,18 +1207,21 @@ export default function SuperAdminPage() {
           </div>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <Link 
-            href="/superadmin/config" 
+          <button
+            onClick={imprimirDashboard}
             style={{
               padding: "10px 16px",
               background: "rgba(255,255,255,.08)",
               border: "1px solid rgba(255,255,255,.16)",
               borderRadius: 10,
               color: "var(--text)",
-              textDecoration: "none",
               fontSize: 14,
               fontWeight: 600,
+              cursor: "pointer",
               transition: "all 0.2s ease",
+              display: "flex",
+              alignItems: "center",
+              gap: 6
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.background = "rgba(255,255,255,.12)";
@@ -1000,8 +1232,8 @@ export default function SuperAdminPage() {
               e.currentTarget.style.borderColor = "rgba(255,255,255,.16)";
             }}
           >
-            ⚙️ Config reportes
-          </Link>
+            🖨️ Imprimir
+          </button>
           <button 
             onClick={logout}
             style={{
