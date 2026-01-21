@@ -850,13 +850,13 @@ export default function SuperAdminPage() {
     doc.rect(margin, yPos - 5, pageWidth - 2 * margin, 8, "F");
     
     // Calcular posiciones de columnas para que no se pisen
-    // Distribuir el ancho disponible (180mm) entre las columnas
-    const colUsuario = margin + 2;           // Usuario: ~50mm
-    const colRojo = margin + 52;              // ROJO: ~10mm
-    const colAmarillo = margin + 65;          // AMARILLO: ~10mm
-    const colVerde = margin + 80;              // VERDE: ~10mm
-    const colTotal = margin + 95;              // TOTAL: ~10mm
-    const colAntigua = margin + 110;           // MÁS ANTIGUA: ~10mm
+    // Distribuir el ancho disponible (180mm) entre las columnas con más padding
+    const colUsuario = margin + 2;           // Usuario: ~55mm de ancho
+    const colRojo = margin + 60;              // ROJO: ~15mm de ancho, con padding
+    const colAmarillo = margin + 78;          // AMARILLO: ~15mm de ancho, con padding
+    const colVerde = margin + 96;             // VERDE: ~15mm de ancho, con padding
+    const colTotal = margin + 114;            // TOTAL: ~15mm de ancho, con padding
+    const colAntigua = margin + 132;          // MÁS ANTIGUA: ~15mm de ancho, con padding
     
     doc.setFont("helvetica", "bold");
     doc.text("Usuario", colUsuario, yPos);
