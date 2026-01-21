@@ -851,20 +851,21 @@ export default function SuperAdminPage() {
     
     // Calcular posiciones de columnas para que no se pisen
     // Distribuir el ancho disponible (180mm) entre las columnas con más padding
-    const colUsuario = margin + 2;           // Usuario: ~55mm de ancho
-    const colRojo = margin + 60;              // ROJO: ~15mm de ancho, con padding
-    const colAmarillo = margin + 78;          // AMARILLO: ~15mm de ancho, con padding
-    const colVerde = margin + 96;             // VERDE: ~15mm de ancho, con padding
-    const colTotal = margin + 114;            // TOTAL: ~15mm de ancho, con padding
-    const colAntigua = margin + 132;          // MÁS ANTIGUA: ~15mm de ancho, con padding
+    // Cada columna numérica tiene un ancho de ~20mm con padding entre ellas
+    const colUsuario = margin + 2;           // Usuario: ~50mm de ancho
+    const colRojo = margin + 55;             // ROJO: centro en 55mm, ancho ~20mm
+    const colAmarillo = margin + 78;          // AMARILLO: centro en 78mm, ancho ~20mm
+    const colVerde = margin + 101;           // VERDE: centro en 101mm, ancho ~20mm
+    const colTotal = margin + 124;           // TOTAL: centro en 124mm, ancho ~20mm
+    const colAntigua = margin + 147;         // MÁS ANTIGUA: centro en 147mm, ancho ~20mm
     
     doc.setFont("helvetica", "bold");
     doc.text("Usuario", colUsuario, yPos);
-    doc.text("ROJO", colRojo, yPos, { align: "right" });
-    doc.text("AMARILLO", colAmarillo, yPos, { align: "right" });
-    doc.text("VERDE", colVerde, yPos, { align: "right" });
-    doc.text("TOTAL", colTotal, yPos, { align: "right" });
-    doc.text("MÁS ANTIGUA", colAntigua, yPos, { align: "right" });
+    doc.text("ROJO", colRojo, yPos, { align: "center" });
+    doc.text("AMARILLO", colAmarillo, yPos, { align: "center" });
+    doc.text("VERDE", colVerde, yPos, { align: "center" });
+    doc.text("TOTAL", colTotal, yPos, { align: "center" });
+    doc.text("MÁS ANTIGUA", colAntigua, yPos, { align: "center" });
     yPos += 10;
 
     // Filas de datos
@@ -891,17 +892,17 @@ export default function SuperAdminPage() {
       doc.text(r.name.length > 30 ? r.name.substring(0, 27) + "..." : r.name, colUsuario, yPos);
       
       doc.setTextColor(colorRedR, colorRedG, colorRedB);
-      doc.text(r.rojos.toString(), colRojo, yPos, { align: "right" });
+      doc.text(r.rojos.toString(), colRojo, yPos, { align: "center" });
       
       doc.setTextColor(colorYellowR, colorYellowG, colorYellowB);
-      doc.text(r.amarillos.toString(), colAmarillo, yPos, { align: "right" });
+      doc.text(r.amarillos.toString(), colAmarillo, yPos, { align: "center" });
       
       doc.setTextColor(colorGreenR, colorGreenG, colorGreenB);
-      doc.text(r.verdes.toString(), colVerde, yPos, { align: "right" });
+      doc.text(r.verdes.toString(), colVerde, yPos, { align: "center" });
       
       doc.setTextColor(0, 0, 0);
-      doc.text(r.total.toString(), colTotal, yPos, { align: "right" });
-      doc.text(r.maxDias >= 0 ? r.maxDias.toString() : "-", colAntigua, yPos, { align: "right" });
+      doc.text(r.total.toString(), colTotal, yPos, { align: "center" });
+      doc.text(r.maxDias >= 0 ? r.maxDias.toString() : "-", colAntigua, yPos, { align: "center" });
       
       yPos += 6;
     });
