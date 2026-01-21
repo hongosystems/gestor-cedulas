@@ -7,6 +7,7 @@ Sistema de gestión de cédulas y oficios con sistema de semáforo automático p
 - ✅ Gestión de cédulas/oficios con carátula y juzgado
 - ✅ Sistema de semáforo automático (Verde 0-29 días, Amarillo 30-59 días, Rojo 60+ días)
 - ✅ Autorrelleno automático desde archivos DOCX
+- ✅ Autocompletado de expedientes desde base de datos pjn-scraper
 - ✅ Visualización de archivos PDF/DOCX directamente en el navegador
 - ✅ Ordenamiento por semáforo, días y fecha de carga
 - ✅ Sistema de usuarios con roles (admin/superadmin)
@@ -16,14 +17,22 @@ Sistema de gestión de cédulas y oficios con sistema de semáforo automático p
 Crea un archivo `.env.local` en la raíz del proyecto con las siguientes variables:
 
 ```env
+# Base de datos principal
 NEXT_PUBLIC_SUPABASE_URL=tu_url_de_supabase
 NEXT_PUBLIC_SUPABASE_ANON_KEY=tu_anon_key_de_supabase
 SUPABASE_SERVICE_ROLE_KEY=tu_service_role_key_de_supabase
+
+# Base de datos pjn-scraper (para autocompletar expedientes)
+NEXT_PUBLIC_PJN_SCRAPER_SUPABASE_URL=tu_url_de_pjn_scraper_supabase
+NEXT_PUBLIC_PJN_SCRAPER_SUPABASE_ANON_KEY=tu_anon_key_de_pjn_scraper_supabase
+# Opcional: Nombre de la tabla en pjn-scraper (por defecto: "expedientes")
+# PJN_SCRAPER_TABLE_NAME=expedientes
 ```
 
 **Importante:** 
 - Las variables que empiezan con `NEXT_PUBLIC_` son accesibles desde el cliente
 - `SUPABASE_SERVICE_ROLE_KEY` solo se usa en API routes del servidor (nunca debe exponerse al cliente)
+- Las variables de `pjn-scraper` son opcionales, pero requeridas para la funcionalidad de autocompletado de expedientes
 
 ## Instalación y Desarrollo
 
@@ -70,6 +79,7 @@ app/
   ├── api/              # API routes
   │   ├── extract-caratula/    # Extracción de carátula desde DOCX
   │   ├── extract-juzgado/     # Extracción de juzgado desde DOCX
+  │   ├── search-expediente-pjn/ # Búsqueda de expedientes en pjn-scraper
   │   └── open-file/           # Endpoint para abrir archivos
   ├── app/              # Páginas principales
   │   ├── nueva/        # Crear nueva cédula
@@ -79,7 +89,8 @@ app/
   └── layout.tsx        # Layout principal
 lib/
   ├── semaforo.ts       # Lógica del semáforo
-  └── supabase.ts       # Cliente de Supabase
+  ├── supabase.ts       # Cliente de Supabase (base principal)
+  └── pjn-scraper-supabase.ts # Cliente de Supabase (proyecto pjn-scraper)
 ```
 
 ## Notas de Seguridad

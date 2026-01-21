@@ -48,7 +48,7 @@ body{
 
 /* ===== Layout ===== */
 .container{
-  width:min(1100px, calc(100% - 32px));
+  width:min(1600px, calc(100% - 32px));
   margin: 38px auto 38px auto;
   padding-bottom: 20px;
 }
@@ -163,7 +163,7 @@ select.input option{
 .table{
   width:100%;
   border-collapse: collapse;
-  min-width: 780px;
+  min-width: 1200px;
 }
 .table thead th{
   text-align:left;

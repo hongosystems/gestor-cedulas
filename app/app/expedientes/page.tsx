@@ -565,7 +565,7 @@ export default function MisExpedientesPage() {
                   <th>Juzgado</th>
                   <th 
                     className="sortable"
-                    style={{ width: 200 }}
+                    style={{ width: 220 }}
                     onClick={() => handleSort("fecha_ultima_modificacion")}
                     title="Haz clic para ordenar"
                   >
@@ -585,9 +585,9 @@ export default function MisExpedientesPage() {
                       {sortField === "dias" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
                     </span>
                   </th>
-                  <th style={{ width: 170 }}>Expediente</th>
-                  <th style={{ width: 150 }}>Cargado por</th>
-                  <th style={{ width: 250 }}>Observaciones</th>
+                  <th style={{ width: 200 }}>Expediente</th>
+                  <th style={{ width: 180 }}>Cargado por</th>
+                  <th style={{ width: 400 }}>Observaciones</th>
                 </tr>
               </thead>
 
@@ -692,14 +692,19 @@ export default function MisExpedientesPage() {
                       )}
                     </td>
 
-                    <td style={{ fontSize: 13, maxWidth: 250, wordBreak: "break-word" }}>
+                    <td style={{ fontSize: 13, maxWidth: 400 }}>
                       {e.observaciones?.trim() ? (
                         <div style={{ 
-                          padding: "4px 8px",
-                          background: "rgba(255,255,255,.04)",
-                          borderRadius: 6,
-                          border: "1px solid rgba(255,255,255,.08)",
-                          lineHeight: 1.5
+                          padding: "8px 10px",
+                          background: "rgba(255,255,255,.03)",
+                          borderRadius: 8,
+                          border: "1px solid rgba(255,255,255,.06)",
+                          lineHeight: 1.6,
+                          whiteSpace: "pre-wrap",
+                          wordBreak: "break-word",
+                          color: "rgba(234,243,255,.88)",
+                          fontSize: 12.5,
+                          letterSpacing: "0.01em"
                         }}>
                           {e.observaciones}
                         </div>

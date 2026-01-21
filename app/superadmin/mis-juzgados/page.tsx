@@ -13,6 +13,7 @@ type Cedula = {
   fecha_carga: string | null;
   estado: string;
   tipo_documento: "CEDULA" | "OFICIO" | null;
+  pdf_path: string | null;
   created_by_user_id?: string | null;
   created_by_name?: string | null;
 };
@@ -112,6 +113,7 @@ export default function MisJuzgadosPage() {
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc"); // Por defecto: más viejo primero
   const [juzgadoFilter, setJuzgadoFilter] = useState<"mis_juzgados" | "todos">("mis_juzgados");
   const [userJuzgados, setUserJuzgados] = useState<string[]>([]);
+  const [isAbogado, setIsAbogado] = useState(false);
 
   const loadData = async () => {
     try {
@@ -131,6 +133,8 @@ export default function MisJuzgadosPage() {
       
       const isSuperadmin = !roleErr && roleData?.is_superadmin === true;
       const isAbogado = !roleErr && roleData?.is_abogado === true;
+      
+      setIsAbogado(isAbogado || false);
       
       if (!isSuperadmin && !isAbogado) {
         window.location.href = "/app";
@@ -342,10 +346,10 @@ export default function MisJuzgadosPage() {
       }
 
       // Cargar todas las cédulas y oficios y filtrar por juzgados asignados
-      // Intentar incluir tipo_documento y created_by_user_id, pero si no existen, usar select sin ellas
+      // Intentar incluir tipo_documento, pdf_path y created_by_user_id, pero si no existen, usar select sin ellas
       let queryCedulas = supabase
         .from("cedulas")
-        .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado, tipo_documento, created_by_user_id")
+        .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado, tipo_documento, pdf_path, created_by_user_id")
         .neq("estado", "CERRADA")
         .order("fecha_carga", { ascending: true }); // Por defecto: más viejo primero
       
@@ -362,20 +366,41 @@ export default function MisJuzgadosPage() {
         const isColumnError = 
           errorMsg.includes("tipo_documento") || 
           errorMsg.includes("created_by_user_id") ||
+          errorMsg.includes("pdf_path") ||
           errorMsg.includes("does not exist") ||
           errorMsg.includes("column") ||
           errorCode === "PGRST116" ||
           errorDetails?.includes("tipo_documento") ||
-          errorDetails?.includes("created_by_user_id");
+          errorDetails?.includes("created_by_user_id") ||
+          errorDetails?.includes("pdf_path");
         
         if (isColumnError) {
-          const { data: allCs2, error: cErr2 } = await supabase
+          // Intentar primero con pdf_path pero sin tipo_documento y created_by_user_id
+          let { data: allCs2, error: cErr2 } = await supabase
             .from("cedulas")
-            .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado")
+            .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado, pdf_path")
             .neq("estado", "CERRADA")
             .order("fecha_carga", { ascending: true }); // Por defecto: más viejo primero
           
-          if (cErr2) {
+          // Si aún falla, intentar sin pdf_path también
+          if (cErr2 && (cErr2.message?.includes("pdf_path") || String(cErr2).includes("pdf_path"))) {
+            const { data: allCs3, error: cErr3 } = await supabase
+              .from("cedulas")
+              .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado")
+              .neq("estado", "CERRADA")
+              .order("fecha_carga", { ascending: true });
+            
+            if (cErr3) {
+              setMsg(msg ? `${msg} Error al cargar cédulas: ${cErr3.message}` : `Error al cargar cédulas: ${cErr3.message}`);
+            } else {
+              allCsData = allCs3?.map((c: any) => ({ 
+                ...c, 
+                tipo_documento: null, 
+                created_by_user_id: null,
+                pdf_path: null
+              })) ?? [];
+            }
+          } else if (cErr2) {
             setMsg(msg ? `${msg} Error al cargar cédulas: ${cErr2.message}` : `Error al cargar cédulas: ${cErr2.message}`);
           } else {
             // Agregar propiedades faltantes como null para mantener el tipo correcto
@@ -532,6 +557,52 @@ export default function MisJuzgadosPage() {
     return cedulas.filter(c => c.tipo_documento === "OFICIO");
   }, [cedulas]);
 
+  async function abrirArchivo(path: string) {
+    if (!path) {
+      setMsg("No hay archivo disponible para abrir");
+      return;
+    }
+
+    try {
+      // Obtener el token de sesión para autenticación
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) {
+        setMsg("No estás autenticado");
+        return;
+      }
+
+      // Usar el endpoint API que sirve el archivo con headers para abrirlo en el navegador
+      const url = `/api/open-file?path=${encodeURIComponent(path)}&token=${encodeURIComponent(sessionData.session.access_token)}`;
+      
+      // Obtener el archivo y crear un blob URL para abrirlo directamente en el navegador
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        setMsg("No se pudo abrir el archivo: " + errorText);
+        return;
+      }
+
+      // Obtener el Content-Type del response
+      const contentType = response.headers.get("Content-Type") || "application/octet-stream";
+      
+      // Obtener el blob y crear uno nuevo con el tipo MIME explícito
+      const blob = await response.blob();
+      const typedBlob = new Blob([blob], { type: contentType });
+      const blobUrl = URL.createObjectURL(typedBlob);
+      
+      // Abrir el blob URL en una nueva pestaña - el navegador lo abrirá según el tipo MIME
+      // Para PDFs se abrirá en el visor del navegador, para otros tipos dependerá del navegador
+      window.open(blobUrl, "_blank");
+      
+      // Limpiar el blob URL después de un tiempo para liberar memoria
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+    } catch (error: any) {
+      console.error("Error al abrir archivo:", error);
+      setMsg("Error al abrir el archivo: " + (error?.message || "Error desconocido"));
+    }
+  }
+
   // Preparar y ordenar items según sortField y sortDirection
   // Por defecto: ordenar por fecha ascendente (más viejo primero)
   // IMPORTANTE: Este useMemo debe estar ANTES del return condicional para cumplir las reglas de Hooks
@@ -559,6 +630,8 @@ export default function MisJuzgadosPage() {
           fecha: c.fecha_carga,
           numero: null,
           created_by: c.created_by_name,
+          pdf_path: c.pdf_path,
+          tipo_documento: c.tipo_documento,
           dias: c.fecha_carga ? daysSince(c.fecha_carga) : null,
           semaforo: c.fecha_carga ? semaforoByAge(daysSince(c.fecha_carga)) : "VERDE" as Semaforo,
         }))
@@ -570,6 +643,8 @@ export default function MisJuzgadosPage() {
           fecha: o.fecha_carga,
           numero: null,
           created_by: o.created_by_name,
+          pdf_path: o.pdf_path,
+          tipo_documento: o.tipo_documento,
           observaciones: null,
           dias: o.fecha_carga ? daysSince(o.fecha_carga) : null,
           semaforo: o.fecha_carga ? semaforoByAge(daysSince(o.fecha_carga)) : "VERDE" as Semaforo,
@@ -796,48 +871,9 @@ export default function MisJuzgadosPage() {
                 Mis Juzgados
               </h1>
               <p style={{ margin: "4px 0 0 0", fontSize: 13, color: "rgba(234,243,255,.65)", fontWeight: 400 }}>
-                {juzgadoFilter === "todos" 
-                  ? "Expedientes, cédulas y oficios de todos los juzgados" 
-                  : "Expedientes, cédulas y oficios de mis juzgados asignados"}
+                Expedientes, cédulas y oficios de mis juzgados asignados
               </p>
             </div>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            {/* Filtro de Juzgados */}
-            <select
-              value={juzgadoFilter}
-              onChange={(e) => {
-                const newFilter = e.target.value as "mis_juzgados" | "todos";
-                setJuzgadoFilter(newFilter);
-                // El useEffect se encargará de recargar los datos
-              }}
-              style={{
-                padding: "10px 16px",
-                background: "rgba(255,255,255,.08)",
-                border: "1px solid rgba(255,255,255,.16)",
-                borderRadius: 10,
-                color: "var(--text)",
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: "pointer",
-                outline: "none",
-                transition: "all 0.2s ease",
-                minWidth: 200
-              }}
-              onFocus={(e) => {
-                e.currentTarget.style.background = "rgba(255,255,255,.12)";
-                e.currentTarget.style.borderColor = "rgba(96,141,186,.5)";
-              }}
-              onBlur={(e) => {
-                e.currentTarget.style.background = "rgba(255,255,255,.08)";
-                e.currentTarget.style.borderColor = "rgba(255,255,255,.16)";
-              }}
-            >
-              <option value="mis_juzgados">
-                Mis Juzgados {userJuzgados.length > 0 ? `(${userJuzgados.length})` : ""}
-              </option>
-              <option value="todos">Todos los Juzgados</option>
-            </select>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <button
@@ -988,7 +1024,7 @@ export default function MisJuzgadosPage() {
                   <th>Carátula</th>
                   <th>Juzgado</th>
                   <th 
-                    style={{ width: 200, cursor: "pointer" }}
+                    style={{ width: 220, cursor: "pointer" }}
                     onClick={() => handleSort("fecha")}
                     title="Haz clic para ordenar"
                   >
@@ -1008,11 +1044,14 @@ export default function MisJuzgadosPage() {
                     </span>
                   </th>
                   {activeTab === "expedientes" && (
-                    <th style={{ width: 170 }}>Expediente</th>
+                    <th style={{ width: 200 }}>Expediente</th>
                   )}
-                  <th style={{ width: 150 }}>Cargado por</th>
+                  <th style={{ width: 180 }}>Cargado por</th>
+                  {isAbogado && (activeTab === "cedulas" || activeTab === "oficios") && (
+                    <th style={{ width: 140 }}>Acción</th>
+                  )}
                   {activeTab === "expedientes" && (
-                    <th style={{ width: 250 }}>Observaciones</th>
+                    <th style={{ width: 400 }}>Observaciones</th>
                   )}
                 </tr>
               </thead>
@@ -1048,15 +1087,39 @@ export default function MisJuzgadosPage() {
                           <span className="muted">—</span>
                         )}
                       </td>
+                      {isAbogado && (activeTab === "cedulas" || activeTab === "oficios") && (
+                        <td>
+                          {item.pdf_path ? (
+                            <button
+                              className="btn primary"
+                              onClick={() => abrirArchivo(item.pdf_path)}
+                              style={{
+                                fontSize: 12,
+                                padding: "6px 12px",
+                                whiteSpace: "nowrap"
+                              }}
+                            >
+                              {item.tipo_documento === "OFICIO" ? "VER OFICIO" : "VER CÉDULA"}
+                            </button>
+                          ) : (
+                            <span className="muted" style={{ fontSize: 12 }}>—</span>
+                          )}
+                        </td>
+                      )}
                       {activeTab === "expedientes" && (
-                        <td style={{ fontSize: 13, maxWidth: 250, wordBreak: "break-word" }}>
+                        <td style={{ fontSize: 13, maxWidth: 400 }}>
                           {item.observaciones?.trim() ? (
                             <div style={{ 
-                              padding: "4px 8px",
-                              background: "rgba(255,255,255,.04)",
-                              borderRadius: 6,
-                              border: "1px solid rgba(255,255,255,.08)",
-                              lineHeight: 1.5
+                              padding: "8px 10px",
+                              background: "rgba(255,255,255,.03)",
+                              borderRadius: 8,
+                              border: "1px solid rgba(255,255,255,.06)",
+                              lineHeight: 1.6,
+                              whiteSpace: "pre-wrap",
+                              wordBreak: "break-word",
+                              color: "rgba(234,243,255,.88)",
+                              fontSize: 12.5,
+                              letterSpacing: "0.01em"
                             }}>
                               {item.observaciones}
                             </div>
@@ -1070,7 +1133,13 @@ export default function MisJuzgadosPage() {
                 })}
                 {sortedItems.length === 0 && (
                   <tr>
-                    <td colSpan={activeTab === "expedientes" ? 8 : 6} className="muted">
+                    <td colSpan={
+                      activeTab === "expedientes" 
+                        ? 8 
+                        : isAbogado 
+                          ? 7 
+                          : 6
+                    } className="muted">
                       No hay {activeTab === "expedientes" ? "expedientes" : activeTab === "cedulas" ? "cédulas" : "oficios"} cargados para tus juzgados asignados.
                     </td>
                   </tr>

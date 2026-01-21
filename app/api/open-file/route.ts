@@ -50,25 +50,86 @@ export async function GET(req: NextRequest) {
     }
 
     const pathUserId = pathParts[0];
+    const supabaseAdmin = getSupabaseAdmin();
 
-    // Verificar que el path coincide con el user_id del token
-    if (userId !== pathUserId) {
-      return new NextResponse("No tienes permisos para acceder a este archivo", {
-        status: 403,
+    // Verificar si el usuario es abogado
+    const { data: roleData } = await supabaseAdmin
+      .from("user_roles")
+      .select("is_abogado, is_superadmin")
+      .eq("user_id", userId)
+      .maybeSingle();
+    
+    const isAbogado = roleData?.is_abogado === true;
+    const isSuperadmin = roleData?.is_superadmin === true;
+
+    // Verificar adicionalmente en la base de datos que existe una cédula con este pdf_path
+    const { data: cedula, error: dbError } = await supabaseAdmin
+      .from("cedulas")
+      .select("id, owner_user_id, juzgado")
+      .eq("pdf_path", path)
+      .maybeSingle();
+
+    if (dbError || !cedula) {
+      return new NextResponse("No se encontró el archivo en la base de datos", {
+        status: 404,
       });
     }
 
-    // Verificar adicionalmente en la base de datos que existe una cédula con este pdf_path
-    // que pertenece al usuario (doble verificación de seguridad)
-    const supabaseAdmin = getSupabaseAdmin();
-    const { data: cedula, error: dbError } = await supabaseAdmin
-      .from("cedulas")
-      .select("id, owner_user_id")
-      .eq("pdf_path", path)
-      .eq("owner_user_id", userId)
-      .single();
-
-    if (dbError || !cedula) {
+    // Si es el dueño, permitir acceso
+    if (cedula.owner_user_id === userId) {
+      // Acceso permitido
+    } 
+    // Si es abogado o superadmin, verificar acceso por juzgado
+    else if (isAbogado || isSuperadmin) {
+      // Obtener juzgados asignados al usuario
+      const { data: juzgadosData } = await supabaseAdmin
+        .from("user_juzgados")
+        .select("juzgado")
+        .eq("user_id", userId);
+      
+      const juzgadosAsignados = (juzgadosData || []).map(j => 
+        j.juzgado?.trim().replace(/\s+/g, " ").toUpperCase()
+      );
+      
+      // Normalizar juzgado de la cédula
+      const juzgadoCedula = cedula.juzgado 
+        ? cedula.juzgado.trim().replace(/\s+/g, " ").toUpperCase()
+        : null;
+      
+      // Verificar si el juzgado de la cédula está en los juzgados asignados
+      let tieneAcceso = false;
+      
+      if (juzgadoCedula && juzgadosAsignados.length > 0) {
+        // Comparación exacta
+        tieneAcceso = juzgadosAsignados.some(jAsignado => {
+          if (jAsignado === juzgadoCedula) return true;
+          
+          // Comparación por número de juzgado (más flexible)
+          const numAsignado = jAsignado.match(/N[°º]\s*(\d+)/i)?.[1];
+          const numCedula = juzgadoCedula.match(/N[°º]\s*(\d+)/i)?.[1];
+          
+          if (numAsignado && numCedula && numAsignado === numCedula) {
+            // Si ambos tienen el mismo número y contienen "Juzgado", considerarlos iguales
+            return jAsignado.includes("JUZGADO") && juzgadoCedula.includes("JUZGADO");
+          }
+          
+          return false;
+        });
+      }
+      
+      // Si es superadmin, permitir acceso a todo
+      if (isSuperadmin) {
+        tieneAcceso = true;
+      }
+      
+      if (!tieneAcceso) {
+        return new NextResponse("No tienes permisos para acceder a este archivo. El juzgado no está asignado a tu cuenta.", {
+          status: 403,
+        });
+      }
+    } 
+    // Si no es el dueño ni tiene rol especial, denegar acceso
+    else {
       return new NextResponse("No tienes permisos para acceder a este archivo", {
         status: 403,
       });

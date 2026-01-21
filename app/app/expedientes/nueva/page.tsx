@@ -79,6 +79,7 @@ export default function NuevaExpedientePage() {
   const [juzgado, setJuzgado] = useState("");
   const [fechaUltimaModificacion, setFechaUltimaModificacion] = useState(todayDDMMAAAA());
   const [observaciones, setObservaciones] = useState("");
+  const [searching, setSearching] = useState(false);
 
   async function requireSessionOrRedirect() {
     const { data } = await supabase.auth.getSession();
@@ -137,6 +138,72 @@ export default function NuevaExpedientePage() {
       setLoading(false);
     })();
   }, []);
+
+  // Buscar automáticamente en pjn-scraper cuando se complete jurisdicción, número y año
+  useEffect(() => {
+    const buscarExpediente = async () => {
+      // Solo buscar si todos los campos están completos
+      if (!jurisdiccion || !numeroExpediente.trim() || !añoExpediente.trim() || añoExpediente.length !== 4) {
+        return;
+      }
+
+      setSearching(true);
+      try {
+        console.log("[Nueva Expediente] Buscando expediente:", { jurisdiccion, numero: numeroExpediente.trim(), año: añoExpediente.trim() });
+        
+        const response = await fetch("/api/search-expediente-pjn", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            jurisdiccion,
+            numero: numeroExpediente.trim(),
+            año: añoExpediente.trim(),
+          }),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error("[Nueva Expediente] Error al buscar expediente:", errorText);
+          return;
+        }
+
+        const data = await response.json();
+        console.log("[Nueva Expediente] Respuesta de API:", data);
+
+        if (data.found) {
+          // Autocompletar campos con los datos encontrados
+          if (data.caratula) {
+            setCaratula(data.caratula);
+            console.log("[Nueva Expediente] Autocompletado caratula:", data.caratula);
+          }
+          if (data.juzgado) {
+            setJuzgado(data.juzgado);
+            console.log("[Nueva Expediente] Autocompletado juzgado:", data.juzgado);
+          }
+          if (data.fechaUltimaModificacion) {
+            setFechaUltimaModificacion(data.fechaUltimaModificacion);
+            console.log("[Nueva Expediente] Autocompletado fecha:", data.fechaUltimaModificacion);
+          }
+          if (data.observaciones) {
+            setObservaciones(data.observaciones);
+            console.log("[Nueva Expediente] Autocompletado observaciones:", data.observaciones);
+          }
+        } else {
+          console.log("[Nueva Expediente] Expediente no encontrado en la base de datos");
+        }
+      } catch (error) {
+        console.error("[Nueva Expediente] Error al buscar expediente:", error);
+      } finally {
+        setSearching(false);
+      }
+    };
+
+    // Debounce: esperar 500ms después del último cambio antes de buscar
+    const timeoutId = setTimeout(buscarExpediente, 500);
+    return () => clearTimeout(timeoutId);
+  }, [jurisdiccion, numeroExpediente, añoExpediente]);
 
   async function onSave() {
     setMsg("");
@@ -293,7 +360,10 @@ export default function NuevaExpedientePage() {
             }}
           >
             <div className="field">
-              <label className="label">Jurisdicción</label>
+              <label className="label">
+                Jurisdicción
+                {searching && <span style={{ marginLeft: 8, fontSize: 12, color: "#888" }}>(Buscando...)</span>}
+              </label>
               <select
                 className="input"
                 value={jurisdiccion}
