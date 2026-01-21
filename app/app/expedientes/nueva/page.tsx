@@ -164,9 +164,18 @@ export default function NuevaExpedientePage() {
         });
 
         if (!response.ok) {
-          const errorText = await response.text();
-          console.error("[Nueva Expediente] Error al buscar expediente:", errorText);
-          return;
+          // Si es un error 500 o similar, intentar parsear como JSON primero
+          try {
+            const errorData = await response.json();
+            console.log("[Nueva Expediente] Servicio de búsqueda no disponible:", errorData.message || "Servicio no configurado");
+            // No mostrar error al usuario, simplemente no autocompletar
+            return;
+          } catch {
+            const errorText = await response.text();
+            console.error("[Nueva Expediente] Error al buscar expediente:", errorText);
+            // No mostrar error al usuario si el servicio no está disponible
+            return;
+          }
         }
 
         const data = await response.json();

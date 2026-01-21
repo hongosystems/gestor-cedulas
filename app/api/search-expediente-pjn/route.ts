@@ -8,7 +8,7 @@ function getPjnScraperSupabase() {
   const supabaseAnonKey = process.env.NEXT_PUBLIC_PJN_SCRAPER_SUPABASE_ANON_KEY;
   
   if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error("Variables de entorno de pjn-scraper Supabase no configuradas");
+    return null; // Retornar null en lugar de lanzar error
   }
   
   return createClient(supabaseUrl, supabaseAnonKey);
@@ -44,6 +44,16 @@ export async function POST(req: NextRequest) {
     console.log("[search-expediente-pjn] Buscando expediente:", expedienteBuscar);
 
     const supabase = getPjnScraperSupabase();
+    
+    // Si las variables de entorno no están configuradas, retornar que no se encontró
+    // (en lugar de fallar con error 500)
+    if (!supabase) {
+      console.log("[search-expediente-pjn] Variables de entorno de pjn-scraper no configuradas, retornando not found");
+      return NextResponse.json({
+        found: false,
+        message: "Servicio de búsqueda no disponible"
+      });
+    }
 
     // Nombre de la tabla: puede configurarse mediante variable de entorno o usar "cases" por defecto
     const tableName = process.env.PJN_SCRAPER_TABLE_NAME || "cases";
