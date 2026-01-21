@@ -578,10 +578,46 @@ export default function SuperAdminPage() {
   const ranking = useMemo(() => {
     const perUser: Record<string, { rojos: number; amarillos: number; verdes: number; total: number; maxDias: number }> = {};
 
+    // Contar cédulas (tipo_documento === "CEDULA" o null)
     for (const c of cedulas) {
+      // Solo contar cédulas, no oficios (los oficios se cuentan por separado)
+      if (c.tipo_documento === "OFICIO") continue;
+      
       const dias = daysSince(c.fecha_carga);
       const s = semaforoPorAntiguedad(dias);
       const uid = c.owner_user_id;
+
+      perUser[uid] ||= { rojos: 0, amarillos: 0, verdes: 0, total: 0, maxDias: -1 };
+      perUser[uid].total++;
+      perUser[uid].maxDias = Math.max(perUser[uid].maxDias, dias);
+
+      if (s === "ROJO") perUser[uid].rojos++;
+      else if (s === "AMARILLO") perUser[uid].amarillos++;
+      else perUser[uid].verdes++;
+    }
+
+    // Contar oficios (tipo_documento === "OFICIO")
+    for (const c of cedulas) {
+      if (c.tipo_documento !== "OFICIO") continue;
+      
+      const dias = daysSince(c.fecha_carga);
+      const s = semaforoPorAntiguedad(dias);
+      const uid = c.owner_user_id;
+
+      perUser[uid] ||= { rojos: 0, amarillos: 0, verdes: 0, total: 0, maxDias: -1 };
+      perUser[uid].total++;
+      perUser[uid].maxDias = Math.max(perUser[uid].maxDias, dias);
+
+      if (s === "ROJO") perUser[uid].rojos++;
+      else if (s === "AMARILLO") perUser[uid].amarillos++;
+      else perUser[uid].verdes++;
+    }
+
+    // Contar expedientes
+    for (const e of expedientes) {
+      const dias = daysSince(e.fecha_ultima_modificacion);
+      const s = semaforoPorAntiguedad(dias);
+      const uid = e.owner_user_id;
 
       perUser[uid] ||= { rojos: 0, amarillos: 0, verdes: 0, total: 0, maxDias: -1 };
       perUser[uid].total++;
@@ -601,7 +637,7 @@ export default function SuperAdminPage() {
       (b.amarillos - a.amarillos) ||
       (b.maxDias - a.maxDias)
     );
-  }, [cedulas, profiles]);
+  }, [cedulas, expedientes, profiles]);
 
   const rankingExpedientes = useMemo(() => {
     const perUser: Record<string, { rojos: number; amarillos: number; verdes: number; total: number; maxDias: number }> = {};
