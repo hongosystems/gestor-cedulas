@@ -836,6 +836,79 @@ export default function SuperAdminPage() {
     doc.text(`Generado el: ${fecha}`, pageWidth / 2, yPos, { align: "center" });
     yPos += 15;
 
+    // Tabla de Rendimiento por Usuario (mover aquí, justo después de la fecha)
+    doc.setFontSize(14);
+    doc.setTextColor(colorPrimaryR, colorPrimaryG, colorPrimaryB);
+    doc.setFont("helvetica", "bold");
+    doc.text("Rendimiento por Usuario", margin, yPos);
+    yPos += 10;
+
+    // Encabezados de tabla
+    doc.setFontSize(9);
+    doc.setTextColor(255, 255, 255);
+    doc.setFillColor(colorPrimaryR, colorPrimaryG, colorPrimaryB);
+    doc.rect(margin, yPos - 5, pageWidth - 2 * margin, 8, "F");
+    
+    // Calcular posiciones de columnas para que no se pisen
+    // Distribuir el ancho disponible (180mm) entre las columnas
+    const colUsuario = margin + 2;           // Usuario: ~50mm
+    const colRojo = margin + 52;              // ROJO: ~10mm
+    const colAmarillo = margin + 65;          // AMARILLO: ~10mm
+    const colVerde = margin + 80;              // VERDE: ~10mm
+    const colTotal = margin + 95;              // TOTAL: ~10mm
+    const colAntigua = margin + 110;           // MÁS ANTIGUA: ~10mm
+    
+    doc.setFont("helvetica", "bold");
+    doc.text("Usuario", colUsuario, yPos);
+    doc.text("ROJO", colRojo, yPos, { align: "right" });
+    doc.text("AMARILLO", colAmarillo, yPos, { align: "right" });
+    doc.text("VERDE", colVerde, yPos, { align: "right" });
+    doc.text("TOTAL", colTotal, yPos, { align: "right" });
+    doc.text("MÁS ANTIGUA", colAntigua, yPos, { align: "right" });
+    yPos += 10;
+
+    // Filas de datos
+    doc.setFontSize(9);
+    doc.setTextColor(0, 0, 0);
+    doc.setFont("helvetica", "normal");
+    
+    ranking.forEach((r, idx) => {
+      checkNewPage(8);
+      
+      // Alternar color de fondo
+      if (idx % 2 === 0) {
+        doc.setFillColor(245, 245, 245);
+        doc.rect(margin, yPos - 4, pageWidth - 2 * margin, 6, "F");
+      }
+      
+      // Resaltar si es crítico
+      if (r.rojos > 0 || r.maxDias >= UMBRAL_ROJO) {
+        doc.setFillColor(255, 240, 240);
+        doc.rect(margin, yPos - 4, pageWidth - 2 * margin, 6, "F");
+      }
+
+      doc.setTextColor(0, 0, 0);
+      doc.text(r.name.length > 30 ? r.name.substring(0, 27) + "..." : r.name, colUsuario, yPos);
+      
+      doc.setTextColor(colorRedR, colorRedG, colorRedB);
+      doc.text(r.rojos.toString(), colRojo, yPos, { align: "right" });
+      
+      doc.setTextColor(colorYellowR, colorYellowG, colorYellowB);
+      doc.text(r.amarillos.toString(), colAmarillo, yPos, { align: "right" });
+      
+      doc.setTextColor(colorGreenR, colorGreenG, colorGreenB);
+      doc.text(r.verdes.toString(), colVerde, yPos, { align: "right" });
+      
+      doc.setTextColor(0, 0, 0);
+      doc.text(r.total.toString(), colTotal, yPos, { align: "right" });
+      doc.text(r.maxDias >= 0 ? r.maxDias.toString() : "-", colAntigua, yPos, { align: "right" });
+      
+      yPos += 6;
+    });
+
+    yPos += 15;
+    checkNewPage(50);
+
     // Sección: Métricas Generales
     doc.setFontSize(14);
     doc.setTextColor(colorPrimaryR, colorPrimaryG, colorPrimaryB);
@@ -931,69 +1004,6 @@ export default function SuperAdminPage() {
     doc.setTextColor(colorGreenR, colorGreenG, colorGreenB);
     doc.text(`  - Verdes: ${metrics.expedientesVerdes} (${metrics.pctExpedientesVerdes}%)`, margin + 10, yPos);
     yPos += 15;
-
-    checkNewPage(50);
-
-    // Tabla de Rendimiento por Usuario
-    doc.setFontSize(14);
-    doc.setTextColor(colorPrimaryR, colorPrimaryG, colorPrimaryB);
-    doc.setFont("helvetica", "bold");
-    doc.text("Rendimiento por Usuario", margin, yPos);
-    yPos += 10;
-
-    // Encabezados de tabla
-    doc.setFontSize(9);
-    doc.setTextColor(255, 255, 255);
-    doc.setFillColor(colorPrimaryR, colorPrimaryG, colorPrimaryB);
-    doc.rect(margin, yPos - 5, pageWidth - 2 * margin, 8, "F");
-    
-    doc.setFont("helvetica", "bold");
-    doc.text("Usuario", margin + 2, yPos);
-    doc.text("ROJO", margin + 60, yPos, { align: "right" });
-    doc.text("AMARILLO", margin + 75, yPos, { align: "right" });
-    doc.text("VERDE", margin + 95, yPos, { align: "right" });
-    doc.text("TOTAL", margin + 110, yPos, { align: "right" });
-    doc.text("MÁS ANTIGUA", margin + 130, yPos, { align: "right" });
-    yPos += 10;
-
-    // Filas de datos
-    doc.setFontSize(9);
-    doc.setTextColor(0, 0, 0);
-    doc.setFont("helvetica", "normal");
-    
-    ranking.forEach((r, idx) => {
-      checkNewPage(8);
-      
-      // Alternar color de fondo
-      if (idx % 2 === 0) {
-        doc.setFillColor(245, 245, 245);
-        doc.rect(margin, yPos - 4, pageWidth - 2 * margin, 6, "F");
-      }
-      
-      // Resaltar si es crítico
-      if (r.rojos > 0 || r.maxDias >= UMBRAL_ROJO) {
-        doc.setFillColor(255, 240, 240);
-        doc.rect(margin, yPos - 4, pageWidth - 2 * margin, 6, "F");
-      }
-
-      doc.setTextColor(0, 0, 0);
-      doc.text(r.name.length > 25 ? r.name.substring(0, 22) + "..." : r.name, margin + 2, yPos);
-      
-      doc.setTextColor(colorRedR, colorRedG, colorRedB);
-      doc.text(r.rojos.toString(), margin + 60, yPos, { align: "right" });
-      
-      doc.setTextColor(colorYellowR, colorYellowG, colorYellowB);
-      doc.text(r.amarillos.toString(), margin + 75, yPos, { align: "right" });
-      
-      doc.setTextColor(colorGreenR, colorGreenG, colorGreenB);
-      doc.text(r.verdes.toString(), margin + 95, yPos, { align: "right" });
-      
-      doc.setTextColor(0, 0, 0);
-      doc.text(r.total.toString(), margin + 110, yPos, { align: "right" });
-      doc.text(r.maxDias >= 0 ? r.maxDias.toString() : "-", margin + 130, yPos, { align: "right" });
-      
-      yPos += 6;
-    });
 
     // Pie de página
     const totalPages = doc.getNumberOfPages();
