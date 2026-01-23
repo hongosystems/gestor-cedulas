@@ -61,10 +61,13 @@ Sistema completo de gestión de cédulas, oficios y expedientes con sistema de s
 
 **URL Principal de Producción:**
 ```
-https://[TU-PROYECTO].vercel.app
+https://gestor-cedulas.vercel.app
 ```
 
-**Nota:** Reemplaza `[TU-PROYECTO]` con el nombre real de tu proyecto en Vercel.
+**Dashboard de Vercel:**
+```
+https://vercel.com/dashboard
+```
 
 **URLs de Preview (despliegues automáticos por branch):**
 ```
