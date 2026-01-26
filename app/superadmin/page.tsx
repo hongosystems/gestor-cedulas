@@ -25,9 +25,26 @@ type Expediente = {
   fecha_ultima_modificacion: string | null;
   estado: string;
   created_by_user_id?: string | null;
+  is_pjn_favorito?: boolean; // Indica si viene de pjn_favoritos
+};
+
+type PjnFavorito = {
+  id: string;
+  jurisdiccion: string;
+  numero: string;
+  anio: number;
+  caratula: string | null;
+  juzgado: string | null;
+  fecha_ultima_carga: string | null; // Formato DD/MM/AAAA
+  observaciones: string | null;
 };
 
 type Profile = { id: string; full_name: string | null; email: string | null };
+
+type UserJuzgados = {
+  user_id: string;
+  juzgado: string;
+};
 
 const UMBRAL_AMARILLO = 30;
 const UMBRAL_ROJO = 60;
@@ -75,6 +92,15 @@ function getDateRange(filter: TimeFilter, customStart?: string, customEnd?: stri
     default:
       return { start: null, end: null };
   }
+}
+
+// Convertir fecha DD/MM/AAAA a ISO (YYYY-MM-DD)
+function ddmmaaaaToISO(ddmm: string | null): string | null {
+  if (!ddmm || ddmm.trim() === "") return null;
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(ddmm.trim());
+  if (!m) return null;
+  const [, dia, mes, anio] = m;
+  return `${anio}-${mes}-${dia}T00:00:00.000Z`;
 }
 
 function daysSince(fechaCargaISO: string | null) {
@@ -254,6 +280,8 @@ export default function SuperAdminPage() {
   const [allCedulas, setAllCedulas] = useState<Cedula[]>([]); // Todas las cédulas sin filtrar
   const [expedientes, setExpedientes] = useState<Expediente[]>([]);
   const [allExpedientes, setAllExpedientes] = useState<Expediente[]>([]); // Todos los expedientes sin filtrar
+  const [pjnFavoritos, setPjnFavoritos] = useState<PjnFavorito[]>([]); // Favoritos de pjn-scraper
+  const [userJuzgadosMap, setUserJuzgadosMap] = useState<Record<string, string[]>>({}); // Mapa de user_id -> juzgados[]
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("all");
   const [selectedUserId, setSelectedUserId] = useState<string>("all");
@@ -416,15 +444,46 @@ export default function SuperAdminPage() {
         console.log(`[Dashboard] Usuarios únicos en expedientes: ${usuariosUnicos.length}`, usuariosUnicos);
       }
       
+      // Cargar favoritos de pjn-scraper (pjn_favoritos)
+      console.log(`[Dashboard] Cargando favoritos de pjn-scraper...`);
+      const { data: favoritosData, error: favoritosErr } = await supabase
+        .from("pjn_favoritos")
+        .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones")
+        .order("updated_at", { ascending: false });
+      
+      if (favoritosErr) {
+        console.warn(`[Dashboard] ⚠️  Error al cargar pjn_favoritos:`, favoritosErr);
+        setPjnFavoritos([]);
+      } else {
+        setPjnFavoritos((favoritosData ?? []) as PjnFavorito[]);
+        console.log(`[Dashboard] ✅ Favoritos de pjn-scraper cargados: ${(favoritosData ?? []).length}`);
+      }
+      
+      // Cargar juzgados asignados a TODOS los usuarios (para asignar favoritos)
+      console.log(`[Dashboard] Cargando juzgados asignados a todos los usuarios...`);
+      const { data: allJuzgadosData, error: allJuzgadosErr } = await supabase
+        .from("user_juzgados")
+        .select("user_id, juzgado");
+      
+      if (allJuzgadosErr) {
+        console.warn(`[Dashboard] ⚠️  Error al cargar user_juzgados:`, allJuzgadosErr);
+        setUserJuzgadosMap({});
+      } else {
+        // Crear mapa de user_id -> juzgados[]
+        const juzgadosMap: Record<string, string[]> = {};
+        (allJuzgadosData ?? []).forEach((uj: UserJuzgados) => {
+          if (!juzgadosMap[uj.user_id]) {
+            juzgadosMap[uj.user_id] = [];
+          }
+          juzgadosMap[uj.user_id].push(uj.juzgado);
+        });
+        setUserJuzgadosMap(juzgadosMap);
+        console.log(`[Dashboard] ✅ Juzgados asignados cargados para ${Object.keys(juzgadosMap).length} usuarios`);
+      }
+      
       setChecking(false);
     })();
   }, []);
-
-  // Función para normalizar juzgado para comparación
-  const normalizarJuzgado = (j: string | null) => {
-    if (!j) return "";
-    return j.trim().replace(/\s+/g, " ").toUpperCase();
-  };
 
   // Asegurar que si no hay juzgados asignados, el filtro vuelva a "todos"
   useEffect(() => {
@@ -505,9 +564,70 @@ export default function SuperAdminPage() {
     setCedulas(filtered);
   }, [allCedulas, timeFilter, selectedUserId, juzgadoFilter, userJuzgados, customStartDate, customEndDate]);
 
+  // Función para normalizar juzgado para comparación
+  const normalizarJuzgado = (j: string | null) => {
+    if (!j) return "";
+    return j.trim().replace(/\s+/g, " ").toUpperCase();
+  };
+
+  // Convertir favoritos de pjn-scraper a expedientes y asignarlos a usuarios según juzgados
+  const favoritosComoExpedientes = useMemo(() => {
+    const expedientesFromFavoritos: Expediente[] = [];
+    
+    // Función para verificar si un juzgado coincide con los juzgados asignados a un usuario
+    const juzgadoCoincide = (favoritoJuzgado: string | null, userJuzgados: string[]): boolean => {
+      if (!favoritoJuzgado || userJuzgados.length === 0) return false;
+      
+      const favoritoNormalizado = normalizarJuzgado(favoritoJuzgado);
+      const userJuzgadosNormalizados = userJuzgados.map(j => normalizarJuzgado(j));
+      
+      // Comparación exacta
+      if (userJuzgadosNormalizados.includes(favoritoNormalizado)) return true;
+      
+      // Comparación por número de juzgado
+      return userJuzgadosNormalizados.some(jAsignado => {
+        const numAsignado = jAsignado.match(/N[°º]\s*(\d+)/i)?.[1];
+        const numFavorito = favoritoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
+        if (numAsignado && numFavorito && numAsignado === numFavorito) {
+          if (jAsignado.includes("JUZGADO") && favoritoNormalizado.includes("JUZGADO")) {
+            return true;
+          }
+        }
+        return false;
+      });
+    };
+    
+    // Para cada favorito, asignarlo a usuarios que tengan juzgados coincidentes
+    for (const favorito of pjnFavoritos) {
+      const numeroExpediente = `${favorito.jurisdiccion} ${favorito.numero}/${favorito.anio}`;
+      const fechaISO = ddmmaaaaToISO(favorito.fecha_ultima_carga);
+      
+      // Buscar usuarios que tengan juzgados que coincidan con este favorito
+      for (const [userId, userJuzgados] of Object.entries(userJuzgadosMap)) {
+        if (juzgadoCoincide(favorito.juzgado, userJuzgados)) {
+          expedientesFromFavoritos.push({
+            id: `pjn_${favorito.id}_${userId}`, // ID único por usuario
+            owner_user_id: userId,
+            caratula: favorito.caratula,
+            juzgado: favorito.juzgado,
+            numero_expediente: numeroExpediente,
+            fecha_ultima_modificacion: fechaISO,
+            estado: "ABIERTO",
+            created_by_user_id: null,
+            is_pjn_favorito: true,
+          });
+        }
+      }
+    }
+    
+    console.log(`[Dashboard] Favoritos convertidos a expedientes: ${expedientesFromFavoritos.length} (de ${pjnFavoritos.length} favoritos)`);
+    return expedientesFromFavoritos;
+  }, [pjnFavoritos, userJuzgadosMap]);
+
   // Filtrar expedientes según los filtros seleccionados
   useEffect(() => {
-    let filtered = [...allExpedientes];
+    // Combinar expedientes locales con favoritos convertidos
+    let filtered = [...allExpedientes, ...favoritosComoExpedientes];
     const initialCount = filtered.length;
     
     console.log(`[Dashboard] Filtrando expedientes - Inicial: ${initialCount}, Filtro juzgados: ${juzgadoFilter}`, {
@@ -574,7 +694,7 @@ export default function SuperAdminPage() {
     }
 
     setExpedientes(filtered);
-  }, [allExpedientes, timeFilter, selectedUserId, juzgadoFilter, userJuzgados, customStartDate, customEndDate]);
+  }, [allExpedientes, favoritosComoExpedientes, timeFilter, selectedUserId, juzgadoFilter, userJuzgados, customStartDate, customEndDate]);
 
   const ranking = useMemo(() => {
     const perUser: Record<string, { rojos: number; amarillos: number; verdes: number; total: number; maxDias: number }> = {};

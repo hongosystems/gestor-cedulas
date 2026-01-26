@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { pjnScraperSupabase } from "@/lib/pjn-scraper-supabase";
 import { daysSince } from "@/lib/semaforo";
 
 type Cedula = {
@@ -29,6 +30,18 @@ type Expediente = {
   observaciones: string | null;
   created_by_user_id: string | null;
   created_by_name: string | null;
+  is_pjn_favorito?: boolean; // Indica si viene de pjn_favoritos
+};
+
+type PjnFavorito = {
+  id: string;
+  jurisdiccion: string;
+  numero: string;
+  anio: number;
+  caratula: string | null;
+  juzgado: string | null;
+  fecha_ultima_carga: string | null; // Formato DD/MM/AAAA
+  observaciones: string | null;
 };
 
 function isoToDDMMAAAA(iso: string | null): string {
@@ -37,6 +50,15 @@ function isoToDDMMAAAA(iso: string | null): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(datePart);
   if (!m) return iso;
   return `${m[3]}/${m[2]}/${m[1]}`;
+}
+
+// Convertir fecha DD/MM/AAAA a ISO (YYYY-MM-DD)
+function ddmmaaaaToISO(ddmm: string | null): string | null {
+  if (!ddmm || ddmm.trim() === "") return null;
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(ddmm.trim());
+  if (!m) return null;
+  const [, dia, mes, anio] = m;
+  return `${anio}-${mes}-${dia}T00:00:00.000Z`;
 }
 
 type Semaforo = "VERDE" | "AMARILLO" | "ROJO";
@@ -252,6 +274,332 @@ export default function MisJuzgadosPage() {
         console.log(`[Mis Juzgados] Expedientes con observaciones cargadas: ${expsWithObservaciones.length}/${allExpsData?.length || 0}`);
       }
       
+      // Cargar favoritos de pjn-scraper (pjn_favoritos)
+      // NOTA: Si pjn-scraper está en la misma base de datos, usar el cliente principal
+      let pjnFavoritos: PjnFavorito[] = [];
+      try {
+        console.log(`[Mis Juzgados] Intentando cargar favoritos de pjn_favoritos...`);
+        
+        // Intentar primero con el cliente principal (misma base de datos)
+        const { data: favoritosData, error: favoritosErr } = await supabase
+          .from("pjn_favoritos")
+          .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones")
+          .order("updated_at", { ascending: false });
+        
+        if (favoritosErr) {
+          console.error(`[Mis Juzgados] ❌ Error al cargar pjn_favoritos:`, favoritosErr);
+          console.error(`[Mis Juzgados] Error details:`, {
+            message: favoritosErr.message,
+            code: (favoritosErr as any).code,
+            details: (favoritosErr as any).details,
+            hint: (favoritosErr as any).hint
+          });
+          
+          // Si el error es que la tabla no existe, intentar con el cliente de pjn-scraper (si está configurado)
+          if (favoritosErr.message?.includes('relation') || favoritosErr.message?.includes('does not exist') || (favoritosErr as any).code === 'PGRST116') {
+            console.warn(`[Mis Juzgados] ⚠️  Tabla pjn_favoritos no encontrada en base de datos principal. Intentando con cliente pjn-scraper...`);
+            
+            const pjnUrl = process.env.NEXT_PUBLIC_PJN_SCRAPER_SUPABASE_URL;
+            const pjnKey = process.env.NEXT_PUBLIC_PJN_SCRAPER_SUPABASE_ANON_KEY;
+            
+            if (pjnUrl && pjnKey) {
+              const { data: favoritosData2, error: favoritosErr2 } = await pjnScraperSupabase
+                .from("pjn_favoritos")
+                .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones")
+                .order("updated_at", { ascending: false });
+              
+              if (favoritosErr2) {
+                console.error(`[Mis Juzgados] ❌ Error también con cliente pjn-scraper:`, favoritosErr2);
+                setMsg(msg ? `${msg} Error al cargar favoritos PJN: ${favoritosErr2.message}` : `Error al cargar favoritos PJN: ${favoritosErr2.message}`);
+              } else if (favoritosData2) {
+                pjnFavoritos = favoritosData2 as PjnFavorito[];
+                console.log(`[Mis Juzgados] ✅ Favoritos cargados desde pjn-scraper DB: ${pjnFavoritos.length}`);
+              }
+            } else {
+              console.warn(`[Mis Juzgados] ⚠️  Variables de entorno de pjn-scraper no configuradas`);
+              setMsg(msg ? `${msg} Tabla pjn_favoritos no encontrada. Verifica que exista en la base de datos.` : `Tabla pjn_favoritos no encontrada. Verifica que exista en la base de datos.`);
+            }
+          } else {
+            // Otro tipo de error
+            setMsg(msg ? `${msg} Error al cargar favoritos PJN: ${favoritosErr.message}` : `Error al cargar favoritos PJN: ${favoritosErr.message}`);
+          }
+          } else if (favoritosData) {
+            pjnFavoritos = favoritosData as PjnFavorito[];
+            console.log(`[Mis Juzgados] ✅ Favoritos cargados desde base de datos principal: ${pjnFavoritos.length}`);
+            
+            // Si pjn_favoritos está vacía, intentar leer desde cases como fallback
+            // NOTA: cases está en la base de datos de pjn-scraper, no en la principal
+            if (pjnFavoritos.length === 0) {
+              console.log(`[Mis Juzgados] Tabla pjn_favoritos está vacía. Intentando leer desde cases en pjn-scraper...`);
+              
+              // Intentar primero con el cliente principal (por si cases está en la misma DB)
+              let casesData: any[] | null = null;
+              let casesErr: any = null;
+              
+              const { data: casesDataMain, error: casesErrMain } = await supabase
+                .from("cases")
+                .select("key, expediente, caratula, dependencia, ult_act, situacion, movimientos")
+                .order("ult_act", { ascending: false })
+                .limit(1000);
+              
+              if (casesErrMain) {
+                // Si falla en la base principal, intentar con pjn-scraper
+                console.log(`[Mis Juzgados] cases no encontrada en BD principal. Intentando con pjn-scraper...`);
+                
+                const pjnUrl = process.env.NEXT_PUBLIC_PJN_SCRAPER_SUPABASE_URL;
+                const pjnKey = process.env.NEXT_PUBLIC_PJN_SCRAPER_SUPABASE_ANON_KEY;
+                
+                if (pjnUrl && pjnKey) {
+                  const { data: casesDataPjn, error: casesErrPjn } = await pjnScraperSupabase
+                    .from("cases")
+                    .select("key, expediente, caratula, dependencia, ult_act, situacion, movimientos")
+                    .order("ult_act", { ascending: false })
+                    .limit(1000);
+                  
+                  if (casesErrPjn) {
+                    console.warn(`[Mis Juzgados] ⚠️  Error al leer desde cases en pjn-scraper:`, casesErrPjn);
+                    casesErr = casesErrPjn;
+                  } else {
+                    casesData = casesDataPjn;
+                  }
+                } else {
+                  console.warn(`[Mis Juzgados] ⚠️  Variables de entorno de pjn-scraper no configuradas. No se puede leer desde cases.`);
+                  casesErr = { message: "Variables de entorno de pjn-scraper no configuradas" };
+                }
+              } else {
+                casesData = casesDataMain;
+              }
+              
+              if (casesErr) {
+                console.warn(`[Mis Juzgados] ⚠️  No se pudo leer desde cases:`, casesErr);
+              } else if (casesData && casesData.length > 0) {
+                console.log(`[Mis Juzgados] ✅ Datos encontrados en cases: ${casesData.length}`);
+                
+                // Función para extraer observaciones de movimientos (mismo criterio que autocompletado)
+                const extractObservaciones = (movimientos: any): string | null => {
+                  if (!movimientos) return null;
+                  
+                  try {
+                    // Si es un array de objetos
+                    if (Array.isArray(movimientos) && movimientos.length > 0) {
+                      let tipoActuacion: string | null = null;
+                      let detalle: string | null = null;
+                      
+                      // Buscar desde el inicio hacia el final para encontrar el primero (más actual) con información completa
+                      for (let i = 0; i < movimientos.length; i++) {
+                        const mov = movimientos[i];
+                        
+                        if (typeof mov === 'object' && mov !== null) {
+                          // Si tiene cols (array de strings)
+                          if (mov.cols && Array.isArray(mov.cols)) {
+                            // Buscar Tipo actuacion y Detalle en este movimiento
+                            for (const col of mov.cols) {
+                              const colStr = String(col).trim();
+                              
+                              // Buscar Tipo actuacion (verificar que tenga contenido después de :)
+                              if (!tipoActuacion) {
+                                const matchTipo = colStr.match(/^Tipo\s+actuacion:\s*(.+)$/i);
+                                if (matchTipo && matchTipo[1].trim() !== "") {
+                                  tipoActuacion = `Tipo actuacion: ${matchTipo[1].trim()}`;
+                                }
+                              }
+                              
+                              // Buscar Detalle (verificar que tenga contenido después de :)
+                              if (!detalle) {
+                                const matchDetalle = colStr.match(/^Detalle:\s*(.+)$/i);
+                                if (matchDetalle && matchDetalle[1].trim() !== "") {
+                                  detalle = `Detalle: ${matchDetalle[1].trim()}`;
+                                }
+                              }
+                            }
+                            
+                            // Si encontramos ambos con información, ya tenemos lo que necesitamos
+                            if (tipoActuacion && detalle) {
+                              break;
+                            }
+                          }
+                        }
+                      }
+                      
+                      // Si encontramos ambos, formatear el resultado
+                      if (tipoActuacion && detalle) {
+                        return `${tipoActuacion}\n${detalle}`;
+                      }
+                    }
+                  } catch (err) {
+                    console.warn(`[Mis Juzgados] Error al extraer observaciones:`, err);
+                  }
+                  
+                  return null;
+                };
+                
+                // Convertir cases a formato PjnFavorito
+                pjnFavoritos = casesData.map((c: any) => {
+                  // Extraer jurisdiccion, numero y anio desde key o expediente
+                  const expText = c.key || c.expediente || '';
+                  const match = expText.match(/^([A-Z]+)\s+(\d+)\/(\d+)/);
+                  
+                  if (match) {
+                    const [, jurisdiccion, numero, anioStr] = match;
+                    const anio = parseInt(anioStr, 10);
+                    
+                    // Convertir ult_act a formato DD/MM/AAAA
+                    let fechaUltimaCarga: string | null = null;
+                    if (c.ult_act) {
+                      try {
+                        // ult_act puede venir en formato DD/MM/YYYY o ISO
+                        let date: Date;
+                        if (typeof c.ult_act === 'string' && c.ult_act.includes('/')) {
+                          // Formato DD/MM/YYYY
+                          const parts = c.ult_act.trim().split('/');
+                          if (parts.length === 3) {
+                            const [dia, mes, anio] = parts.map((p: string) => parseInt(p, 10));
+                            date = new Date(anio, mes - 1, dia);
+                          } else {
+                            date = new Date(c.ult_act);
+                          }
+                        } else {
+                          date = new Date(c.ult_act);
+                        }
+                        
+                        if (!isNaN(date.getTime())) {
+                          const dia = String(date.getDate()).padStart(2, '0');
+                          const mes = String(date.getMonth() + 1).padStart(2, '0');
+                          const anio = date.getFullYear();
+                          fechaUltimaCarga = `${dia}/${mes}/${anio}`;
+                        }
+                      } catch (e) {
+                        console.warn(`[Mis Juzgados] Error al convertir fecha:`, e);
+                      }
+                    }
+                    
+                    // Extraer observaciones de movimientos
+                    const observaciones = extractObservaciones(c.movimientos);
+                    
+                    return {
+                      id: c.key || c.expediente || '',
+                      jurisdiccion,
+                      numero,
+                      anio,
+                      caratula: c.caratula || null,
+                      juzgado: c.dependencia || null,
+                      fecha_ultima_carga: fechaUltimaCarga,
+                      observaciones: observaciones,
+                    } as PjnFavorito;
+                  }
+                  return null;
+                }).filter((f: PjnFavorito | null): f is PjnFavorito => f !== null);
+                
+                console.log(`[Mis Juzgados] ✅ Convertidos ${pjnFavoritos.length} casos desde cases a formato pjn_favoritos`);
+              } else {
+                console.warn(`[Mis Juzgados] ⚠️  No hay datos en la tabla cases`);
+              }
+            }
+            
+            // Debug: mostrar algunos ejemplos de juzgados en favoritos
+            if (pjnFavoritos.length > 0) {
+              const juzgadosEjemplos = [...new Set(pjnFavoritos.map(f => f.juzgado).filter(Boolean).slice(0, 10))];
+              console.log(`[Mis Juzgados] Ejemplos de juzgados en favoritos (${juzgadosEjemplos.length}):`, juzgadosEjemplos);
+              
+              // Mostrar estadísticas
+              const conJuzgado = pjnFavoritos.filter(f => f.juzgado).length;
+              const conCaratula = pjnFavoritos.filter(f => f.caratula).length;
+              const conFecha = pjnFavoritos.filter(f => f.fecha_ultima_carga).length;
+              console.log(`[Mis Juzgados] Estadísticas de favoritos: ${conJuzgado} con juzgado, ${conCaratula} con carátula, ${conFecha} con fecha`);
+            } else {
+              console.warn(`[Mis Juzgados] ⚠️  No hay favoritos disponibles (ni en pjn_favoritos ni en cases)`);
+            }
+          } else {
+            console.warn(`[Mis Juzgados] ⚠️  No se recibieron datos de pjn_favoritos (data es null/undefined)`);
+          }
+      } catch (err: any) {
+        console.error(`[Mis Juzgados] ❌ Error inesperado al cargar favoritos:`, err);
+        console.error(`[Mis Juzgados] Error message:`, err?.message);
+        console.error(`[Mis Juzgados] Error stack:`, err?.stack);
+        setMsg(msg ? `${msg} Error al cargar favoritos: ${err?.message || 'Error desconocido'}` : `Error al cargar favoritos: ${err?.message || 'Error desconocido'}`);
+      }
+
+      // Filtrar favoritos por juzgados asignados (si aplica)
+      let favoritosFiltrados = pjnFavoritos;
+      if (juzgadoFilter === "mis_juzgados" && juzgadosNormalizados.length > 0) {
+        console.log(`[Mis Juzgados] Filtrando ${pjnFavoritos.length} favoritos por ${juzgadosNormalizados.length} juzgados asignados...`);
+        
+        favoritosFiltrados = pjnFavoritos.filter((f: PjnFavorito) => {
+          if (!f.juzgado) {
+            return false;
+          }
+          
+          const juzgadoNormalizado = normalizarJuzgado(f.juzgado);
+          
+          const matched = juzgadosNormalizados.some(jAsignado => {
+            // Comparación exacta normalizada
+            if (juzgadoNormalizado === jAsignado) {
+              return true;
+            }
+            
+            // Comparación por número de juzgado (más flexible)
+            const numAsignado = jAsignado.match(/N[°º]\s*(\d+)/i)?.[1];
+            const numFavorito = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
+            
+            if (numAsignado && numFavorito && numAsignado === numFavorito) {
+              // Si ambos tienen el mismo número y contienen "Juzgado", considerarlos iguales
+              if (jAsignado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
+                return true;
+              }
+            }
+            
+            // Comparación más flexible: buscar si el juzgado asignado está contenido en el favorito o viceversa
+            if (juzgadoNormalizado.includes(jAsignado) || jAsignado.includes(juzgadoNormalizado)) {
+              // Verificar que ambos tengan al menos "JUZGADO" en común
+              if (juzgadoNormalizado.includes("JUZGADO") && jAsignado.includes("JUZGADO")) {
+                return true;
+              }
+            }
+            
+            return false;
+          });
+          
+          return matched;
+        });
+        
+        console.log(`[Mis Juzgados] ✅ Favoritos filtrados por juzgados: ${favoritosFiltrados.length} de ${pjnFavoritos.length}`);
+        
+        // Debug: mostrar algunos ejemplos de favoritos que coincidieron
+        if (favoritosFiltrados.length > 0) {
+          const ejemplos = favoritosFiltrados.slice(0, 3).map(f => ({
+            juzgado: f.juzgado,
+            caratula: f.caratula?.substring(0, 50) + '...'
+          }));
+          console.log(`[Mis Juzgados] Ejemplos de favoritos que coincidieron:`, ejemplos);
+        } else if (pjnFavoritos.length > 0) {
+          console.warn(`[Mis Juzgados] ⚠️  No se encontraron favoritos que coincidan con los juzgados asignados`);
+          console.warn(`[Mis Juzgados] Juzgados asignados (primeros 5):`, juzgadosNormalizados.slice(0, 5));
+          console.warn(`[Mis Juzgados] Juzgados en favoritos (primeros 5):`, [...new Set(pjnFavoritos.map(f => normalizarJuzgado(f.juzgado)).filter(Boolean).slice(0, 5))]);
+        }
+      } else {
+        console.log(`[Mis Juzgados] Mostrando TODOS los favoritos (sin filtrar por juzgados)`);
+      }
+
+      // Convertir favoritos a formato Expediente y combinar con expedientes locales
+      const favoritosComoExpedientes: Expediente[] = favoritosFiltrados.map((f: PjnFavorito) => {
+        const numeroExpediente = `${f.jurisdiccion} ${f.numero}/${f.anio}`;
+        const fechaISO = ddmmaaaaToISO(f.fecha_ultima_carga);
+        
+        return {
+          id: `pjn_${f.id}`, // Prefijo para identificar que viene de pjn
+          owner_user_id: "", // Los favoritos no tienen owner
+          caratula: f.caratula,
+          juzgado: f.juzgado,
+          numero_expediente: numeroExpediente,
+          fecha_ultima_modificacion: fechaISO,
+          estado: "ABIERTO", // Los favoritos siempre están abiertos
+          observaciones: f.observaciones,
+          created_by_user_id: null,
+          created_by_name: "PJN Favoritos", // Indicar que viene de favoritos
+          is_pjn_favorito: true,
+        };
+      });
+
       // Filtrar expedientes según el filtro seleccionado
       let exps = allExpsData ?? [];
       
@@ -281,13 +629,17 @@ export default function MisJuzgadosPage() {
         console.log(`[Mis Juzgados] Mostrando TODOS los expedientes: ${exps.length}`);
       }
 
+      // Combinar expedientes locales con favoritos de pjn
+      const todosLosExpedientes = [...exps, ...favoritosComoExpedientes];
+      console.log(`[Mis Juzgados] Total expedientes (locales + favoritos): ${todosLosExpedientes.length} (${exps.length} locales + ${favoritosComoExpedientes.length} favoritos)`);
+
       // Debug: verificar created_by_user_id en los expedientes
-      console.log(`[Mis Juzgados] Expedientes encontrados: ${exps.length}`);
-      console.log(`[Mis Juzgados] Expedientes con created_by_user_id:`, exps.filter((e: any) => e.created_by_user_id).length);
+      console.log(`[Mis Juzgados] Expedientes encontrados: ${todosLosExpedientes.length}`);
+      console.log(`[Mis Juzgados] Expedientes con created_by_user_id:`, todosLosExpedientes.filter((e: any) => e.created_by_user_id).length);
       
-      if (exps && exps.length > 0) {
-        // Obtener nombres de usuarios que crearon los expedientes
-        const userIds = [...new Set((exps ?? []).map((e: any) => e.created_by_user_id).filter(Boolean))];
+      if (todosLosExpedientes && todosLosExpedientes.length > 0) {
+        // Obtener nombres de usuarios que crearon los expedientes (solo los locales, no los favoritos)
+        const userIds = [...new Set((todosLosExpedientes ?? []).map((e: any) => e.created_by_user_id).filter(Boolean))];
         console.log(`[Mis Juzgados] UserIds únicos encontrados:`, userIds);
         
         let userNames: Record<string, string> = {};
@@ -326,7 +678,13 @@ export default function MisJuzgadosPage() {
           console.warn(`[Mis Juzgados] No hay userIds para buscar nombres`);
         }
         
-        const processedExps = (exps ?? []).map((e: any) => {
+        const processedExps = (todosLosExpedientes ?? []).map((e: any) => {
+          // Si es un favorito de pjn, ya tiene created_by_name = "PJN Favoritos"
+          if (e.is_pjn_favorito) {
+            return e;
+          }
+          
+          // Para expedientes locales, buscar el nombre del usuario
           const createdByName = e.created_by_user_id ? (userNames[e.created_by_user_id] || null) : null;
           if (!createdByName && e.created_by_user_id) {
             console.warn(`[Mis Juzgados] No se encontró nombre para userId: ${e.created_by_user_id}`);
@@ -513,8 +871,6 @@ export default function MisJuzgadosPage() {
         });
         
         console.log(`[Mis Juzgados] Cédulas procesadas con nombres:`, processedCedulas.filter((c: any) => c.created_by_name).length);
-        
-        setCedulas(processedCedulas as Cedula[]);
         
         setCedulas(processedCedulas as Cedula[]);
       } else {
