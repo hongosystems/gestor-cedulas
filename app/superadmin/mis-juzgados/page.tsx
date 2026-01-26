@@ -133,6 +133,7 @@ export default function MisJuzgadosPage() {
   const [activeTab, setActiveTab] = useState<"expedientes" | "cedulas" | "oficios">("expedientes");
   const [sortField, setSortField] = useState<SortField>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc"); // Por defecto: más viejo primero
+  const [semaforoFilter, setSemaforoFilter] = useState<Semaforo | null>(null);
   const [juzgadoFilter, setJuzgadoFilter] = useState<"mis_juzgados" | "todos">("mis_juzgados");
   const [userJuzgados, setUserJuzgados] = useState<string[]>([]);
   const [isAbogado, setIsAbogado] = useState(false);
@@ -1012,8 +1013,14 @@ export default function MisJuzgadosPage() {
       observaciones: 'observaciones' in item ? item.observaciones : null
     }));
 
+    // Aplicar filtro de semáforo
+    let filtered = itemsWithObservations;
+    if (semaforoFilter) {
+      filtered = itemsWithObservations.filter((item) => item.semaforo === semaforoFilter);
+    }
+
     // Ordenar items
-    const sorted = [...itemsWithObservations];
+    const sorted = [...filtered];
     
     sorted.sort((a, b) => {
       let compareA: number;
@@ -1045,7 +1052,7 @@ export default function MisJuzgadosPage() {
     });
 
     return sorted;
-  }, [activeTab, expedientes, cedulasFiltered, oficiosFiltered, sortField, sortDirection]);
+  }, [activeTab, expedientes, cedulasFiltered, oficiosFiltered, sortField, sortDirection, semaforoFilter]);
 
   async function logout() {
     await supabase.auth.signOut();
@@ -1295,12 +1302,90 @@ export default function MisJuzgadosPage() {
             <span style={{ color: "var(--muted)", fontSize: 13 }}>
               Semáforo automático por antigüedad:
             </span>
-            <SemaforoChip value="VERDE" />
+            <button
+              onClick={() => setSemaforoFilter(semaforoFilter === "VERDE" ? null : "VERDE")}
+              style={{
+                cursor: "pointer",
+                border: semaforoFilter === "VERDE" ? "2px solid rgba(46, 204, 113, 0.8)" : "1px solid rgba(46, 204, 113, 0.35)",
+                background: semaforoFilter === "VERDE" ? "rgba(46, 204, 113, 0.25)" : "rgba(46, 204, 113, 0.16)",
+                color: "rgba(210, 255, 226, 0.95)",
+                padding: "6px 12px",
+                borderRadius: 999,
+                fontWeight: 700,
+                fontSize: 12,
+                letterSpacing: 0.4,
+                minWidth: 88,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                transition: "all 0.2s ease",
+              }}
+            >
+              VERDE
+            </button>
             <span style={{ color: "var(--muted)", fontSize: 13 }}>0–29</span>
-            <SemaforoChip value="AMARILLO" />
+            <button
+              onClick={() => setSemaforoFilter(semaforoFilter === "AMARILLO" ? null : "AMARILLO")}
+              style={{
+                cursor: "pointer",
+                border: semaforoFilter === "AMARILLO" ? "2px solid rgba(241, 196, 15, 0.8)" : "1px solid rgba(241, 196, 15, 0.35)",
+                background: semaforoFilter === "AMARILLO" ? "rgba(241, 196, 15, 0.25)" : "rgba(241, 196, 15, 0.14)",
+                color: "rgba(255, 246, 205, 0.95)",
+                padding: "6px 12px",
+                borderRadius: 999,
+                fontWeight: 700,
+                fontSize: 12,
+                letterSpacing: 0.4,
+                minWidth: 88,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                transition: "all 0.2s ease",
+              }}
+            >
+              AMARILLO
+            </button>
             <span style={{ color: "var(--muted)", fontSize: 13 }}>30–59</span>
-            <SemaforoChip value="ROJO" />
+            <button
+              onClick={() => setSemaforoFilter(semaforoFilter === "ROJO" ? null : "ROJO")}
+              style={{
+                cursor: "pointer",
+                border: semaforoFilter === "ROJO" ? "2px solid rgba(231, 76, 60, 0.8)" : "1px solid rgba(231, 76, 60, 0.35)",
+                background: semaforoFilter === "ROJO" ? "rgba(231, 76, 60, 0.25)" : "rgba(231, 76, 60, 0.14)",
+                color: "rgba(255, 220, 216, 0.95)",
+                padding: "6px 12px",
+                borderRadius: 999,
+                fontWeight: 700,
+                fontSize: 12,
+                letterSpacing: 0.4,
+                minWidth: 88,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                transition: "all 0.2s ease",
+              }}
+            >
+              ROJO
+            </button>
             <span style={{ color: "var(--muted)", fontSize: 13 }}>60+ días</span>
+            {semaforoFilter && (
+              <button
+                onClick={() => setSemaforoFilter(null)}
+                style={{
+                  cursor: "pointer",
+                  border: "1px solid rgba(255,255,255,.3)",
+                  background: "rgba(255,255,255,.1)",
+                  color: "var(--text)",
+                  padding: "6px 12px",
+                  borderRadius: 999,
+                  fontWeight: 600,
+                  fontSize: 12,
+                  transition: "all 0.2s ease",
+                }}
+              >
+                Limpiar filtro
+              </button>
+            )}
           </div>
 
           {msg && <div className="error">{msg}</div>}
