@@ -64,6 +64,7 @@ export default function NuevaCedulaPage() {
 
   const [file, setFile] = useState<File | null>(null);
   const [tipoDocumento, setTipoDocumento] = useState<"CEDULA" | "OFICIO" | null>(null);
+  const [currentUserName, setCurrentUserName] = useState<string>("");
 
   // Se setea AL SUBIR ARCHIVO, no editable
   const [fechaCargaISO, setFechaCargaISO] = useState<string>("");
@@ -88,6 +89,26 @@ export default function NuevaCedulaPage() {
       if (!session) return;
 
       const uid = session.user.id;
+      
+      // Obtener nombre del usuario desde la sesión o user_metadata
+      const sessionFullName = (session.user.user_metadata as { full_name?: string })?.full_name;
+      const sessionEmail = (session.user.email || "").trim();
+      const baseName = (sessionFullName || "").trim() || sessionEmail;
+      setCurrentUserName(baseName);
+      
+      // Intentar mejorar el nombre desde profiles
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("full_name, email")
+        .eq("id", uid)
+        .maybeSingle();
+      
+      if (profile) {
+        const profileName = profile.full_name?.trim() || profile.email?.trim() || "";
+        if (profileName) {
+          setCurrentUserName(profileName);
+        }
+      }
 
       const { data: prof, error: pErr } = await supabase
         .from("profiles")
@@ -370,6 +391,43 @@ export default function NuevaCedulaPage() {
         <header className="nav">
           <h1>Nueva carga</h1>
           <div className="spacer" />
+          {currentUserName && (
+            <div
+              title={currentUserName}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "10px 16px",
+                background: "rgba(96,141,186,.15)",
+                border: "1px solid rgba(96,141,186,.35)",
+                borderRadius: 10,
+                color: "var(--brand-blue-2)",
+                fontSize: 14,
+                fontWeight: 600,
+                height: 40,
+                maxWidth: 200,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                marginRight: 8
+              }}
+            >
+              <div
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  background: "#4ade80",
+                  flexShrink: 0,
+                  boxShadow: "0 0 0 2px rgba(74, 222, 128, 0.2)"
+                }}
+              />
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                {currentUserName}
+              </span>
+            </div>
+          )}
           <Link className="btn" href="/app">
             Volver
           </Link>

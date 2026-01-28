@@ -41,6 +41,13 @@ export default function LoginPage() {
       const isAdminCedulas = roleData.is_admin_cedulas === true;
       const isAbogado = roleData.is_abogado === true;
 
+      // Prioridad: Abogado/Superadmin siempre entra directo al Dashboard
+      // (evitar pantalla intermedia aunque tenga roles adicionales)
+      if (isSuperadmin || isAbogado) {
+        window.location.href = "/superadmin";
+        return;
+      }
+
       // Contar cuántos roles tiene
       const roleCount = [isSuperadmin, isAdminExp, isAdminCedulas, isAbogado].filter(Boolean).length;
 
@@ -51,11 +58,6 @@ export default function LoginPage() {
       }
 
       // Si solo tiene un rol, redirigir directamente
-      if (isSuperadmin || isAbogado) {
-        window.location.href = "/superadmin";
-        return;
-      }
-      
       if (isAdminExp) {
         window.location.href = "/app/expedientes";
         return;
@@ -111,6 +113,13 @@ export default function LoginPage() {
     const isAdminCedulas = roleData.is_admin_cedulas === true;
     const isAbogado = roleData.is_abogado === true;
 
+    // Prioridad: Abogado/Superadmin siempre entra directo al Dashboard
+    // (evitar pantalla intermedia aunque tenga roles adicionales)
+    if (isSuperadmin || isAbogado) {
+      window.location.href = "/superadmin";
+      return;
+    }
+
     // Contar cuántos roles tiene
     const roleCount = [isSuperadmin, isAdminExp, isAdminCedulas, isAbogado].filter(Boolean).length;
 
@@ -121,11 +130,6 @@ export default function LoginPage() {
     }
 
     // Si solo tiene un rol, redirigir directamente
-    if (isSuperadmin || isAbogado) {
-      window.location.href = "/superadmin";
-      return;
-    }
-    
     if (isAdminExp) {
       window.location.href = "/app/expedientes";
       return;

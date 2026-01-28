@@ -176,7 +176,7 @@ Los usuarios con rol **Abogado** tienen acceso a expedientes, cédulas y oficios
 | `/` | Página de inicio | Redirige según rol |
 | `/login` | Página de login | Público |
 | `/logout` | Cerrar sesión | Autenticado |
-| `/select-role` | Selección de rol (si tiene múltiples) | Autenticado con múltiples roles |
+| `/select-role` | Selección de rol (solo para roles no-abogado/no-superadmin) | Autenticado con múltiples roles |
 | `/cambiar-password` | Cambio de contraseña obligatorio | Autenticado (si `must_change_password = true`) |
 
 ### Rutas de Gestión de Cédulas/Oficios
@@ -591,7 +591,8 @@ Las migraciones se encuentran en la carpeta `migrations/` y deben ejecutarse en 
 
 ### Múltiples Roles
 
-- Si un usuario tiene múltiples roles, se redirige a `/select-role` para elegir
+- Si un usuario tiene múltiples roles **y NO es Abogado ni Superadmin**, se redirige a `/select-role` para elegir
+- Si el usuario es **Abogado o Superadmin**, entra directo a `/superadmin` (sin pantalla intermedia)
 - Los SuperAdmins pueden acceder a todo sin selección
 
 ### Abogados y Juzgados

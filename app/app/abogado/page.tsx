@@ -93,6 +93,7 @@ export default function AbogadoHomePage() {
   const [sortField, setSortField] = useState<SortField>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [semaforoFilter, setSemaforoFilter] = useState<Semaforo | null>(null);
+  const [createdByFilter, setCreatedByFilter] = useState<string>("all"); // "all" o user_id
   const [userRoles, setUserRoles] = useState<{
     isSuperadmin: boolean;
     isAdminExpedientes: boolean;
@@ -103,6 +104,7 @@ export default function AbogadoHomePage() {
     isAbogado: false,
   });
   const [menuOpen, setMenuOpen] = useState(false);
+  const [currentUserName, setCurrentUserName] = useState<string>("");
 
   // Cerrar menú al hacer clic fuera
   useEffect(() => {
@@ -122,6 +124,26 @@ export default function AbogadoHomePage() {
       if (!session) return;
 
       const uid = session.user.id;
+      
+      // Obtener nombre del usuario desde la sesión o user_metadata
+      const sessionFullName = (session.user.user_metadata as any)?.full_name as string | undefined;
+      const sessionEmail = (session.user.email || "").trim();
+      const baseName = (sessionFullName || "").trim() || sessionEmail;
+      setCurrentUserName(baseName);
+      
+      // Intentar mejorar el nombre desde profiles
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("full_name, email")
+        .eq("id", uid)
+        .maybeSingle();
+      
+      if (profile) {
+        const profileName = profile.full_name?.trim() || profile.email?.trim() || "";
+        if (profileName) {
+          setCurrentUserName(profileName);
+        }
+      }
 
       // Verificar roles del usuario
       const { data: roleData, error: roleErr } = await supabase
@@ -167,92 +189,56 @@ export default function AbogadoHomePage() {
         return;
       }
 
-      // Obtener juzgados asignados al usuario ABOGADO
-      const { data: juzgadosData, error: juzgadosErr } = await supabase
-        .from("user_juzgados")
-        .select("juzgado")
-        .eq("user_id", uid);
-      
-      if (juzgadosErr || !juzgadosData || juzgadosData.length === 0) {
-        setMsg("No tienes juzgados asignados. Contacta al administrador.");
-        setLoading(false);
-        return;
-      }
-
-      const juzgadosAsignados = juzgadosData.map(j => j.juzgado);
-      
-      // Normalizar juzgados (eliminar espacios extra, normalizar a mayúsculas)
-      const juzgadosNormalizados = juzgadosAsignados.map(j => 
-        j?.trim().replace(/\s+/g, " ").toUpperCase()
-      );
-
-      // Función para normalizar juzgado para comparación
-      const normalizarJuzgado = (j: string | null) => {
-        if (!j) return "";
-        return j.trim().replace(/\s+/g, " ").toUpperCase();
-      };
-
-      // Cargar todos los expedientes abiertos y filtrar por juzgados asignados (comparación flexible)
-      // Intentar incluir observaciones, pero si no existe la columna, usar select sin ella
-      let queryExps = supabase
-        .from("expedientes")
-        .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado, observaciones, created_by_user_id")
-        .eq("estado", "ABIERTO")
-        .order("fecha_ultima_modificacion", { ascending: false });
-      
-      const { data: allExps, error: eErr } = await queryExps;
-      
-      // Si el error es porque la columna observaciones o created_by_user_id no existe, intentar sin ellas
-      let allExpsData = allExps;
-      if (eErr && (eErr.message?.includes("observaciones") || eErr.message?.includes("created_by_user_id") || eErr.message?.includes("does not exist"))) {
-        const { data: allExps2, error: eErr2 } = await supabase
+      // ABOGADO: ver lo que cargó (evitar pantalla vacía por falta de juzgados asignados)
+      // Preferimos filtrar por created_by_user_id; si la columna no existe, fallback a owner_user_id.
+      let exps: any[] = [];
+      {
+        const { data: byCreator, error: byCreatorErr } = await supabase
           .from("expedientes")
-          .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado")
+          .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado, observaciones, created_by_user_id")
           .eq("estado", "ABIERTO")
+          .eq("created_by_user_id", uid)
           .order("fecha_ultima_modificacion", { ascending: false });
-        
-        if (eErr2) {
-          setMsg(`Error al cargar expedientes: ${eErr2.message}`);
-          setLoading(false);
-          return;
-        }
-        
-        // Establecer observaciones como null para todos
-        allExpsData = (allExps2 ?? []).map((e: any) => ({
-          ...e,
-          observaciones: null
-        }));
-      } else if (eErr) {
-        setMsg(`Error al cargar expedientes: ${eErr.message}`);
-        setLoading(false);
-        return;
-      } else {
-        // Si no hubo error, verificar que observaciones se están cargando
-        const expsWithObservaciones = (allExpsData ?? []).filter((e: any) => e.observaciones && e.observaciones.trim());
-        console.log(`[Abogado] Expedientes con observaciones cargadas: ${expsWithObservaciones.length}/${allExpsData?.length || 0}`);
-        if (allExpsData && allExpsData.length > 0) {
-          console.log(`[Abogado] Primer expediente tiene observaciones:`, allExpsData[0].observaciones || "null/vacío");
+
+        if (byCreatorErr) {
+          const msgErr = byCreatorErr.message || "";
+          const isMissingColumn =
+            msgErr.includes("created_by_user_id") ||
+            msgErr.includes("observaciones") ||
+            msgErr.includes("does not exist");
+
+          if (!isMissingColumn) {
+            setMsg(`Error al cargar expedientes: ${msgErr}`);
+            setLoading(false);
+            return;
+          }
+
+          // Fallback sin observaciones/created_by_user_id
+          const { data: byOwner, error: byOwnerErr } = await supabase
+            .from("expedientes")
+            .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado")
+            .eq("estado", "ABIERTO")
+            .eq("owner_user_id", uid)
+            .order("fecha_ultima_modificacion", { ascending: false });
+
+          if (byOwnerErr) {
+            setMsg(`Error al cargar expedientes: ${byOwnerErr.message}`);
+            setLoading(false);
+            return;
+          }
+
+          exps = (byOwner ?? []).map((e: any) => ({
+            ...e,
+            observaciones: null,
+            created_by_user_id: uid,
+          }));
+        } else {
+          exps = (byCreator ?? []).map((e: any) => ({
+            ...e,
+            observaciones: e.observaciones !== undefined ? e.observaciones : null,
+          }));
         }
       }
-      
-      // Filtrar expedientes que coincidan con los juzgados asignados (comparación flexible)
-      const exps = allExpsData?.filter((e: any) => {
-        const juzgadoNormalizado = normalizarJuzgado(e.juzgado);
-        return juzgadosNormalizados.some(jAsignado => {
-          // Comparación exacta normalizada
-          if (juzgadoNormalizado === jAsignado) return true;
-          // Comparación parcial (por si hay pequeñas diferencias en formato)
-          const numAsignado = jAsignado.match(/N[°º]\s*(\d+)/i)?.[1];
-          const numExpediente = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
-          if (numAsignado && numExpediente && numAsignado === numExpediente) {
-            // Verificar que ambos contengan "Juzgado Nacional" y el mismo número
-            if (jAsignado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
-              return true;
-            }
-          }
-          return false;
-        }) ?? false;
-      }) ?? [];
       
       if (!exps || exps.length === 0) {
         setExpedientes([]);
@@ -300,8 +286,26 @@ export default function AbogadoHomePage() {
     })();
   }, []);
 
+  const createdByOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const e of expedientes) {
+      if (!e.created_by_user_id) continue;
+      map.set(e.created_by_user_id, e.created_by_name || "Sin nombre");
+    }
+    return [...map.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, "es", { sensitivity: "base" }));
+  }, [expedientes]);
+
   const rows = useMemo(() => {
-    let mapped = expedientes.map((e) => {
+    let mapped = expedientes;
+
+    // Filtro por "Cargado por"
+    if (createdByFilter !== "all") {
+      mapped = mapped.filter((e) => e.created_by_user_id === createdByFilter);
+    }
+
+    let mappedWithMeta = mapped.map((e) => {
       const fechaModISO = e.fecha_ultima_modificacion || "";
       const dias = fechaModISO ? daysSince(fechaModISO) : null;
       const diasValidos = dias !== null && !isNaN(dias) && dias >= 0 ? dias : null;
@@ -311,12 +315,12 @@ export default function AbogadoHomePage() {
 
     // Aplicar filtro de semáforo
     if (semaforoFilter) {
-      mapped = mapped.filter((e) => e.sem === semaforoFilter);
+      mappedWithMeta = mappedWithMeta.filter((e) => e.sem === semaforoFilter);
     }
 
     // Aplicar ordenamiento
     if (sortField) {
-      mapped.sort((a, b) => {
+      mappedWithMeta.sort((a, b) => {
         let compareA: number;
         let compareB: number;
 
@@ -343,8 +347,8 @@ export default function AbogadoHomePage() {
       });
     }
 
-    return mapped;
-  }, [expedientes, sortField, sortDirection, semaforoFilter]);
+    return mappedWithMeta;
+  }, [expedientes, sortField, sortDirection, semaforoFilter, createdByFilter]);
 
   function handleSort(field: SortField) {
     if (sortField === field) {
@@ -519,34 +523,74 @@ export default function AbogadoHomePage() {
                 Expedientes - Mis Juzgados
               </h1>
               <p style={{ margin: "4px 0 0 0", fontSize: 13, color: "rgba(234,243,255,.65)", fontWeight: 400 }}>
-                Expedientes de mis juzgados asignados
+                Expedientes cargados por mí
               </p>
             </div>
           </div>
-          <button 
-            onClick={logout}
-            style={{
-              padding: "10px 16px",
-              background: "rgba(225,57,64,.15)",
-              border: "1px solid rgba(225,57,64,.35)",
-              borderRadius: 10,
-              color: "#ffcccc",
-              cursor: "pointer",
-              fontSize: 14,
-              fontWeight: 600,
-              transition: "all 0.2s ease",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "rgba(225,57,64,.22)";
-              e.currentTarget.style.borderColor = "rgba(225,57,64,.45)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "rgba(225,57,64,.15)";
-              e.currentTarget.style.borderColor = "rgba(225,57,64,.35)";
-            }}
-          >
-            Salir
-          </button>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            {/* Nombre del usuario */}
+            {currentUserName && (
+              <div
+                title={currentUserName}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "10px 16px",
+                  background: "rgba(96,141,186,.15)",
+                  border: "1px solid rgba(96,141,186,.35)",
+                  borderRadius: 10,
+                  color: "var(--brand-blue-2)",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  height: 40,
+                  maxWidth: 200,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap"
+                }}
+              >
+                <div
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: "50%",
+                    background: "#4ade80",
+                    flexShrink: 0,
+                    boxShadow: "0 0 0 2px rgba(74, 222, 128, 0.2)"
+                  }}
+                />
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {currentUserName}
+                </span>
+              </div>
+            )}
+            <button 
+              onClick={logout}
+              style={{
+                padding: "10px 16px",
+                background: "rgba(225,57,64,.15)",
+                border: "1px solid rgba(225,57,64,.35)",
+                borderRadius: 10,
+                color: "#ffcccc",
+                cursor: "pointer",
+                fontSize: 14,
+                fontWeight: 600,
+                transition: "all 0.2s ease",
+                height: 40
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "rgba(225,57,64,.22)";
+                e.currentTarget.style.borderColor = "rgba(225,57,64,.45)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "rgba(225,57,64,.15)";
+                e.currentTarget.style.borderColor = "rgba(225,57,64,.35)";
+              }}
+            >
+              Salir
+            </button>
+          </div>
         </header>
 
         <div className="page">
@@ -638,6 +682,36 @@ export default function AbogadoHomePage() {
                 Limpiar filtro
               </button>
             )}
+
+            {/* Filtro "Cargado por" */}
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ color: "var(--muted)", fontSize: 13, fontWeight: 600 }}>
+                Cargado por:
+              </span>
+              <select
+                value={createdByFilter}
+                onChange={(e) => setCreatedByFilter(e.target.value)}
+                style={{
+                  padding: "8px 10px",
+                  background: "rgba(255,255,255,.06)",
+                  border: "1px solid rgba(255,255,255,.16)",
+                  borderRadius: 10,
+                  color: "var(--text)",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  outline: "none",
+                  minWidth: 220,
+                }}
+              >
+                <option value="all">Todos</option>
+                {createdByOptions.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {msg && <div className="error">{msg}</div>}

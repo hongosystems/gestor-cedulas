@@ -285,12 +285,14 @@ export default function SuperAdminPage() {
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("all");
   const [selectedUserId, setSelectedUserId] = useState<string>("all");
-  const [juzgadoFilter, setJuzgadoFilter] = useState<"mis_juzgados" | "todos">("todos");
+  const [juzgadoFilter, setJuzgadoFilter] = useState<"mis_juzgados" | "todos" | "beneficio" | string>("todos");
   const [userJuzgados, setUserJuzgados] = useState<string[]>([]);
   const [customStartDate, setCustomStartDate] = useState<string>("");
   const [customEndDate, setCustomEndDate] = useState<string>("");
-  const [hasExpedientesRole, setHasExpedientesRole] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string>("");
+  const [currentUserName, setCurrentUserName] = useState<string>("");
+  const [roleFlags, setRoleFlags] = useState<{ isSuperadmin: boolean; isAbogado: boolean }>({ isSuperadmin: false, isAbogado: false });
 
   // Cerrar menú al hacer clic fuera
   useEffect(() => {
@@ -308,6 +310,13 @@ export default function SuperAdminPage() {
       const { data: sess } = await supabase.auth.getSession();
       if (!sess.session) { window.location.href = "/login"; return; }
       const uid = sess.session.user.id;
+      setCurrentUserId(uid);
+      
+      // Obtener nombre del usuario desde la sesión o user_metadata
+      const sessionFullName = (sess.session.user.user_metadata as { full_name?: string })?.full_name;
+      const sessionEmail = (sess.session.user.email || "").trim();
+      const baseName = (sessionFullName || "").trim() || sessionEmail;
+      setCurrentUserName(baseName);
 
       const { data: prof, error: pErr } = await supabase
         .from("profiles")
@@ -319,7 +328,7 @@ export default function SuperAdminPage() {
       if (prof?.must_change_password) { window.location.href = "/cambiar-password"; return; }
 
       // Verificar roles del usuario (superadmin, abogado, expedientes)
-      const { data: roleData, error: roleErr } = await supabase
+      const { data: roleData } = await supabase
         .from("user_roles")
         .select("is_superadmin, is_abogado, is_admin_expedientes")
         .eq("user_id", uid)
@@ -328,6 +337,8 @@ export default function SuperAdminPage() {
       const isSuperadmin = roleData?.is_superadmin === true;
       const isAbogado = roleData?.is_abogado === true;
       const isAdminExpedientes = roleData?.is_admin_expedientes === true;
+
+      setRoleFlags({ isSuperadmin, isAbogado });
       
       console.log(`[Dashboard] Roles del usuario:`, {
         isSuperadmin,
@@ -341,9 +352,12 @@ export default function SuperAdminPage() {
         return; 
       }
 
-      // Verificar si también tiene rol de expedientes
-      const hasExpRole = isAdminExpedientes || isAbogado;
-      setHasExpedientesRole(hasExpRole);
+      // Si es abogado (y no superadmin), fijar el filtro de usuario a sí mismo
+      // para evitar inconsistencias al navegar por el dashboard.
+      if (isAbogado && !isSuperadmin) {
+        setSelectedUserId(uid);
+        setJuzgadoFilter("mis_juzgados");
+      }
 
       // Obtener juzgados asignados al usuario (si es abogado o superadmin)
       // Los superadmins que también son abogados pueden tener juzgados asignados
@@ -362,6 +376,7 @@ export default function SuperAdminPage() {
         }
       }
 
+      // Cargar TODOS los perfiles primero
       const { data: profs, error: profsErr } = await supabase
         .from("profiles")
         .select("id, full_name, email");
@@ -369,11 +384,23 @@ export default function SuperAdminPage() {
       if (profsErr) { setMsg(profsErr.message); setChecking(false); return; }
 
       const map: Record<string, Profile> = {};
-      (profs ?? []).forEach((p: any) => { map[p.id] = p; });
+      const profList = (profs ?? []) as unknown as Profile[];
+      profList.forEach((p) => { map[p.id] = p; });
+      
+      // Mejorar el nombre del usuario actual si hay perfil en la BD
+      if (map[uid]) {
+        const profileName = map[uid].full_name?.trim() || map[uid].email?.trim() || "";
+        if (profileName) {
+          setCurrentUserName(profileName);
+        }
+      }
+      
+      // Después de cargar expedientes y cédulas, asegurar que todos los usuarios tengan perfil
+      // (esto se hará en un useEffect separado después de cargar los datos)
       setProfiles(map);
 
       // Intentar obtener con tipo_documento y created_by_user_id, pero hacer fallback si no existe la columna
-      let query = supabase
+      const query = supabase
         .from("cedulas")
         .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado, tipo_documento, created_by_user_id")
         .neq("estado", "CERRADA")
@@ -396,7 +423,7 @@ export default function SuperAdminPage() {
             return; 
           }
           
-          const csWithNull = (cs2 ?? []).map((c: any) => ({ ...c, tipo_documento: null, created_by_user_id: null }));
+          const csWithNull = (cs2 ?? []).map((c) => ({ ...(c as Record<string, unknown>), tipo_documento: null, created_by_user_id: null }));
           setAllCedulas(csWithNull as Cedula[]);
         } else {
           setMsg(cErr.message);
@@ -411,8 +438,9 @@ export default function SuperAdminPage() {
           juzgadoFilter: "todos (carga inicial)"
         });
         // Log de juzgados únicos en las cédulas cargadas
-        const juzgadosUnicos = [...new Set((cs ?? []).map((c: any) => c.juzgado).filter(Boolean))];
-        const usuariosUnicos = [...new Set((cs ?? []).map((c: any) => c.owner_user_id))];
+        const csTyped = (cs ?? []) as unknown as Cedula[];
+        const juzgadosUnicos = [...new Set(csTyped.map((c) => c.juzgado).filter(Boolean))];
+        const usuariosUnicos = [...new Set(csTyped.map((c) => c.owner_user_id))];
         console.log(`[Dashboard] Juzgados únicos en cédulas: ${juzgadosUnicos.length}`, juzgadosUnicos.slice(0, 10));
         console.log(`[Dashboard] Usuarios únicos en cédulas: ${usuariosUnicos.length}`, usuariosUnicos);
       }
@@ -438,8 +466,9 @@ export default function SuperAdminPage() {
           juzgadoFilter: "todos (carga inicial)"
         });
         // Log de juzgados únicos en los expedientes cargados
-        const juzgadosUnicos = [...new Set((exps ?? []).map((e: any) => e.juzgado).filter(Boolean))];
-        const usuariosUnicos = [...new Set((exps ?? []).map((e: any) => e.owner_user_id))];
+        const expsTyped = (exps ?? []) as unknown as Expediente[];
+        const juzgadosUnicos = [...new Set(expsTyped.map((e) => e.juzgado).filter(Boolean))];
+        const usuariosUnicos = [...new Set(expsTyped.map((e) => e.owner_user_id))];
         console.log(`[Dashboard] Juzgados únicos en expedientes: ${juzgadosUnicos.length}`, juzgadosUnicos.slice(0, 10));
         console.log(`[Dashboard] Usuarios únicos en expedientes: ${usuariosUnicos.length}`, usuariosUnicos);
       }
@@ -485,13 +514,60 @@ export default function SuperAdminPage() {
     })();
   }, []);
 
+  const selectedUserJuzgados = useMemo(() => {
+    if (selectedUserId === "all") return userJuzgados;
+    return userJuzgadosMap[selectedUserId] ?? [];
+  }, [selectedUserId, userJuzgados, userJuzgadosMap]);
+
+  // Cargar perfiles faltantes de usuarios que tienen expedientes/cédulas pero no están en profiles
+  useEffect(() => {
+    if (Object.keys(profiles).length === 0) return; // Esperar a que se carguen los perfiles iniciales
+    
+    const userIdsEnDatos = new Set<string>();
+    
+    // Recolectar todos los owner_user_id de cédulas y expedientes
+    allCedulas.forEach(c => {
+      if (c.owner_user_id && c.owner_user_id.trim() !== "") {
+        userIdsEnDatos.add(c.owner_user_id);
+      }
+    });
+    
+    allExpedientes.forEach(e => {
+      if (e.owner_user_id && e.owner_user_id.trim() !== "") {
+        userIdsEnDatos.add(e.owner_user_id);
+      }
+    });
+    
+    // Identificar usuarios que no están en profiles
+    const userIdsFaltantes = Array.from(userIdsEnDatos).filter(uid => !profiles[uid]);
+    
+    if (userIdsFaltantes.length > 0) {
+      console.log(`[Dashboard] Cargando ${userIdsFaltantes.length} perfiles faltantes...`);
+      
+      supabase
+        .from("profiles")
+        .select("id, full_name, email")
+        .in("id", userIdsFaltantes)
+        .then(({ data: profsFaltantes, error: err }) => {
+          if (!err && profsFaltantes && profsFaltantes.length > 0) {
+            const nuevosPerfiles: Record<string, Profile> = { ...profiles };
+            (profsFaltantes as Profile[]).forEach((p) => {
+              nuevosPerfiles[p.id] = p;
+            });
+            setProfiles(nuevosPerfiles);
+            console.log(`[Dashboard] ✅ ${profsFaltantes.length} perfiles adicionales cargados`);
+          }
+        });
+    }
+  }, [allCedulas, allExpedientes, profiles]);
+
   // Asegurar que si no hay juzgados asignados, el filtro vuelva a "todos"
   useEffect(() => {
-    if (juzgadoFilter === "mis_juzgados" && userJuzgados.length === 0) {
+    if (juzgadoFilter === "mis_juzgados" && selectedUserJuzgados.length === 0) {
       console.log(`[Dashboard] Usuario no tiene juzgados asignados, cambiando filtro a "todos"`);
       setJuzgadoFilter("todos");
     }
-  }, [juzgadoFilter, userJuzgados.length]);
+  }, [juzgadoFilter, selectedUserJuzgados.length]);
 
   // Filtrar cédulas según los filtros seleccionados
   useEffect(() => {
@@ -511,9 +587,9 @@ export default function SuperAdminPage() {
       console.log(`[Dashboard] Filtro por usuario: ${beforeUserFilter} -> ${filtered.length}`);
     }
 
-    // Filtro por juzgados - SOLO si está en "mis_juzgados"
-    if (juzgadoFilter === "mis_juzgados" && userJuzgados.length > 0) {
-      const juzgadosNormalizados = userJuzgados.map(j => 
+    // Filtro por juzgados
+    if (juzgadoFilter === "mis_juzgados" && selectedUserJuzgados.length > 0) {
+      const juzgadosNormalizados = selectedUserJuzgados.map(j => 
         j?.trim().replace(/\s+/g, " ").toUpperCase()
       );
       
@@ -542,11 +618,39 @@ export default function SuperAdminPage() {
       
       console.log(`[Dashboard] Filtro cédulas por juzgados (mis_juzgados): ${beforeJuzgadoFilter} -> ${filtered.length}`, {
         juzgadoFilter,
-        userJuzgadosCount: userJuzgados.length,
+        userJuzgadosCount: selectedUserJuzgados.length,
         juzgadosNormalizados: juzgadosNormalizados.slice(0, 5) // Solo primeros 5 para no saturar
       });
     } else if (juzgadoFilter === "todos") {
       console.log(`[Dashboard] Filtro juzgados = "todos" - NO aplicando filtro de juzgados. Cédulas: ${filtered.length}`);
+    } else if (juzgadoFilter && juzgadoFilter !== "mis_juzgados" && juzgadoFilter !== "todos") {
+      // Filtro por juzgado específico
+      const beforeJuzgadoFilter = filtered.length;
+      const juzgadoFiltroNormalizado = normalizarJuzgado(juzgadoFilter);
+      
+      filtered = filtered.filter(c => {
+        if (!c.juzgado) return false;
+        const juzgadoNormalizado = normalizarJuzgado(c.juzgado);
+        
+        // Comparación exacta normalizada
+        if (juzgadoNormalizado === juzgadoFiltroNormalizado) return true;
+        
+        // Comparación por número de juzgado (más flexible)
+        const numFiltro = juzgadoFiltroNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
+        const numJuzgado = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
+        if (numFiltro && numJuzgado && numFiltro === numJuzgado) {
+          if (juzgadoFiltroNormalizado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
+            return true;
+          }
+        }
+        
+        return false;
+      });
+      
+      console.log(`[Dashboard] Filtro cédulas por juzgado específico: ${beforeJuzgadoFilter} -> ${filtered.length}`, {
+        juzgadoFilter,
+        juzgadoFiltroNormalizado
+      });
     }
 
     // Filtro por tiempo
@@ -562,7 +666,7 @@ export default function SuperAdminPage() {
     }
 
     setCedulas(filtered);
-  }, [allCedulas, timeFilter, selectedUserId, juzgadoFilter, userJuzgados, customStartDate, customEndDate]);
+  }, [allCedulas, timeFilter, selectedUserId, juzgadoFilter, selectedUserJuzgados, customStartDate, customEndDate, userJuzgados.length]);
 
   // Función para normalizar juzgado para comparación
   const normalizarJuzgado = (j: string | null) => {
@@ -570,64 +674,72 @@ export default function SuperAdminPage() {
     return j.trim().replace(/\s+/g, " ").toUpperCase();
   };
 
-  // Convertir favoritos de pjn-scraper a expedientes y asignarlos a usuarios según juzgados
+  // Obtener todos los juzgados únicos de cédulas, expedientes y favoritos, ordenados ascendente
+  const todosLosJuzgados = useMemo(() => {
+    const juzgadosSet = new Set<string>();
+    
+    // Agregar juzgados de cédulas
+    allCedulas.forEach(c => {
+      if (c.juzgado && c.juzgado.trim()) {
+        juzgadosSet.add(c.juzgado.trim());
+      }
+    });
+    
+    // Agregar juzgados de expedientes
+    allExpedientes.forEach(e => {
+      if (e.juzgado && e.juzgado.trim()) {
+        juzgadosSet.add(e.juzgado.trim());
+      }
+    });
+    
+    // Agregar juzgados de favoritos
+    pjnFavoritos.forEach(f => {
+      if (f.juzgado && f.juzgado.trim()) {
+        juzgadosSet.add(f.juzgado.trim());
+      }
+    });
+    
+    // Convertir a array y ordenar ascendente
+    const juzgadosArray = Array.from(juzgadosSet);
+    juzgadosArray.sort((a, b) => {
+      // Normalizar para comparación
+      const aNorm = normalizarJuzgado(a);
+      const bNorm = normalizarJuzgado(b);
+      return aNorm.localeCompare(bNorm, 'es', { numeric: true, sensitivity: 'base' });
+    });
+    
+    return juzgadosArray;
+  }, [allCedulas, allExpedientes, pjnFavoritos]);
+
+  // Convertir favoritos de pjn-scraper a expedientes (SIN duplicar - solo mostrar favoritos filtrados por juzgado)
   const favoritosComoExpedientes = useMemo(() => {
-    const expedientesFromFavoritos: Expediente[] = [];
-    
-    // Función para verificar si un juzgado coincide con los juzgados asignados a un usuario
-    const juzgadoCoincide = (favoritoJuzgado: string | null, userJuzgados: string[]): boolean => {
-      if (!favoritoJuzgado || userJuzgados.length === 0) return false;
-      
-      const favoritoNormalizado = normalizarJuzgado(favoritoJuzgado);
-      const userJuzgadosNormalizados = userJuzgados.map(j => normalizarJuzgado(j));
-      
-      // Comparación exacta
-      if (userJuzgadosNormalizados.includes(favoritoNormalizado)) return true;
-      
-      // Comparación por número de juzgado
-      return userJuzgadosNormalizados.some(jAsignado => {
-        const numAsignado = jAsignado.match(/N[°º]\s*(\d+)/i)?.[1];
-        const numFavorito = favoritoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
-        if (numAsignado && numFavorito && numAsignado === numFavorito) {
-          if (jAsignado.includes("JUZGADO") && favoritoNormalizado.includes("JUZGADO")) {
-            return true;
-          }
-        }
-        return false;
-      });
-    };
-    
-    // Para cada favorito, asignarlo a usuarios que tengan juzgados coincidentes
-    for (const favorito of pjnFavoritos) {
+    // Convertir TODOS los favoritos a expedientes, sin asignar a usuarios específicos
+    // El filtrado por juzgado se hará después en el useEffect de filtrado
+    const expedientesFromFavoritos: Expediente[] = pjnFavoritos.map((favorito) => {
       const numeroExpediente = `${favorito.jurisdiccion} ${favorito.numero}/${favorito.anio}`;
       const fechaISO = ddmmaaaaToISO(favorito.fecha_ultima_carga);
       
-      // Buscar usuarios que tengan juzgados que coincidan con este favorito
-      for (const [userId, userJuzgados] of Object.entries(userJuzgadosMap)) {
-        if (juzgadoCoincide(favorito.juzgado, userJuzgados)) {
-          expedientesFromFavoritos.push({
-            id: `pjn_${favorito.id}_${userId}`, // ID único por usuario
-            owner_user_id: userId,
-            caratula: favorito.caratula,
-            juzgado: favorito.juzgado,
-            numero_expediente: numeroExpediente,
-            fecha_ultima_modificacion: fechaISO,
-            estado: "ABIERTO",
-            created_by_user_id: null,
-            is_pjn_favorito: true,
-          });
-        }
-      }
-    }
+      return {
+        id: `pjn_${favorito.id}`, // ID único por favorito (sin duplicar por usuario)
+        owner_user_id: "", // Los favoritos no tienen owner específico
+        caratula: favorito.caratula,
+        juzgado: favorito.juzgado,
+        numero_expediente: numeroExpediente,
+        fecha_ultima_modificacion: fechaISO,
+        estado: "ABIERTO",
+        created_by_user_id: null,
+        is_pjn_favorito: true,
+      };
+    });
     
-    console.log(`[Dashboard] Favoritos convertidos a expedientes: ${expedientesFromFavoritos.length} (de ${pjnFavoritos.length} favoritos)`);
+    console.log(`[Dashboard] Favoritos convertidos a expedientes: ${expedientesFromFavoritos.length} (de ${pjnFavoritos.length} favoritos únicos)`);
     return expedientesFromFavoritos;
-  }, [pjnFavoritos, userJuzgadosMap]);
+  }, [pjnFavoritos]);
 
   // Filtrar expedientes según los filtros seleccionados
   useEffect(() => {
     // Combinar expedientes locales con favoritos convertidos
-    let filtered = [...allExpedientes, ...favoritosComoExpedientes];
+    let filtered: Expediente[] = [...allExpedientes, ...favoritosComoExpedientes];
     const initialCount = filtered.length;
     
     console.log(`[Dashboard] Filtrando expedientes - Inicial: ${initialCount}, Filtro juzgados: ${juzgadoFilter}`, {
@@ -639,13 +751,29 @@ export default function SuperAdminPage() {
     // Filtro por usuario
     if (selectedUserId !== "all") {
       const beforeUserFilter = filtered.length;
-      filtered = filtered.filter(e => e.owner_user_id === selectedUserId);
-      console.log(`[Dashboard] Filtro por usuario: ${beforeUserFilter} -> ${filtered.length}`);
+      const juzgadosDelUsuario = selectedUserJuzgados.map(j => j?.trim().replace(/\s+/g, " ").toUpperCase());
+
+      // Mantener expedientes locales por owner, y favoritos PJN por juzgado asignado del usuario seleccionado
+      // IMPORTANTE: Asignar owner_user_id a favoritos PJN para que aparezcan correctamente en el ranking
+      filtered = filtered.map(e => {
+        if (e.is_pjn_favorito) {
+          if (!e.juzgado) return null;
+          const juzgadoNormalizado = normalizarJuzgado(e.juzgado);
+          if (juzgadosDelUsuario.includes(juzgadoNormalizado)) {
+            // Asignar el owner_user_id del usuario seleccionado para que aparezca en el ranking
+            return { ...e, owner_user_id: selectedUserId };
+          }
+          return null;
+        }
+        return e.owner_user_id === selectedUserId ? e : null;
+      }).filter((e): e is Expediente => e !== null);
+
+      console.log(`[Dashboard] Filtro por usuario (local por owner, PJN por juzgado asignado): ${beforeUserFilter} -> ${filtered.length}`);
     }
 
-    // Filtro por juzgados - SOLO si está en "mis_juzgados"
-    if (juzgadoFilter === "mis_juzgados" && userJuzgados.length > 0) {
-      const juzgadosNormalizados = userJuzgados.map(j => 
+    // Filtro por juzgados
+    if (juzgadoFilter === "mis_juzgados" && selectedUserJuzgados.length > 0) {
+      const juzgadosNormalizados = selectedUserJuzgados.map(j => 
         j?.trim().replace(/\s+/g, " ").toUpperCase()
       );
       
@@ -679,6 +807,77 @@ export default function SuperAdminPage() {
       });
     } else if (juzgadoFilter === "todos") {
       console.log(`[Dashboard] Filtro juzgados = "todos" - NO aplicando filtro de juzgados. Expedientes: ${filtered.length}`);
+    } else if (juzgadoFilter === "beneficio") {
+      // Filtro por "BENEFICIO DE LITIGAR SIN GASTOS" en la carátula
+      const beforeBeneficioFilter = filtered.length;
+      const fraseBeneficio = "BENEFICIO DE LITIGAR SIN GASTOS";
+      
+      filtered = filtered.filter(e => {
+        // Verificar que tenga la frase en la carátula (case insensitive)
+        if (!e.caratula) return false;
+        const caratulaUpper = e.caratula.toUpperCase();
+        if (!caratulaUpper.includes(fraseBeneficio)) return false;
+        
+        // Si el usuario tiene juzgados asignados, respetar la distribución por juzgado
+        if (selectedUserJuzgados.length > 0) {
+          if (!e.juzgado) return false;
+          const juzgadoNormalizado = normalizarJuzgado(e.juzgado);
+          const juzgadosNormalizados = selectedUserJuzgados.map(j => 
+            j?.trim().replace(/\s+/g, " ").toUpperCase()
+          );
+          
+          // Comparación exacta normalizada
+          if (juzgadosNormalizados.includes(juzgadoNormalizado)) return true;
+          
+          // Comparación por número de juzgado (más flexible)
+          return juzgadosNormalizados.some(jAsignado => {
+            const numAsignado = jAsignado.match(/N[°º]\s*(\d+)/i)?.[1];
+            const numJuzgado = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
+            if (numAsignado && numJuzgado && numAsignado === numJuzgado) {
+              if (jAsignado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
+                return true;
+              }
+            }
+            return false;
+          });
+        }
+        
+        // Si no hay juzgados asignados, mostrar todos los que tengan la frase
+        return true;
+      });
+      
+      console.log(`[Dashboard] Filtro expedientes por BENEFICIO: ${beforeBeneficioFilter} -> ${filtered.length}`, {
+        juzgadoFilter,
+        selectedUserJuzgadosCount: selectedUserJuzgados.length
+      });
+    } else if (juzgadoFilter && juzgadoFilter !== "mis_juzgados" && juzgadoFilter !== "todos" && juzgadoFilter !== "beneficio") {
+      // Filtro por juzgado específico
+      const beforeJuzgadoFilter = filtered.length;
+      const juzgadoFiltroNormalizado = normalizarJuzgado(juzgadoFilter);
+      
+      filtered = filtered.filter(e => {
+        if (!e.juzgado) return false;
+        const juzgadoNormalizado = normalizarJuzgado(e.juzgado);
+        
+        // Comparación exacta normalizada
+        if (juzgadoNormalizado === juzgadoFiltroNormalizado) return true;
+        
+        // Comparación por número de juzgado (más flexible)
+        const numFiltro = juzgadoFiltroNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
+        const numJuzgado = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
+        if (numFiltro && numJuzgado && numFiltro === numJuzgado) {
+          if (juzgadoFiltroNormalizado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
+            return true;
+          }
+        }
+        
+        return false;
+      });
+      
+      console.log(`[Dashboard] Filtro expedientes por juzgado específico: ${beforeJuzgadoFilter} -> ${filtered.length}`, {
+        juzgadoFilter,
+        juzgadoFiltroNormalizado
+      });
     }
 
     // Filtro por tiempo
@@ -694,7 +893,7 @@ export default function SuperAdminPage() {
     }
 
     setExpedientes(filtered);
-  }, [allExpedientes, favoritosComoExpedientes, timeFilter, selectedUserId, juzgadoFilter, userJuzgados, customStartDate, customEndDate]);
+  }, [allExpedientes, favoritosComoExpedientes, timeFilter, selectedUserId, juzgadoFilter, selectedUserJuzgados, customStartDate, customEndDate, userJuzgados.length]);
 
   const ranking = useMemo(() => {
     const perUser: Record<string, { rojos: number; amarillos: number; verdes: number; total: number; maxDias: number }> = {};
@@ -703,6 +902,9 @@ export default function SuperAdminPage() {
     for (const c of cedulas) {
       // Solo contar cédulas, no oficios (los oficios se cuentan por separado)
       if (c.tipo_documento === "OFICIO") continue;
+      
+      // Ignorar cédulas sin owner_user_id válido
+      if (!c.owner_user_id || c.owner_user_id.trim() === "") continue;
       
       const dias = daysSince(c.fecha_carga);
       const s = semaforoPorAntiguedad(dias);
@@ -721,6 +923,9 @@ export default function SuperAdminPage() {
     for (const c of cedulas) {
       if (c.tipo_documento !== "OFICIO") continue;
       
+      // Ignorar oficios sin owner_user_id válido
+      if (!c.owner_user_id || c.owner_user_id.trim() === "") continue;
+      
       const dias = daysSince(c.fecha_carga);
       const s = semaforoPorAntiguedad(dias);
       const uid = c.owner_user_id;
@@ -734,8 +939,11 @@ export default function SuperAdminPage() {
       else perUser[uid].verdes++;
     }
 
-    // Contar expedientes
+    // Contar expedientes (ignorar los que no tienen owner_user_id válido)
     for (const e of expedientes) {
+      // Ignorar expedientes sin owner_user_id (favoritos PJN sin asignar a usuario)
+      if (!e.owner_user_id || e.owner_user_id.trim() === "") continue;
+      
       const dias = daysSince(e.fecha_ultima_modificacion);
       const s = semaforoPorAntiguedad(dias);
       const uid = e.owner_user_id;
@@ -749,11 +957,29 @@ export default function SuperAdminPage() {
       else perUser[uid].verdes++;
     }
 
-    return Object.entries(perUser).map(([uid, v]) => ({
-      uid,
-      ...v,
-      name: displayName(profiles[uid]),
-    })).sort((a, b) =>
+    return Object.entries(perUser).map(([uid, v]) => {
+      const profile = profiles[uid];
+      let name = displayName(profile);
+      
+      // Si no hay perfil pero tenemos el uid, intentar obtener el email del usuario desde auth.users
+      // Por ahora, si no hay perfil, usar el uid como fallback
+      if (!profile && uid && uid.trim() !== "") {
+        // Buscar en los perfiles cargados si hay alguno con ese id (por si acaso)
+        const foundProfile = Object.values(profiles).find(p => p.id === uid);
+        if (foundProfile) {
+          name = displayName(foundProfile);
+        } else {
+          // Si realmente no hay perfil, usar el uid truncado como identificador temporal
+          name = `Usuario ${uid.substring(0, 8)}...`;
+        }
+      }
+      
+      return {
+        uid,
+        ...v,
+        name,
+      };
+    }).sort((a, b) =>
       (b.rojos - a.rojos) ||
       (b.amarillos - a.amarillos) ||
       (b.maxDias - a.maxDias)
@@ -1337,7 +1563,44 @@ export default function SuperAdminPage() {
             </p>
           </div>
         </div>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          {/* Nombre del usuario */}
+          {currentUserName && (
+            <div
+              title={currentUserName}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "10px 16px",
+                background: "rgba(96,141,186,.15)",
+                border: "1px solid rgba(96,141,186,.35)",
+                borderRadius: 10,
+                color: "var(--brand-blue-2)",
+                fontSize: 14,
+                fontWeight: 600,
+                height: 40,
+                maxWidth: 200,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap"
+              }}
+            >
+              <div
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  background: "#4ade80",
+                  flexShrink: 0,
+                  boxShadow: "0 0 0 2px rgba(74, 222, 128, 0.2)"
+                }}
+              />
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                {currentUserName}
+              </span>
+            </div>
+          )}
           <button
             onClick={imprimirDashboard}
             style={{
@@ -1450,6 +1713,7 @@ export default function SuperAdminPage() {
               <select
                 value={selectedUserId}
                 onChange={(e) => setSelectedUserId(e.target.value)}
+                disabled={roleFlags.isAbogado && !roleFlags.isSuperadmin}
                 style={{
                   width: "100%",
                   padding: "10px 12px",
@@ -1458,7 +1722,7 @@ export default function SuperAdminPage() {
                   borderRadius: 8,
                   color: "#1a1a1a",
                   fontSize: 14,
-                  cursor: "pointer",
+                  cursor: roleFlags.isAbogado && !roleFlags.isSuperadmin ? "not-allowed" : "pointer",
                   outline: "none",
                   transition: "all 0.2s ease"
                 }}
@@ -1471,12 +1735,18 @@ export default function SuperAdminPage() {
                   e.currentTarget.style.boxShadow = "none";
                 }}
               >
-                <option value="all">Todos los usuarios</option>
-                {Object.entries(profiles).map(([uid, profile]) => (
-                  <option key={uid} value={uid}>
-                    {displayName(profile)}
-                  </option>
-                ))}
+                {roleFlags.isAbogado && !roleFlags.isSuperadmin ? (
+                  <option value={currentUserId}>{displayName(profiles[currentUserId])}</option>
+                ) : (
+                  <>
+                    <option value="all">Todos los usuarios</option>
+                    {Object.entries(profiles).map(([uid, profile]) => (
+                      <option key={uid} value={uid}>
+                        {displayName(profile)}
+                      </option>
+                    ))}
+                  </>
+                )}
               </select>
             </div>
 
@@ -1494,11 +1764,12 @@ export default function SuperAdminPage() {
               <select
                 value={juzgadoFilter}
                 onChange={(e) => {
-                  const newFilter = e.target.value as "mis_juzgados" | "todos";
+                  const newFilter = e.target.value;
                   setJuzgadoFilter(newFilter);
                   console.log(`[Dashboard] Filtro de juzgados cambiado a: ${newFilter}`, {
                     userJuzgadosCount: userJuzgados.length,
-                    userJuzgados: userJuzgados
+                    userJuzgados: userJuzgados,
+                    todosLosJuzgadosCount: todosLosJuzgados.length
                   });
                 }}
                 style={{
@@ -1526,6 +1797,16 @@ export default function SuperAdminPage() {
                 <option value="mis_juzgados" disabled={userJuzgados.length === 0}>
                   Mis Juzgados {userJuzgados.length === 0 ? "(sin asignar)" : `(${userJuzgados.length})`}
                 </option>
+                <option value="beneficio">Beneficio</option>
+                {todosLosJuzgados.length > 0 && (
+                  <optgroup label="Juzgados individuales">
+                    {todosLosJuzgados.map((juzgado) => (
+                      <option key={juzgado} value={juzgado}>
+                        {juzgado}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
             </div>
 

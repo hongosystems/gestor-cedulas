@@ -45,15 +45,17 @@ export default function SelectRolePage() {
       const isAdminCedulas = roleData.is_admin_cedulas === true;
       const isAbogado = roleData.is_abogado === true;
 
+      // Prioridad: si es Abogado o Superadmin, ir directo al Dashboard (sin pantalla intermedia)
+      if (isSuperadmin || isAbogado) {
+        router.push("/superadmin");
+        return;
+      }
+
       // Contar cuántos roles tiene
       const roleCount = [isSuperadmin, isAdminExpedientes, isAdminCedulas, isAbogado].filter(Boolean).length;
 
       // Si solo tiene un rol, redirigir automáticamente
       if (roleCount === 1) {
-        if (isSuperadmin || isAbogado) {
-          router.push("/superadmin");
-          return;
-        }
         if (isAdminExpedientes) {
           router.push("/app/expedientes");
           return;

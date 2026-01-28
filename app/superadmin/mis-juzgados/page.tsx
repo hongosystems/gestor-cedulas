@@ -6,6 +6,29 @@ import { supabase } from "@/lib/supabase";
 import { pjnScraperSupabase } from "@/lib/pjn-scraper-supabase";
 import { daysSince } from "@/lib/semaforo";
 
+// Estilos globales para mejorar contraste del dropdown
+if (typeof document !== 'undefined') {
+  const styleId = 'mis-juzgados-dropdown-styles';
+  if (!document.getElementById(styleId)) {
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = `
+      /* Mejorar contraste del dropdown "Cargado por" */
+      select option {
+        background-color: rgba(11,47,85,1) !important;
+        color: rgba(234,243,255,.95) !important;
+      }
+      select option:hover,
+      select option:focus,
+      select option:checked {
+        background-color: rgba(96,141,186,.3) !important;
+        color: rgba(234,243,255,1) !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+}
+
 type Cedula = {
   id: string;
   owner_user_id: string;
@@ -43,6 +66,16 @@ type PjnFavorito = {
   fecha_ultima_carga: string | null; // Formato DD/MM/AAAA
   observaciones: string | null;
 };
+
+// Normalizar juzgado para mostrar SIN "- SECRETARIA N° X"
+function normalizeJuzgado(raw: string | null): string | null {
+  if (!raw) return null;
+  const j = raw.trim().replace(/\s+/g, " ").toUpperCase();
+  const mCivil = /^JUZGADO\s+CIVIL\s+(\d+)\b/i.exec(j);
+  if (mCivil) return `JUZGADO CIVIL ${mCivil[1]}`;
+  const stripped = j.replace(/\s*-\s*SECRETAR[ÍI]A\s*N[°º]?\s*\d+\s*.*$/i, "").trim();
+  return stripped || null;
+}
 
 function isoToDDMMAAAA(iso: string | null): string {
   if (!iso || iso.trim() === "") return "";
@@ -134,9 +167,13 @@ export default function MisJuzgadosPage() {
   const [sortField, setSortField] = useState<SortField>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc"); // Por defecto: más viejo primero
   const [semaforoFilter, setSemaforoFilter] = useState<Semaforo | null>(null);
-  const [juzgadoFilter, setJuzgadoFilter] = useState<"mis_juzgados" | "todos">("mis_juzgados");
+  const [juzgadoFilter, setJuzgadoFilter] = useState<"mis_juzgados" | "todos" | "beneficio" | string>("mis_juzgados");
   const [userJuzgados, setUserJuzgados] = useState<string[]>([]);
   const [isAbogado, setIsAbogado] = useState(false);
+  const [createdByFilter, setCreatedByFilter] = useState<string>("all"); // "all" | user_id | "pjn"
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 15;
+  const [currentUserName, setCurrentUserName] = useState<string>("");
 
   const loadData = async () => {
     try {
@@ -146,6 +183,28 @@ export default function MisJuzgadosPage() {
       if (!session) return;
 
       const uid = session.user.id;
+
+      // Nombre base desde la sesión (para TODOS los usuarios, aunque no tengan profile)
+      const sessionFullName = (session.user.user_metadata as any)?.full_name as string | undefined;
+      const sessionEmail = (session.user.email || "").trim();
+      const baseName = (sessionFullName || "").trim() || sessionEmail;
+      if (baseName) {
+        setCurrentUserName(baseName);
+      }
+
+      // Intentar mejorar el nombre con datos de profiles si existen
+      const { data: profile, error: profileErr } = await supabase
+        .from("profiles")
+        .select("full_name, email")
+        .eq("id", uid)
+        .maybeSingle();
+
+      if (!profileErr && profile) {
+        const nameFromProfile = (profile.full_name || "").trim() || (profile.email || "").trim() || "";
+        if (nameFromProfile) {
+          setCurrentUserName(nameFromProfile);
+        }
+      }
 
       // Verificar que es superadmin/abogado
       const { data: roleData, error: roleErr } = await supabase
@@ -162,6 +221,12 @@ export default function MisJuzgadosPage() {
       if (!isSuperadmin && !isAbogado) {
         window.location.href = "/app";
         return;
+      }
+
+      // Si es abogado (y no superadmin), por defecto mostrar "Todos los Juzgados"
+      // para evitar caer en pantalla vacía por falta de juzgados asignados.
+      if (isAbogado && !isSuperadmin && juzgadoFilter === "mis_juzgados") {
+        setJuzgadoFilter("todos");
       }
 
       // Obtener juzgados asignados al usuario
@@ -483,7 +548,7 @@ export default function MisJuzgadosPage() {
                       numero,
                       anio,
                       caratula: c.caratula || null,
-                      juzgado: c.dependencia || null,
+                      juzgado: normalizeJuzgado(c.dependencia || null),
                       fecha_ultima_carga: fechaUltimaCarga,
                       observaciones: observaciones,
                     } as PjnFavorito;
@@ -522,7 +587,51 @@ export default function MisJuzgadosPage() {
 
       // Filtrar favoritos por juzgados asignados (si aplica)
       let favoritosFiltrados = pjnFavoritos;
-      if (juzgadoFilter === "mis_juzgados" && juzgadosNormalizados.length > 0) {
+      if (juzgadoFilter === "beneficio") {
+        // Filtrar favoritos por "BENEFICIO DE LITIGAR SIN GASTOS" en la carátula
+        const fraseBeneficio = "BENEFICIO DE LITIGAR SIN GASTOS";
+        favoritosFiltrados = pjnFavoritos.filter((f: PjnFavorito) => {
+          if (!f.caratula) return false;
+          const caratulaUpper = f.caratula.toUpperCase();
+          if (!caratulaUpper.includes(fraseBeneficio)) return false;
+          
+          // Respetar la distribución por juzgados asignados
+          if (juzgadosNormalizados.length > 0) {
+            if (!f.juzgado) return false;
+            const juzgadoNormalizado = normalizarJuzgado(f.juzgado);
+            return juzgadosNormalizados.some(jAsignado => {
+              if (juzgadoNormalizado === jAsignado) return true;
+              const numAsignado = jAsignado.match(/N[°º]\s*(\d+)/i)?.[1];
+              const numFavorito = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
+              if (numAsignado && numFavorito && numAsignado === numFavorito) {
+                if (jAsignado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
+                  return true;
+                }
+              }
+              return false;
+            });
+          }
+          return true;
+        });
+        console.log(`[Mis Juzgados] ✅ Favoritos filtrados por BENEFICIO: ${favoritosFiltrados.length} de ${pjnFavoritos.length}`);
+      } else if (juzgadoFilter && juzgadoFilter !== "mis_juzgados" && juzgadoFilter !== "todos" && juzgadoFilter !== "beneficio") {
+        // Filtro por juzgado específico
+        const juzgadoFiltroNormalizado = normalizarJuzgado(juzgadoFilter);
+        favoritosFiltrados = pjnFavoritos.filter((f: PjnFavorito) => {
+          if (!f.juzgado) return false;
+          const juzgadoNormalizado = normalizarJuzgado(f.juzgado);
+          if (juzgadoNormalizado === juzgadoFiltroNormalizado) return true;
+          const numFiltro = juzgadoFiltroNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
+          const numFavorito = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
+          if (numFiltro && numFavorito && numFiltro === numFavorito) {
+            if (juzgadoFiltroNormalizado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
+              return true;
+            }
+          }
+          return false;
+        });
+        console.log(`[Mis Juzgados] ✅ Favoritos filtrados por juzgado específico "${juzgadoFilter}": ${favoritosFiltrados.length}`);
+      } else if (juzgadoFilter === "mis_juzgados" && juzgadosNormalizados.length > 0) {
         console.log(`[Mis Juzgados] Filtrando ${pjnFavoritos.length} favoritos por ${juzgadosNormalizados.length} juzgados asignados...`);
         
         favoritosFiltrados = pjnFavoritos.filter((f: PjnFavorito) => {
@@ -628,6 +737,50 @@ export default function MisJuzgadosPage() {
         // No filtrar, mostrar todos los expedientes
         exps = allExpsData ?? [];
         console.log(`[Mis Juzgados] Mostrando TODOS los expedientes: ${exps.length}`);
+      } else if (juzgadoFilter === "beneficio") {
+        // Filtrar por "BENEFICIO DE LITIGAR SIN GASTOS" en la carátula
+        const fraseBeneficio = "BENEFICIO DE LITIGAR SIN GASTOS";
+        exps = (allExpsData ?? []).filter((e: any) => {
+          if (!e.caratula) return false;
+          const caratulaUpper = e.caratula.toUpperCase();
+          if (!caratulaUpper.includes(fraseBeneficio)) return false;
+          
+          // Respetar la distribución por juzgados asignados
+          if (juzgadosNormalizados.length > 0) {
+            if (!e.juzgado) return false;
+            const juzgadoNormalizado = normalizarJuzgado(e.juzgado);
+            return juzgadosNormalizados.some(jAsignado => {
+              if (juzgadoNormalizado === jAsignado) return true;
+              const numAsignado = jAsignado.match(/N[°º]\s*(\d+)/i)?.[1];
+              const numExpediente = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
+              if (numAsignado && numExpediente && numAsignado === numExpediente) {
+                if (jAsignado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
+                  return true;
+                }
+              }
+              return false;
+            });
+          }
+          return true;
+        });
+        console.log(`[Mis Juzgados] Expedientes con BENEFICIO: ${exps.length} de ${allExpsData?.length || 0}`);
+      } else if (juzgadoFilter && juzgadoFilter !== "mis_juzgados" && juzgadoFilter !== "todos" && juzgadoFilter !== "beneficio") {
+        // Filtro por juzgado específico
+        const juzgadoFiltroNormalizado = normalizarJuzgado(juzgadoFilter);
+        exps = (allExpsData ?? []).filter((e: any) => {
+          if (!e.juzgado) return false;
+          const juzgadoNormalizado = normalizarJuzgado(e.juzgado);
+          if (juzgadoNormalizado === juzgadoFiltroNormalizado) return true;
+          const numFiltro = juzgadoFiltroNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
+          const numJuzgado = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
+          if (numFiltro && numJuzgado && numFiltro === numJuzgado) {
+            if (juzgadoFiltroNormalizado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
+              return true;
+            }
+          }
+          return false;
+        });
+        console.log(`[Mis Juzgados] Expedientes filtrados por juzgado específico "${juzgadoFilter}": ${exps.length}`);
       }
 
       // Combinar expedientes locales con favoritos de pjn
@@ -813,6 +966,27 @@ export default function MisJuzgadosPage() {
         // No filtrar, mostrar todas las cédulas
         cs = allCsData ?? [];
         console.log(`[Mis Juzgados] Mostrando TODAS las cédulas: ${cs.length}`);
+      } else if (juzgadoFilter === "beneficio") {
+        // El filtro "beneficio" solo aplica a expedientes (tienen carátula), no a cédulas
+        cs = [];
+        console.log(`[Mis Juzgados] Filtro "beneficio" no aplica a cédulas, mostrando 0`);
+      } else if (juzgadoFilter && juzgadoFilter !== "mis_juzgados" && juzgadoFilter !== "todos" && juzgadoFilter !== "beneficio") {
+        // Filtro por juzgado específico
+        const juzgadoFiltroNormalizado = normalizarJuzgado(juzgadoFilter);
+        cs = (allCsData ?? []).filter((c: any) => {
+          if (!c.juzgado) return false;
+          const juzgadoNormalizado = normalizarJuzgado(c.juzgado);
+          if (juzgadoNormalizado === juzgadoFiltroNormalizado) return true;
+          const numFiltro = juzgadoFiltroNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
+          const numJuzgado = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
+          if (numFiltro && numJuzgado && numFiltro === numJuzgado) {
+            if (juzgadoFiltroNormalizado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
+              return true;
+            }
+          }
+          return false;
+        });
+        console.log(`[Mis Juzgados] Cédulas filtradas por juzgado específico "${juzgadoFilter}": ${cs.length}`);
       }
       
       // Debug: mostrar cantidad de cédulas encontradas
@@ -914,6 +1088,17 @@ export default function MisJuzgadosPage() {
     return cedulas.filter(c => c.tipo_documento === "OFICIO");
   }, [cedulas]);
 
+  // Obtener juzgados únicos de los juzgados asignados, ordenados ascendente
+  const juzgadosAsignadosOrdenados = useMemo(() => {
+    if (userJuzgados.length === 0) return [];
+    const juzgadosUnicos = [...new Set(userJuzgados)];
+    return juzgadosUnicos.sort((a, b) => {
+      const aNorm = a?.trim().replace(/\s+/g, " ").toUpperCase() || "";
+      const bNorm = b?.trim().replace(/\s+/g, " ").toUpperCase() || "";
+      return aNorm.localeCompare(bNorm, 'es', { numeric: true, sensitivity: 'base' });
+    });
+  }, [userJuzgados]);
+
   async function abrirArchivo(path: string) {
     if (!path) {
       setMsg("No hay archivo disponible para abrir");
@@ -963,6 +1148,26 @@ export default function MisJuzgadosPage() {
   // Preparar y ordenar items según sortField y sortDirection
   // Por defecto: ordenar por fecha ascendente (más viejo primero)
   // IMPORTANTE: Este useMemo debe estar ANTES del return condicional para cumplir las reglas de Hooks
+  const createdByOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    // Expedientes locales (y favoritos PJN como opción fija)
+    for (const e of expedientes) {
+      if (e.is_pjn_favorito) continue;
+      if (e.created_by_user_id) {
+        map.set(e.created_by_user_id, e.created_by_name || "Sin nombre");
+      }
+    }
+    // Cédulas/oficios
+    for (const c of cedulas) {
+      if (c.created_by_user_id) {
+        map.set(c.created_by_user_id, c.created_by_name || "Sin nombre");
+      }
+    }
+    return [...map.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, "es", { sensitivity: "base" }));
+  }, [expedientes, cedulas]);
+
   const sortedItems = useMemo(() => {
     // Preparar items según el tab activo
     const itemsToShow = activeTab === "expedientes" 
@@ -974,6 +1179,8 @@ export default function MisJuzgadosPage() {
           fecha: e.fecha_ultima_modificacion,
           numero: e.numero_expediente,
           created_by: e.created_by_name,
+          created_by_user_id: e.created_by_user_id,
+          is_pjn_favorito: e.is_pjn_favorito === true,
           observaciones: e.observaciones,
           dias: e.fecha_ultima_modificacion ? daysSince(e.fecha_ultima_modificacion) : null,
           semaforo: e.fecha_ultima_modificacion ? semaforoByAge(daysSince(e.fecha_ultima_modificacion)) : "VERDE" as Semaforo,
@@ -987,6 +1194,7 @@ export default function MisJuzgadosPage() {
           fecha: c.fecha_carga,
           numero: null,
           created_by: c.created_by_name,
+          created_by_user_id: c.created_by_user_id || null,
           pdf_path: c.pdf_path,
           tipo_documento: c.tipo_documento,
           dias: c.fecha_carga ? daysSince(c.fecha_carga) : null,
@@ -1000,6 +1208,7 @@ export default function MisJuzgadosPage() {
           fecha: o.fecha_carga,
           numero: null,
           created_by: o.created_by_name,
+          created_by_user_id: o.created_by_user_id || null,
           pdf_path: o.pdf_path,
           tipo_documento: o.tipo_documento,
           observaciones: null,
@@ -1013,10 +1222,23 @@ export default function MisJuzgadosPage() {
       observaciones: 'observaciones' in item ? item.observaciones : null
     }));
 
+    // Aplicar filtro "Cargado por"
+    let filteredByCreator = itemsWithObservations;
+    if (createdByFilter !== "all") {
+      filteredByCreator = itemsWithObservations.filter((item: any) => {
+        // Favoritos PJN
+        if (createdByFilter === "pjn") {
+          return item.is_pjn_favorito === true || item.created_by === "PJN Favoritos";
+        }
+        // Otros usuarios
+        return item.created_by_user_id === createdByFilter;
+      });
+    }
+
     // Aplicar filtro de semáforo
-    let filtered = itemsWithObservations;
+    let filtered = filteredByCreator;
     if (semaforoFilter) {
-      filtered = itemsWithObservations.filter((item) => item.semaforo === semaforoFilter);
+      filtered = filteredByCreator.filter((item) => item.semaforo === semaforoFilter);
     }
 
     // Ordenar items
@@ -1052,7 +1274,27 @@ export default function MisJuzgadosPage() {
     });
 
     return sorted;
-  }, [activeTab, expedientes, cedulasFiltered, oficiosFiltered, sortField, sortDirection, semaforoFilter]);
+  }, [activeTab, expedientes, cedulasFiltered, oficiosFiltered, sortField, sortDirection, semaforoFilter, createdByFilter]);
+
+  // Paginación: solo para expedientes
+  const paginatedItems = useMemo(() => {
+    if (activeTab !== "expedientes") {
+      return sortedItems; // Sin paginación para cédulas/oficios
+    }
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    return sortedItems.slice(startIndex, endIndex);
+  }, [sortedItems, currentPage, activeTab]);
+
+  const totalPages = useMemo(() => {
+    if (activeTab !== "expedientes") return 1;
+    return Math.ceil(sortedItems.length / itemsPerPage);
+  }, [sortedItems.length, activeTab]);
+
+  // Resetear a página 1 cuando cambia el filtro o el tab
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [juzgadoFilter, createdByFilter, semaforoFilter, activeTab]);
 
   async function logout() {
     await supabase.auth.signOut();
@@ -1239,61 +1481,98 @@ export default function MisJuzgadosPage() {
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <button
-            onClick={refreshData}
-            disabled={loading}
-            style={{
-              padding: "10px 16px",
-              background: "rgba(96,141,186,.15)",
-              border: "1px solid rgba(96,141,186,.35)",
-              borderRadius: 10,
-              color: "var(--brand-blue-2)",
-              fontSize: 14,
-              fontWeight: 600,
-              cursor: loading ? "wait" : "pointer",
-              transition: "all 0.2s ease",
-              opacity: loading ? 0.6 : 1
-            }}
-            onMouseEnter={(e) => {
-              if (!loading) {
-                e.currentTarget.style.background = "rgba(96,141,186,.25)";
-                e.currentTarget.style.borderColor = "rgba(96,141,186,.45)";
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!loading) {
-                e.currentTarget.style.background = "rgba(96,141,186,.15)";
-                e.currentTarget.style.borderColor = "rgba(96,141,186,.35)";
-              }
-            }}
-            title="Actualizar datos"
-          >
-            🔄 Refresh
-          </button>
-          <button 
-            onClick={logout}
-            style={{
-              padding: "10px 16px",
-              background: "rgba(225,57,64,.15)",
-              border: "1px solid rgba(225,57,64,.35)",
-              borderRadius: 10,
-              color: "var(--text)",
-              fontSize: 14,
-              fontWeight: 600,
-              cursor: "pointer",
-              transition: "all 0.2s ease",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "rgba(225,57,64,.25)";
-              e.currentTarget.style.borderColor = "rgba(225,57,64,.45)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "rgba(225,57,64,.15)";
-              e.currentTarget.style.borderColor = "rgba(225,57,64,.35)";
-            }}
-          >
-            Salir
-          </button>
+            {currentUserName && (
+              <div
+                style={{
+                  padding: "8px 14px",
+                  background: "rgba(255,255,255,.06)",
+                  border: "1px solid rgba(255,255,255,.14)",
+                  borderRadius: 999,
+                  color: "rgba(234,243,255,.92)",
+                  fontSize: 13,
+                  fontWeight: 650,
+                  letterSpacing: "0.01em",
+                  maxWidth: 260,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  height: 40,
+                }}
+                title={currentUserName}
+              >
+                <span
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: "50%",
+                    background: "#4ade80",
+                    boxShadow: "0 0 0 2px rgba(74,222,128,.35)",
+                  }}
+                />
+                <span>{currentUserName}</span>
+              </div>
+            )}
+
+            <button
+              onClick={refreshData}
+              disabled={loading}
+              style={{
+                padding: "10px 16px",
+                background: "rgba(96,141,186,.15)",
+                border: "1px solid rgba(96,141,186,.35)",
+                borderRadius: 10,
+                color: "var(--brand-blue-2)",
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: loading ? "wait" : "pointer",
+                transition: "all 0.2s ease",
+                opacity: loading ? 0.6 : 1,
+                height: 40,
+              }}
+              onMouseEnter={(e) => {
+                if (!loading) {
+                  e.currentTarget.style.background = "rgba(96,141,186,.25)";
+                  e.currentTarget.style.borderColor = "rgba(96,141,186,.45)";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!loading) {
+                  e.currentTarget.style.background = "rgba(96,141,186,.15)";
+                  e.currentTarget.style.borderColor = "rgba(96,141,186,.35)";
+                }
+              }}
+              title="Actualizar datos"
+            >
+              🔄 Refresh
+            </button>
+            <button
+              onClick={logout}
+              style={{
+                padding: "10px 16px",
+                background: "rgba(225,57,64,.15)",
+                border: "1px solid rgba(225,57,64,.35)",
+                borderRadius: 10,
+                color: "var(--text)",
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: "pointer",
+                transition: "all 0.2s ease",
+                height: 40,
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "rgba(225,57,64,.25)";
+                e.currentTarget.style.borderColor = "rgba(225,57,64,.45)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "rgba(225,57,64,.15)";
+                e.currentTarget.style.borderColor = "rgba(225,57,64,.35)";
+              }}
+            >
+              Salir
+            </button>
           </div>
         </header>
 
@@ -1386,6 +1665,96 @@ export default function MisJuzgadosPage() {
                 Limpiar filtro
               </button>
             )}
+
+            {/* Filtro por Juzgado/Beneficio y Cargado por */}
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
+              {juzgadosAsignadosOrdenados.length > 0 && (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ color: "var(--muted)", fontSize: 13, fontWeight: 600 }}>
+                    Juzgado:
+                  </span>
+                  <select
+                    value={juzgadoFilter}
+                    onChange={(e) => {
+                      setJuzgadoFilter(e.target.value);
+                      setCurrentPage(1); // Resetear a primera página al cambiar filtro
+                    }}
+                    style={{
+                      padding: "8px 10px",
+                      background: "rgba(11,47,85,.95)",
+                      border: "1px solid rgba(255,255,255,.2)",
+                      borderRadius: 10,
+                      color: "rgba(234,243,255,.95)",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      outline: "none",
+                      minWidth: 220,
+                      transition: "all 0.2s ease",
+                    }}
+                    onFocus={(e) => {
+                      e.currentTarget.style.borderColor = "rgba(96,141,186,.5)";
+                      e.currentTarget.style.boxShadow = "0 0 0 3px rgba(96,141,186,.1)";
+                    }}
+                    onBlur={(e) => {
+                      e.currentTarget.style.borderColor = "rgba(255,255,255,.2)";
+                      e.currentTarget.style.boxShadow = "none";
+                    }}
+                  >
+                    <option value="mis_juzgados" style={{ background: "rgba(11,47,85,1)", color: "rgba(234,243,255,.95)" }}>
+                      Mis Juzgados ({userJuzgados.length})
+                    </option>
+                    <option value="beneficio" style={{ background: "rgba(11,47,85,1)", color: "rgba(234,243,255,.95)" }}>
+                      Beneficio
+                    </option>
+                    {juzgadosAsignadosOrdenados.map((juzgado) => (
+                      <option key={juzgado} value={juzgado} style={{ background: "rgba(11,47,85,1)", color: "rgba(234,243,255,.95)" }}>
+                        {juzgado}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Filtro "Cargado por" */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <span style={{ color: "var(--muted)", fontSize: 13, fontWeight: 600 }}>
+                  Cargado por:
+                </span>
+              <select
+                value={createdByFilter}
+                onChange={(e) => setCreatedByFilter(e.target.value)}
+                style={{
+                  padding: "8px 10px",
+                  background: "rgba(11,47,85,.95)",
+                  border: "1px solid rgba(255,255,255,.2)",
+                  borderRadius: 10,
+                  color: "rgba(234,243,255,.95)",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  outline: "none",
+                  minWidth: 220,
+                  transition: "all 0.2s ease",
+                }}
+                onFocus={(e) => {
+                  e.currentTarget.style.borderColor = "rgba(96,141,186,.5)";
+                  e.currentTarget.style.boxShadow = "0 0 0 3px rgba(96,141,186,.1)";
+                }}
+                onBlur={(e) => {
+                  e.currentTarget.style.borderColor = "rgba(255,255,255,.2)";
+                  e.currentTarget.style.boxShadow = "none";
+                }}
+              >
+                <option value="all" style={{ background: "rgba(11,47,85,1)", color: "rgba(234,243,255,.95)" }}>Todos</option>
+                <option value="pjn" style={{ background: "rgba(11,47,85,1)", color: "rgba(234,243,255,.95)" }}>PJN Favoritos</option>
+                {createdByOptions.map((u) => (
+                  <option key={u.id} value={u.id} style={{ background: "rgba(11,47,85,1)", color: "rgba(234,243,255,.95)" }}>
+                    {u.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {msg && <div className="error">{msg}</div>}
@@ -1497,7 +1866,7 @@ export default function MisJuzgadosPage() {
                 </tr>
               </thead>
               <tbody>
-                {sortedItems.map((item: any) => {
+                {paginatedItems.map((item: any) => {
                   const dias = item.dias ?? null;
                   const sem = item.semaforo || (dias !== null ? semaforoByAge(dias) : "VERDE");
                   
@@ -1587,6 +1956,120 @@ export default function MisJuzgadosPage() {
                 )}
               </tbody>
             </table>
+          </div>
+
+          {/* Paginación - solo para expedientes */}
+          {activeTab === "expedientes" && totalPages > 1 && (
+              <div style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 12,
+                margin: "24px auto",
+                padding: "16px",
+                background: "rgba(255,255,255,.02)",
+                borderRadius: 12,
+                border: "1px solid rgba(255,255,255,.06)",
+                maxWidth: 520
+              }}>
+                <button
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  style={{
+                    padding: "8px 16px",
+                    background: currentPage === 1 ? "rgba(255,255,255,.05)" : "rgba(96,141,186,.2)",
+                    border: `1px solid ${currentPage === 1 ? "rgba(255,255,255,.1)" : "rgba(96,141,186,.4)"}`,
+                    borderRadius: 8,
+                    color: currentPage === 1 ? "rgba(255,255,255,.3)" : "var(--text)",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: currentPage === 1 ? "not-allowed" : "pointer",
+                    transition: "all 0.2s ease",
+                    opacity: currentPage === 1 ? 0.5 : 1
+                  }}
+                  onMouseEnter={(e) => {
+                    if (currentPage !== 1) {
+                      e.currentTarget.style.background = "rgba(96,141,186,.3)";
+                      e.currentTarget.style.borderColor = "rgba(96,141,186,.6)";
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (currentPage !== 1) {
+                      e.currentTarget.style.background = "rgba(96,141,186,.2)";
+                      e.currentTarget.style.borderColor = "rgba(96,141,186,.4)";
+                    }
+                  }}
+                >
+                  ← Anterior
+                </button>
+                
+                <div style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  color: "var(--text)",
+                  fontSize: 14,
+                  fontWeight: 600
+                }}>
+                  <span>Página</span>
+                  <span style={{
+                    padding: "6px 12px",
+                    background: "rgba(96,141,186,.2)",
+                    borderRadius: 6,
+                    border: "1px solid rgba(96,141,186,.3)",
+                    minWidth: 50,
+                    textAlign: "center"
+                  }}>
+                    {currentPage}
+                  </span>
+                  <span>de</span>
+                  <span style={{
+                    padding: "6px 12px",
+                    background: "rgba(255,255,255,.05)",
+                    borderRadius: 6,
+                    border: "1px solid rgba(255,255,255,.1)",
+                    minWidth: 50,
+                    textAlign: "center"
+                  }}>
+                    {totalPages}
+                  </span>
+                  <span style={{ color: "var(--muted)", fontSize: 12, marginLeft: 8 }}>
+                    ({sortedItems.length} expedientes)
+                  </span>
+                </div>
+
+                <button
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  style={{
+                    padding: "8px 16px",
+                    background: currentPage === totalPages ? "rgba(255,255,255,.05)" : "rgba(96,141,186,.2)",
+                    border: `1px solid ${currentPage === totalPages ? "rgba(255,255,255,.1)" : "rgba(96,141,186,.4)"}`,
+                    borderRadius: 8,
+                    color: currentPage === totalPages ? "rgba(255,255,255,.3)" : "var(--text)",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: currentPage === totalPages ? "not-allowed" : "pointer",
+                    transition: "all 0.2s ease",
+                    opacity: currentPage === totalPages ? 0.5 : 1
+                  }}
+                  onMouseEnter={(e) => {
+                    if (currentPage !== totalPages) {
+                      e.currentTarget.style.background = "rgba(96,141,186,.3)";
+                      e.currentTarget.style.borderColor = "rgba(96,141,186,.6)";
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (currentPage !== totalPages) {
+                      e.currentTarget.style.background = "rgba(96,141,186,.2)";
+                      e.currentTarget.style.borderColor = "rgba(96,141,186,.4)";
+                    }
+                  }}
+                >
+                  Siguiente →
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </section>
