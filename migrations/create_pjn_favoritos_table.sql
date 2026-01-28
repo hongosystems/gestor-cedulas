@@ -36,6 +36,9 @@ CREATE INDEX IF NOT EXISTS idx_pjn_favoritos_updated_at
 ALTER TABLE pjn_favoritos ENABLE ROW LEVEL SECURITY;
 
 -- 5. Política: Todos los usuarios autenticados pueden leer favoritos
+-- Eliminar política si existe (para hacer la migración idempotente)
+DROP POLICY IF EXISTS "Authenticated users can view pjn_favoritos" ON pjn_favoritos;
+
 CREATE POLICY "Authenticated users can view pjn_favoritos"
     ON pjn_favoritos FOR SELECT
     USING (auth.role() = 'authenticated');
