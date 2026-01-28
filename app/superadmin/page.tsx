@@ -759,8 +759,23 @@ export default function SuperAdminPage() {
         if (e.is_pjn_favorito) {
           if (!e.juzgado) return null;
           const juzgadoNormalizado = normalizarJuzgado(e.juzgado);
+          // Comparación exacta normalizada
           if (juzgadosDelUsuario.includes(juzgadoNormalizado)) {
             // Asignar el owner_user_id del usuario seleccionado para que aparezca en el ranking
+            return { ...e, owner_user_id: selectedUserId };
+          }
+          // Comparación por número de juzgado (más flexible)
+          const matchJuzgado = juzgadosDelUsuario.some(jAsignado => {
+            const numAsignado = jAsignado.match(/N[°º]\s*(\d+)/i)?.[1];
+            const numJuzgado = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
+            if (numAsignado && numJuzgado && numAsignado === numJuzgado) {
+              if (jAsignado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
+                return true;
+              }
+            }
+            return false;
+          });
+          if (matchJuzgado) {
             return { ...e, owner_user_id: selectedUserId };
           }
           return null;
@@ -769,6 +784,46 @@ export default function SuperAdminPage() {
       }).filter((e): e is Expediente => e !== null);
 
       console.log(`[Dashboard] Filtro por usuario (local por owner, PJN por juzgado asignado): ${beforeUserFilter} -> ${filtered.length}`);
+    } else {
+      // Cuando se selecciona "Todos los usuarios", distribuir favoritos PJN entre todos los usuarios
+      // que tienen ese juzgado asignado, pero solo una vez por favorito (asignar al primer usuario que coincida)
+      filtered = filtered.map(e => {
+        if (e.is_pjn_favorito && (!e.owner_user_id || e.owner_user_id.trim() === "")) {
+          if (!e.juzgado) return e; // Mantener sin asignar si no tiene juzgado
+          const juzgadoNormalizado = normalizarJuzgado(e.juzgado);
+          
+          // Buscar el primer usuario que tenga este juzgado asignado
+          for (const [userId, juzgadosDelUsuario] of Object.entries(userJuzgadosMap)) {
+            const juzgadosNormalizados = juzgadosDelUsuario.map(j => j?.trim().replace(/\s+/g, " ").toUpperCase());
+            
+            // Comparación exacta normalizada
+            if (juzgadosNormalizados.includes(juzgadoNormalizado)) {
+              return { ...e, owner_user_id: userId };
+            }
+            
+            // Comparación por número de juzgado (más flexible)
+            const matchJuzgado = juzgadosNormalizados.some(jAsignado => {
+              const numAsignado = jAsignado.match(/N[°º]\s*(\d+)/i)?.[1];
+              const numJuzgado = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
+              if (numAsignado && numJuzgado && numAsignado === numJuzgado) {
+                if (jAsignado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
+                  return true;
+                }
+              }
+              return false;
+            });
+            
+            if (matchJuzgado) {
+              return { ...e, owner_user_id: userId };
+            }
+          }
+          // Si no se encuentra ningún usuario con este juzgado, mantener sin asignar
+          return e;
+        }
+        return e;
+      });
+      
+      console.log(`[Dashboard] Distribución de favoritos PJN entre usuarios: ${filtered.filter(e => e.is_pjn_favorito && e.owner_user_id && e.owner_user_id.trim() !== "").length} favoritos asignados`);
     }
 
     // Filtro por juzgados
@@ -1768,8 +1823,8 @@ export default function SuperAdminPage() {
                 }}
               >
                 <option value="todos">Todos los Juzgados</option>
-                <option value="mis_juzgados" disabled={userJuzgados.length === 0}>
-                  Mis Juzgados {userJuzgados.length === 0 ? "(sin asignar)" : `(${userJuzgados.length})`}
+                <option value="mis_juzgados" disabled={selectedUserJuzgados.length === 0}>
+                  Mis Juzgados {selectedUserJuzgados.length === 0 ? "(sin asignar)" : `(${selectedUserJuzgados.length})`}
                 </option>
                 <option value="beneficio">Beneficio</option>
                 {todosLosJuzgados.length > 0 && (
