@@ -809,6 +809,7 @@ export default function SuperAdminPage() {
       console.log(`[Dashboard] Filtro juzgados = "todos" - NO aplicando filtro de juzgados. Expedientes: ${filtered.length}`);
     } else if (juzgadoFilter === "beneficio") {
       // Filtro por "BENEFICIO DE LITIGAR SIN GASTOS" en la carátula
+      // IMPORTANTE: Mostrar TODOS los expedientes con esta frase, sin filtrar por juzgados asignados
       const beforeBeneficioFilter = filtered.length;
       const fraseBeneficio = "BENEFICIO DE LITIGAR SIN GASTOS";
       
@@ -816,34 +817,7 @@ export default function SuperAdminPage() {
         // Verificar que tenga la frase en la carátula (case insensitive)
         if (!e.caratula) return false;
         const caratulaUpper = e.caratula.toUpperCase();
-        if (!caratulaUpper.includes(fraseBeneficio)) return false;
-        
-        // Si el usuario tiene juzgados asignados, respetar la distribución por juzgado
-        if (selectedUserJuzgados.length > 0) {
-          if (!e.juzgado) return false;
-          const juzgadoNormalizado = normalizarJuzgado(e.juzgado);
-          const juzgadosNormalizados = selectedUserJuzgados.map(j => 
-            j?.trim().replace(/\s+/g, " ").toUpperCase()
-          );
-          
-          // Comparación exacta normalizada
-          if (juzgadosNormalizados.includes(juzgadoNormalizado)) return true;
-          
-          // Comparación por número de juzgado (más flexible)
-          return juzgadosNormalizados.some(jAsignado => {
-            const numAsignado = jAsignado.match(/N[°º]\s*(\d+)/i)?.[1];
-            const numJuzgado = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
-            if (numAsignado && numJuzgado && numAsignado === numJuzgado) {
-              if (jAsignado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
-                return true;
-              }
-            }
-            return false;
-          });
-        }
-        
-        // Si no hay juzgados asignados, mostrar todos los que tengan la frase
-        return true;
+        return caratulaUpper.includes(fraseBeneficio);
       });
       
       console.log(`[Dashboard] Filtro expedientes por BENEFICIO: ${beforeBeneficioFilter} -> ${filtered.length}`, {
