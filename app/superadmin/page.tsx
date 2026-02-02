@@ -37,6 +37,9 @@ type PjnFavorito = {
   juzgado: string | null;
   fecha_ultima_carga: string | null; // Formato DD/MM/AAAA
   observaciones: string | null;
+  notas?: string | null;
+  removido?: boolean | null;
+  estado?: string | null;
 };
 
 type Profile = { id: string; full_name: string | null; email: string | null };
@@ -483,12 +486,12 @@ export default function SuperAdminPage() {
       
       const { data: favoritosDataWithStatus, error: favoritosErrWithStatus } = await supabase
         .from("pjn_favoritos")
-        .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones, removido, estado")
+        .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones, notas, removido, estado")
         .order("updated_at", { ascending: false });
       
       // Si falla porque la columna no existe, intentar sin incluirla en el select
-      if (favoritosErrWithStatus && (favoritosErrWithStatus.message?.includes("removido") || favoritosErrWithStatus.message?.includes("estado"))) {
-        console.log(`[Dashboard] Columnas removido/estado no encontradas, cargando sin ellas...`);
+      if (favoritosErrWithStatus && (favoritosErrWithStatus.message?.includes("removido") || favoritosErrWithStatus.message?.includes("estado") || favoritosErrWithStatus.message?.includes("notas"))) {
+        console.log(`[Dashboard] Columnas removido/estado/notas no encontradas, cargando sin ellas...`);
         const { data: favoritosData2, error: favoritosErr2 } = await supabase
           .from("pjn_favoritos")
           .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones")
@@ -497,8 +500,8 @@ export default function SuperAdminPage() {
         if (favoritosErr2) {
           favoritosErr = favoritosErr2;
         } else {
-          // Agregar propiedades removido y estado como undefined para mantener consistencia
-          favoritosData = (favoritosData2 || []).map((f: PjnFavorito) => ({ ...f, removido: undefined, estado: undefined }));
+          // Agregar propiedades removido, estado y notas como undefined/null para mantener consistencia
+          favoritosData = (favoritosData2 || []).map((f: PjnFavorito) => ({ ...f, removido: undefined, estado: undefined, notas: null }));
           favoritosErr = null;
         }
       } else {
