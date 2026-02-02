@@ -62,6 +62,7 @@ export default function NuevaExpedientePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
   const [userRoles, setUserRoles] = useState<{
     isSuperadmin: boolean;
     isAdminExpedientes: boolean;
@@ -159,6 +160,14 @@ export default function NuevaExpedientePage() {
       setLoading(false);
     })();
   }, []);
+
+  // Cerrar menú al hacer clic fuera
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleClickOutside = () => setMenuOpen(false);
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
+  }, [menuOpen]);
 
   // Buscar automáticamente en pjn-scraper cuando se complete jurisdicción, número y año
   useEffect(() => {
@@ -363,7 +372,7 @@ export default function NuevaExpedientePage() {
         <div className="page">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24, flexWrap: "wrap", gap: 8 }}>
             <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700 }}>Cargar Expediente</h1>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", position: "relative" }}>
               {currentUserName && (
                 <div
                   title={currentUserName}
@@ -400,19 +409,130 @@ export default function NuevaExpedientePage() {
                   </span>
                 </div>
               )}
-              {userRoles.isSuperadmin && (
-                <Link className="btn" href="/superadmin">
-                  DASHBOARD
-                </Link>
-              )}
+              
+              {/* Botón menú hamburguesa */}
               {userRoles.isAbogado && (
-                <Link className="btn" href="/app/abogado">
-                  HOME
-                </Link>
+                <>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMenuOpen(!menuOpen);
+                    }}
+                    style={{
+                      background: "rgba(96,141,186,.15)",
+                      border: "1px solid rgba(96,141,186,.35)",
+                      borderRadius: 8,
+                      padding: "8px 10px",
+                      cursor: "pointer",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 4,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      transition: "all 0.2s ease",
+                      minWidth: 40,
+                      minHeight: 40
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = "rgba(96,141,186,.22)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = "rgba(96,141,186,.15)";
+                    }}
+                  >
+                    <div style={{
+                      width: 20,
+                      height: 2,
+                      background: "var(--brand-blue-2)",
+                      borderRadius: 1,
+                      transition: "all 0.3s ease"
+                    }} />
+                    <div style={{
+                      width: 20,
+                      height: 2,
+                      background: "var(--brand-blue-2)",
+                      borderRadius: 1,
+                      transition: "all 0.3s ease"
+                    }} />
+                    <div style={{
+                      width: 20,
+                      height: 2,
+                      background: "var(--brand-blue-2)",
+                      borderRadius: 1,
+                      transition: "all 0.3s ease"
+                    }} />
+                  </button>
+
+                  {/* Menú desplegable */}
+                  {menuOpen && (
+                    <div
+                      onClick={(e) => e.stopPropagation()}
+                      style={{
+                        position: "absolute",
+                        top: "100%",
+                        right: 0,
+                        marginTop: 8,
+                        background: "#ffffff",
+                        border: "1px solid rgba(0,0,0,.12)",
+                        borderRadius: 12,
+                        padding: "12px 0",
+                        minWidth: 220,
+                        boxShadow: "0 8px 24px rgba(0,0,0,.15)",
+                        zIndex: 1000
+                      }}
+                    >
+                      <Link
+                        href="/superadmin"
+                        onClick={() => setMenuOpen(false)}
+                        style={{
+                          display: "block",
+                          padding: "12px 20px",
+                          color: "#1a1a1a",
+                          textDecoration: "none",
+                          fontSize: 14,
+                          fontWeight: 600,
+                          transition: "background 0.2s ease",
+                          borderLeft: "3px solid transparent"
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = "rgba(96,141,186,.08)";
+                          e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = "transparent";
+                          e.currentTarget.style.borderLeftColor = "transparent";
+                        }}
+                      >
+                        📊 Dashboard
+                      </Link>
+                      <Link
+                        href="/superadmin/mis-juzgados"
+                        onClick={() => setMenuOpen(false)}
+                        style={{
+                          display: "block",
+                          padding: "12px 20px",
+                          color: "#1a1a1a",
+                          textDecoration: "none",
+                          fontSize: 14,
+                          fontWeight: 600,
+                          transition: "background 0.2s ease",
+                          borderLeft: "3px solid transparent"
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = "rgba(96,141,186,.08)";
+                          e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = "transparent";
+                          e.currentTarget.style.borderLeftColor = "transparent";
+                        }}
+                      >
+                        📋 Mis Juzgados
+                      </Link>
+                    </div>
+                  )}
+                </>
               )}
-              <Link href={userRoles.isAbogado ? "/app/abogado" : "/app/expedientes"} className="btn">
-                Volver
-              </Link>
             </div>
           </div>
 

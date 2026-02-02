@@ -474,11 +474,48 @@ export default function SuperAdminPage() {
       }
       
       // Cargar favoritos de pjn-scraper (pjn_favoritos)
+      // IMPORTANTE: Filtrar favoritos removidos (si existe columna removido o estado)
       console.log(`[Dashboard] Cargando favoritos de pjn-scraper...`);
-      const { data: favoritosData, error: favoritosErr } = await supabase
+      
+      // Intentar cargar con filtro de removido primero
+      let favoritosData: (PjnFavorito & { removido?: boolean; estado?: string })[] | null = null;
+      let favoritosErr: { message?: string } | null = null;
+      
+      const { data: favoritosDataWithStatus, error: favoritosErrWithStatus } = await supabase
         .from("pjn_favoritos")
-        .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones")
+        .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones, removido, estado")
         .order("updated_at", { ascending: false });
+      
+      // Si falla porque la columna no existe, intentar sin incluirla en el select
+      if (favoritosErrWithStatus && (favoritosErrWithStatus.message?.includes("removido") || favoritosErrWithStatus.message?.includes("estado"))) {
+        console.log(`[Dashboard] Columnas removido/estado no encontradas, cargando sin ellas...`);
+        const { data: favoritosData2, error: favoritosErr2 } = await supabase
+          .from("pjn_favoritos")
+          .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones")
+          .order("updated_at", { ascending: false });
+        
+        if (favoritosErr2) {
+          favoritosErr = favoritosErr2;
+        } else {
+          // Agregar propiedades removido y estado como undefined para mantener consistencia
+          favoritosData = (favoritosData2 || []).map((f: PjnFavorito) => ({ ...f, removido: undefined, estado: undefined }));
+          favoritosErr = null;
+        }
+      } else {
+        favoritosData = favoritosDataWithStatus as (PjnFavorito & { removido?: boolean; estado?: string })[] | null;
+        favoritosErr = favoritosErrWithStatus;
+      }
+      
+      // Filtrar favoritos removidos en memoria si las columnas existen
+      if (favoritosData && !favoritosErr) {
+        favoritosData = favoritosData.filter((f) => {
+          // Si tiene columna removido, filtrar los que están removidos
+          if (f.removido === true) return false;
+          // Si tiene columna estado, filtrar los que están REMOVIDO
+          if (f.estado === "REMOVIDO") return false;
+          return true;
+        });
+      }
       
       if (favoritosErr) {
         console.warn(`[Dashboard] ⚠️  Error al cargar pjn_favoritos:`, favoritosErr);
@@ -669,9 +706,54 @@ export default function SuperAdminPage() {
   }, [allCedulas, timeFilter, selectedUserId, juzgadoFilter, selectedUserJuzgados, customStartDate, customEndDate, userJuzgados.length]);
 
   // Función para normalizar juzgado para comparación
-  const normalizarJuzgado = (j: string | null) => {
+  // Extrae el número del juzgado de manera consistente
+  const normalizarJuzgado = (j: string | null): string => {
     if (!j) return "";
-    return j.trim().replace(/\s+/g, " ").toUpperCase();
+    const normalized = j.trim().replace(/\s+/g, " ").toUpperCase();
+    
+    // Intentar extraer número de juzgado civil
+    // Patrones: "JUZGADO CIVIL 70", "JUZGADO NACIONAL EN LO CIVIL N° 70", etc.
+    const matchCivil = normalized.match(/JUZGADO\s+(?:NACIONAL\s+EN\s+LO\s+)?CIVIL\s+(?:N[°º]?\s*)?(\d+)/i);
+    if (matchCivil && matchCivil[1]) {
+      return `JUZGADO CIVIL ${matchCivil[1]}`;
+    }
+    
+    // Si no es civil, intentar extraer cualquier número después de "JUZGADO"
+    const matchGeneric = normalized.match(/JUZGADO[^0-9]*?(\d+)/i);
+    if (matchGeneric && matchGeneric[1]) {
+      // Intentar determinar el tipo
+      if (normalized.includes("CIVIL")) {
+        return `JUZGADO CIVIL ${matchGeneric[1]}`;
+      }
+      // Para otros tipos, mantener el formato original pero normalizado
+      return normalized;
+    }
+    
+    // Si no se encuentra número, retornar normalizado
+    return normalized;
+  };
+  
+  // Función para comparar juzgados de manera estricta
+  const juzgadosCoinciden = (j1: string, j2: string): boolean => {
+    const n1 = normalizarJuzgado(j1);
+    const n2 = normalizarJuzgado(j2);
+    
+    // Comparación exacta
+    if (n1 === n2) return true;
+    
+    // Extraer números de ambos
+    const num1 = n1.match(/(\d+)/)?.[1];
+    const num2 = n2.match(/(\d+)/)?.[1];
+    
+    // Si ambos tienen números y son iguales, y ambos contienen "JUZGADO" y "CIVIL"
+    if (num1 && num2 && num1 === num2) {
+      if (n1.includes("JUZGADO") && n2.includes("JUZGADO") && 
+          n1.includes("CIVIL") && n2.includes("CIVIL")) {
+        return true;
+      }
+    }
+    
+    return false;
   };
 
   // Obtener todos los juzgados únicos de cédulas, expedientes y favoritos, ordenados ascendente
@@ -739,7 +821,22 @@ export default function SuperAdminPage() {
   // Filtrar expedientes según los filtros seleccionados
   useEffect(() => {
     // Combinar expedientes locales con favoritos convertidos
-    let filtered: Expediente[] = [...allExpedientes, ...favoritosComoExpedientes];
+    // IMPORTANTE: Eliminar duplicados por ID antes de filtrar
+    const expedientesMap = new Map<string, Expediente>();
+    
+    // Primero agregar expedientes locales (tienen prioridad)
+    allExpedientes.forEach(e => {
+      expedientesMap.set(e.id, e);
+    });
+    
+    // Luego agregar favoritos PJN solo si no existen ya (por ID único)
+    favoritosComoExpedientes.forEach(e => {
+      if (!expedientesMap.has(e.id)) {
+        expedientesMap.set(e.id, e);
+      }
+    });
+    
+    let filtered: Expediente[] = Array.from(expedientesMap.values());
     const initialCount = filtered.length;
     
     console.log(`[Dashboard] Filtrando expedientes - Inicial: ${initialCount}, Filtro juzgados: ${juzgadoFilter}`, {
@@ -755,27 +852,16 @@ export default function SuperAdminPage() {
 
       // Mantener expedientes locales por owner, y favoritos PJN por juzgado asignado del usuario seleccionado
       // IMPORTANTE: Asignar owner_user_id a favoritos PJN para que aparezcan correctamente en el ranking
+      const juzgadosDelUsuarioNormalizados = juzgadosDelUsuario.map(j => normalizarJuzgado(j));
       filtered = filtered.map(e => {
         if (e.is_pjn_favorito) {
           if (!e.juzgado) return null;
-          const juzgadoNormalizado = normalizarJuzgado(e.juzgado);
-          // Comparación exacta normalizada
-          if (juzgadosDelUsuario.includes(juzgadoNormalizado)) {
-            // Asignar el owner_user_id del usuario seleccionado para que aparezca en el ranking
-            return { ...e, owner_user_id: selectedUserId };
-          }
-          // Comparación por número de juzgado (más flexible)
-          const matchJuzgado = juzgadosDelUsuario.some(jAsignado => {
-            const numAsignado = jAsignado.match(/N[°º]\s*(\d+)/i)?.[1];
-            const numJuzgado = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
-            if (numAsignado && numJuzgado && numAsignado === numJuzgado) {
-              if (jAsignado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
-                return true;
-              }
-            }
-            return false;
+          // Usar comparación estricta
+          const matchJuzgado = juzgadosDelUsuarioNormalizados.some(jAsignado => {
+            return juzgadosCoinciden(e.juzgado || "", jAsignado);
           });
           if (matchJuzgado) {
+            // Asignar el owner_user_id del usuario seleccionado para que aparezca en el ranking
             return { ...e, owner_user_id: selectedUserId };
           }
           return null;
@@ -785,45 +871,36 @@ export default function SuperAdminPage() {
 
       console.log(`[Dashboard] Filtro por usuario (local por owner, PJN por juzgado asignado): ${beforeUserFilter} -> ${filtered.length}`);
     } else {
-      // Cuando se selecciona "Todos los usuarios", distribuir favoritos PJN entre todos los usuarios
-      // que tienen ese juzgado asignado, pero solo una vez por favorito (asignar al primer usuario que coincida)
+      // Cuando se selecciona "Todos los usuarios", mostrar TODOS los expedientes:
+      // 1. Todos los expedientes locales (ya tienen owner_user_id)
+      // 2. Todos los favoritos PJN asignados a usuarios (asignar al primer usuario que coincida)
+      // IMPORTANTE: NO filtrar, solo asignar favoritos PJN sin asignar
       filtered = filtered.map(e => {
+        // Si es un favorito PJN sin asignar, buscar el primer usuario que tenga este juzgado asignado
         if (e.is_pjn_favorito && (!e.owner_user_id || e.owner_user_id.trim() === "")) {
           if (!e.juzgado) return e; // Mantener sin asignar si no tiene juzgado
-          const juzgadoNormalizado = normalizarJuzgado(e.juzgado);
           
           // Buscar el primer usuario que tenga este juzgado asignado
           for (const [userId, juzgadosDelUsuario] of Object.entries(userJuzgadosMap)) {
-            const juzgadosNormalizados = juzgadosDelUsuario.map(j => j?.trim().replace(/\s+/g, " ").toUpperCase());
+            const juzgadosNormalizados = juzgadosDelUsuario.map(j => normalizarJuzgado(j));
             
-            // Comparación exacta normalizada
-            if (juzgadosNormalizados.includes(juzgadoNormalizado)) {
-              return { ...e, owner_user_id: userId };
-            }
-            
-            // Comparación por número de juzgado (más flexible)
+            // Usar comparación estricta
             const matchJuzgado = juzgadosNormalizados.some(jAsignado => {
-              const numAsignado = jAsignado.match(/N[°º]\s*(\d+)/i)?.[1];
-              const numJuzgado = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
-              if (numAsignado && numJuzgado && numAsignado === numJuzgado) {
-                if (jAsignado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
-                  return true;
-                }
-              }
-              return false;
+              return juzgadosCoinciden(e.juzgado || "", jAsignado);
             });
             
             if (matchJuzgado) {
               return { ...e, owner_user_id: userId };
             }
           }
-          // Si no se encuentra ningún usuario con este juzgado, mantener sin asignar
+          // Si no se encuentra ningún usuario con este juzgado, mantener sin asignar (no se contará en métricas)
           return e;
         }
+        // Mantener todos los demás expedientes (locales y favoritos ya asignados)
         return e;
       });
       
-      console.log(`[Dashboard] Distribución de favoritos PJN entre usuarios: ${filtered.filter(e => e.is_pjn_favorito && e.owner_user_id && e.owner_user_id.trim() !== "").length} favoritos asignados`);
+      console.log(`[Dashboard] Modo "Todos los usuarios" - Total expedientes: ${filtered.length} (${filtered.filter(e => !e.is_pjn_favorito).length} locales + ${filtered.filter(e => e.is_pjn_favorito && e.owner_user_id && e.owner_user_id.trim() !== "").length} favoritos PJN asignados)`);
     }
 
     // Filtro por juzgados
@@ -836,22 +913,8 @@ export default function SuperAdminPage() {
       
       filtered = filtered.filter(e => {
         if (!e.juzgado) return false;
-        const juzgadoNormalizado = normalizarJuzgado(e.juzgado);
-        
-        // Comparación exacta normalizada
-        if (juzgadosNormalizados.includes(juzgadoNormalizado)) return true;
-        
-        // Comparación por número de juzgado (más flexible) - misma lógica que mis-juzgados
         return juzgadosNormalizados.some(jAsignado => {
-          const numAsignado = jAsignado.match(/N[°º]\s*(\d+)/i)?.[1];
-          const numJuzgado = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
-          if (numAsignado && numJuzgado && numAsignado === numJuzgado) {
-            // Verificar que ambos contengan "JUZGADO" y el mismo número
-            if (jAsignado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
-              return true;
-            }
-          }
-          return false;
+          return juzgadosCoinciden(e.juzgado || "", jAsignado);
         });
       });
       
@@ -886,21 +949,7 @@ export default function SuperAdminPage() {
       
       filtered = filtered.filter(e => {
         if (!e.juzgado) return false;
-        const juzgadoNormalizado = normalizarJuzgado(e.juzgado);
-        
-        // Comparación exacta normalizada
-        if (juzgadoNormalizado === juzgadoFiltroNormalizado) return true;
-        
-        // Comparación por número de juzgado (más flexible)
-        const numFiltro = juzgadoFiltroNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
-        const numJuzgado = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
-        if (numFiltro && numJuzgado && numFiltro === numJuzgado) {
-          if (juzgadoFiltroNormalizado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
-            return true;
-          }
-        }
-        
-        return false;
+        return juzgadosCoinciden(e.juzgado, juzgadoFilter);
       });
       
       console.log(`[Dashboard] Filtro expedientes por juzgado específico: ${beforeJuzgadoFilter} -> ${filtered.length}`, {
@@ -922,6 +971,7 @@ export default function SuperAdminPage() {
     }
 
     setExpedientes(filtered);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allExpedientes, favoritosComoExpedientes, timeFilter, selectedUserId, juzgadoFilter, selectedUserJuzgados, customStartDate, customEndDate, userJuzgados.length]);
 
   const ranking = useMemo(() => {
@@ -1018,18 +1068,60 @@ export default function SuperAdminPage() {
   const rankingExpedientes = useMemo(() => {
     const perUser: Record<string, { rojos: number; amarillos: number; verdes: number; total: number; maxDias: number }> = {};
 
-    for (const e of expedientes) {
+    // IMPORTANTE: Calcular el ranking desde los datos originales, no desde el array filtrado
+    // Esto asegura que los favoritos PJN se cuenten para TODOS los usuarios que tienen ese juzgado asignado
+    
+    // Eliminar duplicados por ID (priorizar expedientes locales)
+    const expedientesMap = new Map<string, Expediente>();
+    allExpedientes.forEach(e => expedientesMap.set(e.id, e));
+    favoritosComoExpedientes.forEach(e => {
+      if (!expedientesMap.has(e.id)) {
+        expedientesMap.set(e.id, e);
+      }
+    });
+    
+    const expedientesUnicos = Array.from(expedientesMap.values());
+
+    for (const e of expedientesUnicos) {
+      const usuariosParaContar: string[] = [];
+      
+      if (e.is_pjn_favorito) {
+        // Para favoritos PJN, contar para TODOS los usuarios que tienen ese juzgado asignado
+        if (e.juzgado) {
+          for (const [userId, juzgadosDelUsuario] of Object.entries(userJuzgadosMap)) {
+            const juzgadosNormalizados = juzgadosDelUsuario.map(j => normalizarJuzgado(j));
+            const matchJuzgado = juzgadosNormalizados.some(jAsignado => {
+              return juzgadosCoinciden(e.juzgado || "", jAsignado);
+            });
+            if (matchJuzgado) {
+              usuariosParaContar.push(userId);
+            }
+          }
+        }
+        // Si no tiene juzgado o no coincide con ningún usuario, no contar
+        if (usuariosParaContar.length === 0) continue;
+      } else {
+        // Para expedientes locales, contar solo para el owner
+        if (e.owner_user_id && e.owner_user_id.trim() !== "") {
+          usuariosParaContar.push(e.owner_user_id);
+        } else {
+          continue; // Sin owner, no contar
+        }
+      }
+
       const dias = daysSince(e.fecha_ultima_modificacion);
       const s = semaforoPorAntiguedad(dias);
-      const uid = e.owner_user_id;
 
-      perUser[uid] ||= { rojos: 0, amarillos: 0, verdes: 0, total: 0, maxDias: -1 };
-      perUser[uid].total++;
-      perUser[uid].maxDias = Math.max(perUser[uid].maxDias, dias);
+      // Contar para cada usuario
+      for (const uid of usuariosParaContar) {
+        perUser[uid] ||= { rojos: 0, amarillos: 0, verdes: 0, total: 0, maxDias: -1 };
+        perUser[uid].total++;
+        perUser[uid].maxDias = Math.max(perUser[uid].maxDias, dias);
 
-      if (s === "ROJO") perUser[uid].rojos++;
-      else if (s === "AMARILLO") perUser[uid].amarillos++;
-      else perUser[uid].verdes++;
+        if (s === "ROJO") perUser[uid].rojos++;
+        else if (s === "AMARILLO") perUser[uid].amarillos++;
+        else perUser[uid].verdes++;
+      }
     }
 
     return Object.entries(perUser).map(([uid, v]) => ({
@@ -1041,7 +1133,8 @@ export default function SuperAdminPage() {
       (b.amarillos - a.amarillos) ||
       (b.maxDias - a.maxDias)
     );
-  }, [expedientes, profiles]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allExpedientes, favoritosComoExpedientes, userJuzgadosMap, profiles]);
 
   const metrics = useMemo(() => {
     const cedulasFiltered = cedulas.filter(c => !c.tipo_documento || c.tipo_documento === "CEDULA");
@@ -1100,16 +1193,70 @@ export default function SuperAdminPage() {
     const maxDias = ranking.length > 0 ? Math.max(...ranking.map(r => r.maxDias)) : 0;
     
     // Métricas de expedientes
-    const totalExpedientes = expedientes.length;
-    const expedientesRojos = expedientes.filter(e => {
+    // IMPORTANTE: Cuando selectedUserId === "all", contar EXPEDIENTES ÚNICOS (sin duplicar favoritos PJN)
+    // Cuando selectedUserId !== "all", usar el array filtrado (expedientes)
+    let expedientesParaContar: Expediente[];
+    
+    if (selectedUserId === "all") {
+      // Calcular desde datos originales: todos los expedientes locales + favoritos PJN únicos
+      // IMPORTANTE: Los favoritos PJN se cuentan UNA SOLA VEZ (no por cada usuario que lo tiene)
+      const expedientesMap = new Map<string, Expediente>();
+      
+      // Agregar expedientes locales (tienen prioridad)
+      allExpedientes.forEach(e => {
+        if (e.owner_user_id && e.owner_user_id.trim() !== "") {
+          expedientesMap.set(e.id, e);
+        }
+      });
+      
+      // Agregar favoritos PJN únicos (solo si no existe ya un expediente local con el mismo ID)
+      favoritosComoExpedientes.forEach(e => {
+        if (!expedientesMap.has(e.id)) {
+          // Solo contar favoritos PJN que tienen juzgado y al menos un usuario lo tiene asignado
+          if (e.juzgado) {
+            let tieneUsuarioAsignado = false;
+            for (const [, juzgadosDelUsuario] of Object.entries(userJuzgadosMap)) {
+              const juzgadosNormalizados = juzgadosDelUsuario.map(j => normalizarJuzgado(j));
+              const matchJuzgado = juzgadosNormalizados.some(jAsignado => {
+                return juzgadosCoinciden(e.juzgado || "", jAsignado);
+              });
+              if (matchJuzgado) {
+                tieneUsuarioAsignado = true;
+                break;
+              }
+            }
+            if (tieneUsuarioAsignado) {
+              expedientesMap.set(e.id, e);
+            }
+          }
+        }
+      });
+      
+      expedientesParaContar = Array.from(expedientesMap.values());
+      
+      // Debug log
+      console.log(`[Dashboard Metrics] Modo "Todos" - Expedientes únicos: ${expedientesParaContar.length}`, {
+        locales: allExpedientes.filter(e => e.owner_user_id && e.owner_user_id.trim() !== "").length,
+        favoritosPJN: expedientesParaContar.filter(e => e.is_pjn_favorito).length,
+        totalFavoritosPJN: favoritosComoExpedientes.length
+      });
+    } else {
+      // Usar el array filtrado (ya está filtrado por usuario y juzgado)
+      expedientesParaContar = expedientes.filter(e => {
+        return e.owner_user_id && e.owner_user_id.trim() !== "";
+      });
+    }
+    
+    const totalExpedientes = expedientesParaContar.length;
+    const expedientesRojos = expedientesParaContar.filter(e => {
       const dias = daysSince(e.fecha_ultima_modificacion);
       return semaforoPorAntiguedad(dias) === "ROJO";
     }).length;
-    const expedientesAmarillos = expedientes.filter(e => {
+    const expedientesAmarillos = expedientesParaContar.filter(e => {
       const dias = daysSince(e.fecha_ultima_modificacion);
       return semaforoPorAntiguedad(dias) === "AMARILLO";
     }).length;
-    const expedientesVerdes = expedientes.filter(e => {
+    const expedientesVerdes = expedientesParaContar.filter(e => {
       const dias = daysSince(e.fecha_ultima_modificacion);
       return semaforoPorAntiguedad(dias) === "VERDE";
     }).length;
@@ -1154,6 +1301,7 @@ export default function SuperAdminPage() {
       maxDias,
       maxDiasExpedientes,
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cedulas, expedientes, ranking, rankingExpedientes]);
 
   async function logout() {

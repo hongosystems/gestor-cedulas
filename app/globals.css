@@ -163,11 +163,11 @@ select.input option{
 .table{
   width:100%;
   border-collapse: collapse;
-  min-width: 1200px;
+  min-width: 1400px;
 }
 .table thead th{
   text-align:left;
-  font-size: 12px;
+  font-size: 12.5px;
   letter-spacing:.3px;
   text-transform: none;
   color: rgba(234,243,255,.80);
@@ -175,6 +175,7 @@ select.input option{
   border-bottom: 1px solid rgba(255,255,255,.10);
   background: rgba(0,82,156,.10);
   transition: background .15s ease, color .15s ease;
+  white-space: nowrap;
 }
 .table thead th.sortable{
   cursor: pointer;

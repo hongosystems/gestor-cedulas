@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { pjnScraperSupabase } from "@/lib/pjn-scraper-supabase";
 import { daysSince } from "@/lib/semaforo";
@@ -51,6 +51,7 @@ type Expediente = {
   fecha_ultima_modificacion: string | null;
   estado: string;
   observaciones: string | null;
+  notas: string | null;
   created_by_user_id: string | null;
   created_by_name: string | null;
   is_pjn_favorito?: boolean; // Indica si viene de pjn_favoritos
@@ -105,6 +106,394 @@ function semaforoByAge(dias: number): Semaforo {
   return "VERDE";
 }
 
+function NotasTextarea({
+  itemId,
+  isPjnFavorito,
+  initialValue,
+  notasEditables,
+  setNotasEditables,
+  notasGuardando,
+  setNotasGuardando,
+  setMsg
+}: {
+  itemId: string;
+  isPjnFavorito: boolean;
+  initialValue: string;
+  notasEditables: Record<string, string>;
+  setNotasEditables: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  notasGuardando: Record<string, boolean>;
+  setNotasGuardando: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+  setMsg: React.Dispatch<React.SetStateAction<string>>;
+}) {
+  const timeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+  const [isEditing, setIsEditing] = React.useState(false);
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const value = notasEditables[itemId] !== undefined ? notasEditables[itemId] : initialValue;
+  const trimmedValue = value?.trim() || "";
+
+  const guardarNotas = React.useCallback(async (newValue: string) => {
+    if (notasGuardando[itemId]) return;
+    
+    setNotasGuardando(prev => ({ ...prev, [itemId]: true }));
+    
+    try {
+      if (isPjnFavorito) {
+        // Para favoritos PJN, extraer el ID real (sin el prefijo "pjn_")
+        const pjnId = itemId.replace(/^pjn_/, "");
+        
+        console.log(`[Notas] Intentando guardar notas para favorito PJN: ${itemId} (ID real: ${pjnId})`);
+        
+        // Intentar primero con el cliente principal
+        let { data, error } = await supabase
+          .from("pjn_favoritos")
+          .update({ notas: newValue.trim() || null })
+          .eq("id", pjnId)
+          .select();
+        
+        // Log detallado del error
+        if (error) {
+          const errorObj = error as any;
+          console.log(`[Notas] Error del cliente principal:`, {
+            message: errorObj.message,
+            code: errorObj.code,
+            details: errorObj.details,
+            hint: errorObj.hint,
+            status: errorObj.status,
+            statusText: errorObj.statusText,
+            error: JSON.stringify(errorObj, Object.getOwnPropertyNames(errorObj))
+          });
+        } else {
+          console.log(`[Notas] ✅ Notas guardadas exitosamente con cliente principal:`, data);
+        }
+        
+        // Si falla porque la tabla no está en la BD principal, intentar con pjn-scraper
+        if (error) {
+          const errorMsg = (error as any).message || String(error) || "";
+          const errorCode = (error as any).code || "";
+          const errorDetails = (error as any).details || "";
+          const errorHint = (error as any).hint || "";
+          const errorStatus = (error as any).status || "";
+          
+          console.log(`[Notas] Analizando error:`, { errorMsg, errorCode, errorDetails, errorHint, errorStatus });
+          
+          // Si es error de tabla/columna no encontrada, intentar con pjn-scraper
+          const isTableOrColumnError = 
+            errorMsg.includes("relation") || 
+            errorMsg.includes("does not exist") || 
+            errorCode === "PGRST116" || 
+            errorMsg.includes("column") || 
+            errorDetails.includes("column") ||
+            errorMsg.includes("permission denied") ||
+            errorMsg.includes("new row violates row-level security");
+          
+          if (isTableOrColumnError) {
+            const pjnUrl = process.env.NEXT_PUBLIC_PJN_SCRAPER_SUPABASE_URL;
+            const pjnKey = process.env.NEXT_PUBLIC_PJN_SCRAPER_SUPABASE_ANON_KEY;
+            
+            console.log(`[Notas] Intentando con cliente pjn-scraper...`, { pjnUrl: !!pjnUrl, pjnKey: !!pjnKey });
+            
+            if (pjnUrl && pjnKey) {
+              // Intentar con el cliente pjn-scraper
+              const { data: pjnData, error: pjnError } = await pjnScraperSupabase
+                .from("pjn_favoritos")
+                .update({ notas: newValue.trim() || null })
+                .eq("id", pjnId)
+                .select();
+              
+              if (pjnError) {
+                const pjnErrorObj = pjnError as any;
+                console.error(`[Notas] Error del cliente pjn-scraper:`, {
+                  message: pjnErrorObj.message,
+                  code: pjnErrorObj.code,
+                  details: pjnErrorObj.details,
+                  hint: pjnErrorObj.hint,
+                  status: pjnErrorObj.status,
+                  error: JSON.stringify(pjnErrorObj, Object.getOwnPropertyNames(pjnErrorObj))
+                });
+                const pjnErrorMsg = pjnErrorObj.message || String(pjnError) || "Error desconocido";
+                setMsg(`Error al guardar notas: ${pjnErrorMsg}. Verifica que la columna notas exista en pjn_favoritos y que tengas permisos de escritura.`);
+                return;
+              }
+              // Éxito con pjn-scraper
+              console.log(`[Notas] ✅ Notas guardadas exitosamente con cliente pjn-scraper:`, pjnData);
+              error = null;
+            } else {
+              console.error(`[Notas] Cliente pjn-scraper no configurado`);
+              setMsg(`Error al guardar notas: ${errorMsg || "Tabla pjn_favoritos no encontrada y cliente pjn-scraper no configurado"}`);
+              return;
+            }
+          } else {
+            // Otro tipo de error (posiblemente permisos RLS)
+            const fullError = {
+              message: errorMsg,
+              code: errorCode,
+              details: errorDetails,
+              hint: errorHint,
+              status: errorStatus,
+              originalError: error
+            };
+            console.error(`[Notas] Error completo:`, fullError);
+            
+            // Mensaje más descriptivo basado en el tipo de error
+            let userMessage = errorMsg || errorDetails || "Error desconocido";
+            if (errorMsg.includes("permission denied") || errorMsg.includes("row-level security")) {
+              userMessage = "Error de permisos: Verifica que exista una política RLS de UPDATE para pjn_favoritos. Ejecuta la migración SQL para crear la política.";
+            } else if (errorMsg.includes("column") || errorDetails.includes("column")) {
+              userMessage = "Error: La columna 'notas' no existe en pjn_favoritos. Ejecuta la migración SQL para agregarla.";
+            }
+            
+            setMsg(`Error al guardar notas: ${userMessage}`);
+            return;
+          }
+        }
+      } else {
+        // Para expedientes locales
+        const { error } = await supabase
+          .from("expedientes")
+          .update({ notas: newValue.trim() || null })
+          .eq("id", itemId);
+        
+        if (error) {
+          console.error(`Error al guardar notas para expediente ${itemId}:`, error);
+          setMsg(`Error al guardar notas: ${error.message}`);
+        }
+      }
+    } catch (err) {
+      console.error(`Error al guardar notas:`, err);
+      setMsg(`Error al guardar notas: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setNotasGuardando(prev => {
+        const newState = { ...prev };
+        delete newState[itemId];
+        return newState;
+      });
+    }
+  }, [itemId, isPjnFavorito, notasGuardando, setMsg]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newValue = e.target.value;
+    setNotasEditables(prev => ({ ...prev, [itemId]: newValue }));
+    
+    // Cancelar timeout anterior
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+    
+    // Guardar automáticamente después de 30 segundos sin escribir
+    timeoutRef.current = setTimeout(() => {
+      guardarNotas(newValue);
+    }, 30000);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Guardar inmediatamente con ENTER (Ctrl+Enter o Cmd+Enter) o TAB
+    if (e.key === "Tab" || (e.key === "Enter" && (e.ctrlKey || e.metaKey))) {
+      e.preventDefault();
+      const currentValue = notasEditables[itemId] !== undefined ? notasEditables[itemId] : initialValue;
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      guardarNotas(currentValue);
+      setIsEditing(false);
+    }
+    // ESC para cancelar edición
+    if (e.key === "Escape") {
+      setNotasEditables(prev => {
+        const newState = { ...prev };
+        delete newState[itemId];
+        return newState;
+      });
+      setIsEditing(false);
+    }
+  };
+
+  const handleBlur = () => {
+    const currentValue = notasEditables[itemId] !== undefined ? notasEditables[itemId] : initialValue;
+    if (currentValue !== initialValue) {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      guardarNotas(currentValue);
+    }
+    setIsEditing(false);
+  };
+
+  const handleClick = () => {
+    setIsEditing(true);
+    // Enfocar el textarea después de un pequeño delay para que se renderice
+    setTimeout(() => {
+      textareaRef.current?.focus();
+    }, 0);
+  };
+
+  React.useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Si está editando, mostrar textarea
+  if (isEditing) {
+    return (
+      <div style={{ 
+        width: "100%",
+        padding: "6px 8px",
+        background: "rgba(255,255,255,.03)",
+        borderRadius: 8,
+        border: "1px solid rgba(255,255,255,.06)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 5,
+        boxSizing: "border-box"
+      }}>
+        <textarea
+          ref={textareaRef}
+          value={value}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          onBlur={handleBlur}
+          placeholder="Agregar notas..."
+          disabled={notasGuardando[itemId]}
+          style={{
+            width: "100%",
+            minHeight: "50px",
+            padding: "6px 8px",
+            background: "rgba(255,255,255,.05)",
+            border: "1px solid rgba(255,255,255,.08)",
+            borderRadius: 6,
+            color: "rgba(234,243,255,.95)",
+            fontSize: 12.5,
+            fontFamily: "inherit",
+            resize: "vertical",
+            lineHeight: 1.6,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+            transition: "all 0.2s ease",
+            outline: "none",
+            textAlign: "left",
+            boxSizing: "border-box"
+          }}
+        />
+        <div style={{
+          padding: "2px 0 0 0",
+          fontSize: 9.5,
+          color: "rgba(234,243,255,.5)",
+          fontStyle: "italic",
+          textAlign: "left",
+          letterSpacing: "0.01em",
+          lineHeight: 1.3,
+          wordBreak: "break-word",
+          whiteSpace: "normal"
+        }}>
+          Autoguardado en 30 segundos, presionando Ctrl+Enter ó Tab
+        </div>
+        {notasGuardando[itemId] && (
+          <div style={{ 
+            fontSize: 9.5, 
+            color: "rgba(234,243,255,.5)", 
+            textAlign: "left",
+            fontStyle: "italic",
+            padding: "2px 0 0 0"
+          }}>
+            Guardando...
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Si no está editando, mostrar bloque similar a Observaciones
+  if (!trimmedValue) {
+    return (
+      <div
+        onClick={handleClick}
+        style={{
+          padding: "6px 8px",
+          background: "rgba(255,255,255,.03)",
+          borderRadius: 8,
+          border: "1px solid rgba(255,255,255,.06)",
+          lineHeight: 1.6,
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+          color: "rgba(234,243,255,.5)",
+          fontSize: 12.5,
+          letterSpacing: "0.01em",
+          cursor: "pointer",
+          transition: "all 0.2s ease",
+          textAlign: "left",
+          boxSizing: "border-box"
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "rgba(255,255,255,.05)";
+          e.currentTarget.style.borderColor = "rgba(255,255,255,.1)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "rgba(255,255,255,.03)";
+          e.currentTarget.style.borderColor = "rgba(255,255,255,.06)";
+        }}
+      >
+        <div style={{
+          fontSize: 9.5,
+          color: "rgba(234,243,255,.5)",
+          fontStyle: "italic",
+          lineHeight: 1.3,
+          wordBreak: "break-word",
+          whiteSpace: "normal"
+        }}>
+          Autoguardado en 30 segundos, presionando Ctrl+Enter ó Tab
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      onClick={handleClick}
+      style={{
+        padding: "6px 8px",
+        background: "rgba(255,255,255,.03)",
+        borderRadius: 8,
+        border: "1px solid rgba(255,255,255,.06)",
+        lineHeight: 1.6,
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-word",
+        color: "rgba(234,243,255,.88)",
+        fontSize: 12.5,
+        letterSpacing: "0.01em",
+        cursor: "pointer",
+        transition: "all 0.2s ease",
+        position: "relative",
+        textAlign: "left",
+        boxSizing: "border-box"
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = "rgba(255,255,255,.05)";
+        e.currentTarget.style.borderColor = "rgba(255,255,255,.1)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "rgba(255,255,255,.03)";
+        e.currentTarget.style.borderColor = "rgba(255,255,255,.06)";
+      }}
+      title="Haz clic para editar"
+    >
+      {trimmedValue}
+      {notasGuardando[itemId] && (
+        <div style={{ 
+          fontSize: 9.5, 
+          color: "rgba(234,243,255,.5)", 
+          marginTop: 6,
+          textAlign: "left",
+          fontStyle: "italic"
+        }}>
+          Guardando...
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SemaforoChip({ value }: { value: Semaforo }) {
   const style: React.CSSProperties =
     value === "VERDE"
@@ -154,7 +543,7 @@ async function requireSessionOrRedirect() {
   return data.session;
 }
 
-type SortField = "semaforo" | "fecha" | "dias" | null;
+type SortField = "semaforo" | "fecha" | "dias" | "juzgado" | null;
 type SortDirection = "asc" | "desc";
 
 export default function MisJuzgadosPage() {
@@ -167,6 +556,8 @@ export default function MisJuzgadosPage() {
   const [sortField, setSortField] = useState<SortField>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc"); // Por defecto: más viejo primero
   const [semaforoFilter, setSemaforoFilter] = useState<Semaforo | null>(null);
+  const [notasEditables, setNotasEditables] = useState<Record<string, string>>({});
+  const [notasGuardando, setNotasGuardando] = useState<Record<string, boolean>>({});
   const [juzgadoFilter, setJuzgadoFilter] = useState<"mis_juzgados" | "todos" | "beneficio" | string>("mis_juzgados");
   const [userJuzgados, setUserJuzgados] = useState<string[]>([]);
   const [isAbogado, setIsAbogado] = useState(false);
@@ -241,6 +632,57 @@ export default function MisJuzgadosPage() {
       
       setUserJuzgados(juzgadosAsignados);
       
+      // Función para normalizar juzgado para comparación
+      // Extrae el número del juzgado de manera consistente
+      const normalizarJuzgado = (j: string | null): string => {
+        if (!j) return "";
+        const normalized = j.trim().replace(/\s+/g, " ").toUpperCase();
+        
+        // Intentar extraer número de juzgado civil
+        // Patrones: "JUZGADO CIVIL 70", "JUZGADO NACIONAL EN LO CIVIL N° 70", etc.
+        const matchCivil = normalized.match(/JUZGADO\s+(?:NACIONAL\s+EN\s+LO\s+)?CIVIL\s+(?:N[°º]?\s*)?(\d+)/i);
+        if (matchCivil && matchCivil[1]) {
+          return `JUZGADO CIVIL ${matchCivil[1]}`;
+        }
+        
+        // Si no es civil, intentar extraer cualquier número después de "JUZGADO"
+        const matchGeneric = normalized.match(/JUZGADO[^0-9]*?(\d+)/i);
+        if (matchGeneric && matchGeneric[1]) {
+          // Intentar determinar el tipo
+          if (normalized.includes("CIVIL")) {
+            return `JUZGADO CIVIL ${matchGeneric[1]}`;
+          }
+          // Para otros tipos, mantener el formato original pero normalizado
+          return normalized;
+        }
+        
+        // Si no se encuentra número, retornar normalizado
+        return normalized;
+      };
+      
+      // Función para comparar juzgados de manera estricta
+      const juzgadosCoinciden = (j1: string, j2: string): boolean => {
+        const n1 = normalizarJuzgado(j1);
+        const n2 = normalizarJuzgado(j2);
+        
+        // Comparación exacta
+        if (n1 === n2) return true;
+        
+        // Extraer números de ambos
+        const num1 = n1.match(/(\d+)/)?.[1];
+        const num2 = n2.match(/(\d+)/)?.[1];
+        
+        // Si ambos tienen números y son iguales, y ambos contienen "JUZGADO" y "CIVIL"
+        if (num1 && num2 && num1 === num2) {
+          if (n1.includes("JUZGADO") && n2.includes("JUZGADO") && 
+              n1.includes("CIVIL") && n2.includes("CIVIL")) {
+            return true;
+          }
+        }
+        
+        return false;
+      };
+      
       // Normalizar juzgados solo si el filtro es "mis_juzgados"
       let juzgadosNormalizados: string[] = [];
       if (juzgadoFilter === "mis_juzgados") {
@@ -251,10 +693,8 @@ export default function MisJuzgadosPage() {
           return;
         }
         
-        // Normalizar juzgados (eliminar espacios extra, normalizar a mayúsculas)
-        juzgadosNormalizados = juzgadosAsignados.map(j => 
-          j?.trim().replace(/\s+/g, " ").toUpperCase()
-        );
+        // Normalizar juzgados usando la función de normalización mejorada
+        juzgadosNormalizados = juzgadosAsignados.map(j => normalizarJuzgado(j));
         
         // Debug: mostrar juzgados asignados
         console.log(`[Mis Juzgados] Juzgados asignados (${juzgadosNormalizados.length}):`, juzgadosNormalizados);
@@ -262,17 +702,11 @@ export default function MisJuzgadosPage() {
         console.log(`[Mis Juzgados] Filtro: "Todos los Juzgados" - Mostrando todos los datos sin filtrar por juzgados`);
       }
 
-      // Función para normalizar juzgado para comparación
-      const normalizarJuzgado = (j: string | null) => {
-        if (!j) return "";
-        return j.trim().replace(/\s+/g, " ").toUpperCase();
-      };
-
       // Cargar todos los expedientes abiertos y filtrar por juzgados asignados
-      // Intentar primero con todas las columnas (observaciones y created_by_user_id)
+      // Intentar primero con todas las columnas (observaciones, notas y created_by_user_id)
       let queryExps = supabase
         .from("expedientes")
-        .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado, observaciones, created_by_user_id")
+        .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado, observaciones, notas, created_by_user_id")
         .eq("estado", "ABIERTO")
         .order("fecha_ultima_modificacion", { ascending: true }); // Por defecto: más viejo primero
       
@@ -347,10 +781,38 @@ export default function MisJuzgadosPage() {
         console.log(`[Mis Juzgados] Intentando cargar favoritos de pjn_favoritos...`);
         
         // Intentar primero con el cliente principal (misma base de datos)
-        const { data: favoritosData, error: favoritosErr } = await supabase
+        // IMPORTANTE: Filtrar favoritos removidos (si existe columna removido o estado)
+        let { data: favoritosData, error: favoritosErr } = await supabase
           .from("pjn_favoritos")
-          .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones")
+          .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones, removido, estado")
           .order("updated_at", { ascending: false });
+        
+        // Si falla porque la columna no existe, intentar sin incluirla en el select
+        if (favoritosErr && (favoritosErr.message?.includes("removido") || favoritosErr.message?.includes("estado"))) {
+          console.log(`[Mis Juzgados] Columnas removido/estado no encontradas, cargando sin ellas...`);
+          const { data: favoritosData2, error: favoritosErr2 } = await supabase
+            .from("pjn_favoritos")
+            .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones")
+            .order("updated_at", { ascending: false });
+          
+          if (favoritosErr2) {
+            favoritosErr = favoritosErr2;
+          } else {
+            favoritosData = favoritosData2;
+            favoritosErr = null;
+          }
+        }
+        
+        // Filtrar favoritos removidos en memoria si las columnas existen
+        if (favoritosData && !favoritosErr) {
+          favoritosData = favoritosData.filter((f: any) => {
+            // Si tiene columna removido, filtrar los que están removidos
+            if (f.removido === true) return false;
+            // Si tiene columna estado, filtrar los que están REMOVIDO
+            if (f.estado === "REMOVIDO") return false;
+            return true;
+          });
+        }
         
         if (favoritosErr) {
           console.error(`[Mis Juzgados] ❌ Error al cargar pjn_favoritos:`, favoritosErr);
@@ -639,34 +1101,9 @@ export default function MisJuzgadosPage() {
             return false;
           }
           
-          const juzgadoNormalizado = normalizarJuzgado(f.juzgado);
-          
+          // Usar comparación estricta
           const matched = juzgadosNormalizados.some(jAsignado => {
-            // Comparación exacta normalizada
-            if (juzgadoNormalizado === jAsignado) {
-              return true;
-            }
-            
-            // Comparación por número de juzgado (más flexible)
-            const numAsignado = jAsignado.match(/N[°º]\s*(\d+)/i)?.[1];
-            const numFavorito = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
-            
-            if (numAsignado && numFavorito && numAsignado === numFavorito) {
-              // Si ambos tienen el mismo número y contienen "Juzgado", considerarlos iguales
-              if (jAsignado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
-                return true;
-              }
-            }
-            
-            // Comparación más flexible: buscar si el juzgado asignado está contenido en el favorito o viceversa
-            if (juzgadoNormalizado.includes(jAsignado) || jAsignado.includes(juzgadoNormalizado)) {
-              // Verificar que ambos tengan al menos "JUZGADO" en común
-              if (juzgadoNormalizado.includes("JUZGADO") && jAsignado.includes("JUZGADO")) {
-                return true;
-              }
-            }
-            
-            return false;
+            return juzgadosCoinciden(f.juzgado || "", jAsignado);
           });
           
           return matched;
@@ -716,21 +1153,10 @@ export default function MisJuzgadosPage() {
       // Solo filtrar por juzgados si el filtro es "mis_juzgados" y hay juzgados asignados
       if (juzgadoFilter === "mis_juzgados" && juzgadosNormalizados.length > 0) {
         exps = allExpsData?.filter((e: any) => {
-          const juzgadoNormalizado = normalizarJuzgado(e.juzgado);
+          if (!e.juzgado) return false;
           return juzgadosNormalizados.some(jAsignado => {
-            // Comparación exacta normalizada
-            if (juzgadoNormalizado === jAsignado) return true;
-            // Comparación parcial (por si hay pequeñas diferencias en formato)
-            const numAsignado = jAsignado.match(/N[°º]\s*(\d+)/i)?.[1];
-            const numExpediente = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
-            if (numAsignado && numExpediente && numAsignado === numExpediente) {
-              // Verificar que ambos contengan "Juzgado Nacional" y el mismo número
-              if (jAsignado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
-                return true;
-              }
-            }
-            return false;
-          }) ?? false;
+            return juzgadosCoinciden(e.juzgado, jAsignado);
+          });
         }) ?? [];
         console.log(`[Mis Juzgados] Expedientes filtrados por juzgados: ${exps.length} de ${allExpsData?.length || 0}`);
       } else if (juzgadoFilter === "todos") {
@@ -748,17 +1174,8 @@ export default function MisJuzgadosPage() {
           // Respetar la distribución por juzgados asignados
           if (juzgadosNormalizados.length > 0) {
             if (!e.juzgado) return false;
-            const juzgadoNormalizado = normalizarJuzgado(e.juzgado);
             return juzgadosNormalizados.some(jAsignado => {
-              if (juzgadoNormalizado === jAsignado) return true;
-              const numAsignado = jAsignado.match(/N[°º]\s*(\d+)/i)?.[1];
-              const numExpediente = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
-              if (numAsignado && numExpediente && numAsignado === numExpediente) {
-                if (jAsignado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
-                  return true;
-                }
-              }
-              return false;
+              return juzgadosCoinciden(e.juzgado, jAsignado);
             });
           }
           return true;
@@ -766,19 +1183,9 @@ export default function MisJuzgadosPage() {
         console.log(`[Mis Juzgados] Expedientes con BENEFICIO: ${exps.length} de ${allExpsData?.length || 0}`);
       } else if (juzgadoFilter && juzgadoFilter !== "mis_juzgados" && juzgadoFilter !== "todos" && juzgadoFilter !== "beneficio") {
         // Filtro por juzgado específico
-        const juzgadoFiltroNormalizado = normalizarJuzgado(juzgadoFilter);
         exps = (allExpsData ?? []).filter((e: any) => {
           if (!e.juzgado) return false;
-          const juzgadoNormalizado = normalizarJuzgado(e.juzgado);
-          if (juzgadoNormalizado === juzgadoFiltroNormalizado) return true;
-          const numFiltro = juzgadoFiltroNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
-          const numJuzgado = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
-          if (numFiltro && numJuzgado && numFiltro === numJuzgado) {
-            if (juzgadoFiltroNormalizado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
-              return true;
-            }
-          }
-          return false;
+          return juzgadosCoinciden(e.juzgado, juzgadoFilter);
         });
         console.log(`[Mis Juzgados] Expedientes filtrados por juzgado específico "${juzgadoFilter}": ${exps.length}`);
       }
@@ -846,6 +1253,7 @@ export default function MisJuzgadosPage() {
           return {
             ...e,
             observaciones: e.observaciones || null, // Mantener observaciones si existe
+            notas: e.notas || null, // Mantener notas si existe
             created_by_name: createdByName,
           };
         });
@@ -1080,6 +1488,22 @@ export default function MisJuzgadosPage() {
     return () => document.removeEventListener("click", handleClickOutside);
   }, [menuOpen]);
 
+  // Inicializar notas editables cuando cambian los expedientes
+  useEffect(() => {
+    if (activeTab === "expedientes" && expedientes.length > 0) {
+      setNotasEditables(prev => {
+        // Solo actualizar las que no están siendo editadas
+        const merged = { ...prev };
+        expedientes.forEach(e => {
+          if (e.notas && !(e.id in merged)) {
+            merged[e.id] = e.notas;
+          }
+        });
+        return merged;
+      });
+    }
+  }, [expedientes, activeTab]);
+
   const cedulasFiltered = useMemo(() => {
     return cedulas.filter(c => !c.tipo_documento || c.tipo_documento === "CEDULA");
   }, [cedulas]);
@@ -1182,6 +1606,7 @@ export default function MisJuzgadosPage() {
           created_by_user_id: e.created_by_user_id,
           is_pjn_favorito: e.is_pjn_favorito === true,
           observaciones: e.observaciones,
+          notas: e.notas || null,
           dias: e.fecha_ultima_modificacion ? daysSince(e.fecha_ultima_modificacion) : null,
           semaforo: e.fecha_ultima_modificacion ? semaforoByAge(daysSince(e.fecha_ultima_modificacion)) : "VERDE" as Semaforo,
         }))
@@ -1216,10 +1641,11 @@ export default function MisJuzgadosPage() {
           semaforo: o.fecha_carga ? semaforoByAge(daysSince(o.fecha_carga)) : "VERDE" as Semaforo,
         }));
     
-    // Preparar items para mostrar (agregar observaciones si faltan)
+    // Preparar items para mostrar (agregar observaciones y notas si faltan)
     const itemsWithObservations = itemsToShow.map(item => ({
       ...item,
-      observaciones: 'observaciones' in item ? item.observaciones : null
+      observaciones: 'observaciones' in item ? item.observaciones : null,
+      notas: 'notas' in item ? item.notas : null
     }));
 
     // Aplicar filtro "Cargado por"
@@ -1265,6 +1691,18 @@ export default function MisJuzgadosPage() {
         if (!b.fecha) return -1;
         compareA = new Date(a.fecha).getTime();
         compareB = new Date(b.fecha).getTime();
+      } else if (currentSortField === "juzgado") {
+        // Ordenamiento alfabético de juzgado (case-insensitive)
+        // null va al final
+        const juzgadoA = (a.juzgado || "").trim().toUpperCase();
+        const juzgadoB = (b.juzgado || "").trim().toUpperCase();
+        if (!juzgadoA && !juzgadoB) return 0;
+        if (!juzgadoA) return 1;
+        if (!juzgadoB) return -1;
+        // Comparación alfabética directa
+        if (juzgadoA < juzgadoB) return currentSortDirection === "asc" ? -1 : 1;
+        if (juzgadoA > juzgadoB) return currentSortDirection === "asc" ? 1 : -1;
+        return 0;
       } else {
         return 0;
       }
@@ -1832,7 +2270,17 @@ export default function MisJuzgadosPage() {
                     </span>
                   </th>
                   <th>Carátula</th>
-                  <th>Juzgado</th>
+                  <th 
+                    className="sortable"
+                    style={{ cursor: "pointer" }}
+                    onClick={() => handleSort("juzgado")}
+                    title="Haz clic para ordenar"
+                  >
+                    Juzgado{" "}
+                    <span style={{ opacity: sortField === "juzgado" ? 1 : 0.4 }}>
+                      {sortField === "juzgado" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
+                    </span>
+                  </th>
                   <th 
                     style={{ width: 220, cursor: "pointer" }}
                     onClick={() => handleSort("fecha")}
@@ -1861,7 +2309,10 @@ export default function MisJuzgadosPage() {
                     <th style={{ width: 140 }}>Acción</th>
                   )}
                   {activeTab === "expedientes" && (
-                    <th style={{ width: 400 }}>Observaciones</th>
+                    <th style={{ width: 380, minWidth: 380, textAlign: "center" }}>Observaciones</th>
+                  )}
+                  {activeTab === "expedientes" && (
+                    <th style={{ width: 380, minWidth: 380, textAlign: "center" }}>Notas</th>
                   )}
                 </tr>
               </thead>
@@ -1917,7 +2368,7 @@ export default function MisJuzgadosPage() {
                         </td>
                       )}
                       {activeTab === "expedientes" && (
-                        <td style={{ fontSize: 13, maxWidth: 400 }}>
+                        <td style={{ fontSize: 13, width: 380, minWidth: 380, textAlign: "center", padding: "11px 12px" }}>
                           {item.observaciones?.trim() ? (
                             <div style={{ 
                               padding: "8px 10px",
@@ -1929,13 +2380,28 @@ export default function MisJuzgadosPage() {
                               wordBreak: "break-word",
                               color: "rgba(234,243,255,.88)",
                               fontSize: 12.5,
-                              letterSpacing: "0.01em"
+                              letterSpacing: "0.01em",
+                              textAlign: "left"
                             }}>
                               {item.observaciones}
                             </div>
                           ) : (
                             <span className="muted">—</span>
                           )}
+                        </td>
+                      )}
+                      {activeTab === "expedientes" && (
+                        <td style={{ fontSize: 13, width: 380, minWidth: 380, textAlign: "center", padding: "11px 12px" }}>
+                          <NotasTextarea
+                            itemId={item.id}
+                            isPjnFavorito={item.is_pjn_favorito === true}
+                            initialValue={item.notas || ""}
+                            notasEditables={notasEditables}
+                            setNotasEditables={setNotasEditables}
+                            notasGuardando={notasGuardando}
+                            setNotasGuardando={setNotasGuardando}
+                            setMsg={setMsg}
+                          />
                         </td>
                       )}
                     </tr>
@@ -1945,7 +2411,7 @@ export default function MisJuzgadosPage() {
                   <tr>
                     <td colSpan={
                       activeTab === "expedientes" 
-                        ? 8 
+                        ? 9 
                         : isAbogado 
                           ? 7 
                           : 6

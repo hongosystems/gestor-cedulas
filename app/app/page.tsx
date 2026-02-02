@@ -92,7 +92,7 @@ async function requireSessionOrRedirect() {
   return data.session;
 }
 
-type SortField = "dias" | "semaforo" | "fecha_carga" | null;
+type SortField = "dias" | "semaforo" | "fecha_carga" | "juzgado" | null;
 type SortDirection = "asc" | "desc";
 
 export default function MisCedulasPage() {
@@ -243,6 +243,18 @@ export default function MisCedulasPage() {
           const dateB = b.cargaISO.length === 10 ? new Date(b.cargaISO + "T00:00:00") : new Date(b.cargaISO);
           compareA = dateA.getTime();
           compareB = dateB.getTime();
+        } else if (sortField === "juzgado") {
+          // Ordenamiento alfabético de juzgado (case-insensitive)
+          // null va al final
+          const juzgadoA = (a.juzgado || "").trim().toUpperCase();
+          const juzgadoB = (b.juzgado || "").trim().toUpperCase();
+          if (!juzgadoA && !juzgadoB) return 0;
+          if (!juzgadoA) return 1;
+          if (!juzgadoB) return -1;
+          // Comparación alfabética directa
+          if (juzgadoA < juzgadoB) return sortDirection === "asc" ? -1 : 1;
+          if (juzgadoA > juzgadoB) return sortDirection === "asc" ? 1 : -1;
+          return 0;
         } else {
           return 0;
         }
@@ -262,8 +274,9 @@ export default function MisCedulasPage() {
       setSortDirection(sortDirection === "asc" ? "desc" : "asc");
     } else {
       // Nueva columna, empezar con desc para días, semáforo y fecha_carga (más reciente/crítico primero)
+      // Para juzgado, empezar con asc (orden alfabético)
       setSortField(field);
-      setSortDirection("desc");
+      setSortDirection(field === "juzgado" ? "asc" : "desc");
     }
   }
 
@@ -487,7 +500,16 @@ export default function MisCedulasPage() {
                     </span>
                   </th>
                   <th>Carátula</th>
-                  <th>Juzgado</th>
+                  <th 
+                    className="sortable"
+                    onClick={() => handleSort("juzgado")}
+                    title="Haz clic para ordenar"
+                  >
+                    Juzgado{" "}
+                    <span style={{ opacity: sortField === "juzgado" ? 1 : 0.4 }}>
+                      {sortField === "juzgado" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
+                    </span>
+                  </th>
                   <th 
                     className="sortable"
                     style={{ width: 150 }}
