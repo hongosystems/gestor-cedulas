@@ -66,6 +66,9 @@ type PjnFavorito = {
   juzgado: string | null;
   fecha_ultima_carga: string | null; // Formato DD/MM/AAAA
   observaciones: string | null;
+  notas?: string | null;
+  removido?: boolean | null;
+  estado?: string | null;
 };
 
 // Normalizar juzgado para mostrar SIN "- SECRETARIA N° X"
@@ -784,12 +787,12 @@ export default function MisJuzgadosPage() {
         // IMPORTANTE: Filtrar favoritos removidos (si existe columna removido o estado)
         let { data: favoritosData, error: favoritosErr } = await supabase
           .from("pjn_favoritos")
-          .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones, removido, estado")
+          .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones, notas, removido, estado")
           .order("updated_at", { ascending: false });
         
         // Si falla porque la columna no existe, intentar sin incluirla en el select
-        if (favoritosErr && (favoritosErr.message?.includes("removido") || favoritosErr.message?.includes("estado"))) {
-          console.log(`[Mis Juzgados] Columnas removido/estado no encontradas, cargando sin ellas...`);
+        if (favoritosErr && (favoritosErr.message?.includes("removido") || favoritosErr.message?.includes("estado") || favoritosErr.message?.includes("notas"))) {
+          console.log(`[Mis Juzgados] Columnas removido/estado/notas no encontradas, cargando sin ellas...`);
           const { data: favoritosData2, error: favoritosErr2 } = await supabase
             .from("pjn_favoritos")
             .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones")
@@ -798,7 +801,13 @@ export default function MisJuzgadosPage() {
           if (favoritosErr2) {
             favoritosErr = favoritosErr2;
           } else {
-            favoritosData = favoritosData2;
+            // Agregar valores por defecto para removido, estado y notas si no existen
+            favoritosData = favoritosData2?.map((f: any) => ({
+              ...f,
+              removido: false,
+              estado: null,
+              notas: null
+            })) || [];
             favoritosErr = null;
           }
         }
@@ -1141,6 +1150,7 @@ export default function MisJuzgadosPage() {
           fecha_ultima_modificacion: fechaISO,
           estado: "ABIERTO", // Los favoritos siempre están abiertos
           observaciones: f.observaciones,
+          notas: (f as any).notas || null, // Usar notas del favorito si existe
           created_by_user_id: null,
           created_by_name: "PJN Favoritos", // Indicar que viene de favoritos
           is_pjn_favorito: true,
