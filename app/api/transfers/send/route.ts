@@ -4,27 +4,43 @@ import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 
-function supabaseFromAuthHeader(req: Request) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+async function getUserFromRequest(req: Request) {
   const authHeader = req.headers.get("authorization");
   if (!authHeader) return null;
 
-  return createClient(url, anon, {
-    global: { headers: { Authorization: authHeader } },
-    auth: { persistSession: false },
-  });
+  try {
+    const token = authHeader.replace("Bearer ", "").trim();
+    if (!token) return null;
+
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    
+    if (!url || !anon) {
+      console.error("Missing Supabase env vars");
+      return null;
+    }
+
+    const supabaseClient = createClient(url, anon, {
+      auth: { persistSession: false },
+    });
+
+    const { data: { user }, error } = await supabaseClient.auth.getUser(token);
+    
+    if (error || !user) {
+      console.error("Auth error:", error?.message);
+      return null;
+    }
+
+    return user;
+  } catch (e: any) {
+    console.error("Error getting user:", e?.message);
+    return null;
+  }
 }
 
 export async function POST(req: Request) {
   try {
-    const sbAuth = supabaseFromAuthHeader(req);
-    if (!sbAuth) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { data: sess } = await sbAuth.auth.getUser();
-    const user = sess?.user;
+    const user = await getUserFromRequest(req);
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
