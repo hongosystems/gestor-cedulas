@@ -152,6 +152,14 @@ select.input option{
   background: rgba(225,57,64,.12);
   color: rgba(255,235,235,.95);
 }
+.success{
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(0,169,82,.45);
+  background: rgba(0,169,82,.12);
+  color: rgba(235,255,240,.95);
+}
 
 /* ===== Tables ===== */
 .tableWrap{

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import jsPDF from "jspdf";
+import NotificationBell from "@/app/components/NotificationBell";
 
 type Cedula = {
   id: string;
@@ -1720,6 +1721,54 @@ export default function SuperAdminPage() {
               >
                 ➕ Carga Expedientes
               </Link>
+              <Link
+                href="/app/enviar"
+                onClick={() => setMenuOpen(false)}
+                style={{
+                  display: "block",
+                  padding: "12px 20px",
+                  color: "var(--text)",
+                  textDecoration: "none",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  transition: "background 0.2s ease",
+                  borderLeft: "3px solid transparent"
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                  e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "transparent";
+                  e.currentTarget.style.borderLeftColor = "transparent";
+                }}
+              >
+                📤 Enviar Cédula/Oficio
+              </Link>
+              <Link
+                href="/app/recibidos"
+                onClick={() => setMenuOpen(false)}
+                style={{
+                  display: "block",
+                  padding: "12px 20px",
+                  color: "var(--text)",
+                  textDecoration: "none",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  transition: "background 0.2s ease",
+                  borderLeft: "3px solid transparent"
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                  e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "transparent";
+                  e.currentTarget.style.borderLeftColor = "transparent";
+                }}
+              >
+                📥 Recibidos / Enviados
+              </Link>
             </div>
           )}
 
@@ -1781,6 +1830,7 @@ export default function SuperAdminPage() {
               </span>
             </div>
           )}
+          <NotificationBell />
           <button
             onClick={imprimirDashboard}
             style={{

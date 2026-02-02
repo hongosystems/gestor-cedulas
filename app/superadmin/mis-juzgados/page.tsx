@@ -1779,7 +1779,7 @@ export default function MisJuzgadosPage() {
   }
 
   return (
-    <main className="container">
+    <main className="container" style={{ maxWidth: '95%', width: 'min(2400px, calc(100% - 32px))' }}>
       <section className="card">
         <header style={{
           background: "linear-gradient(135deg, rgba(0,82,156,.25), rgba(0,82,156,.08))",
@@ -2266,7 +2266,7 @@ export default function MisJuzgadosPage() {
 
           {/* Tabla */}
           <div className="tableWrap" style={{ marginTop: 10 }}>
-            <table className="table">
+            <table className="table" style={{ minWidth: '1800px' }}>
               <thead>
                 <tr>
                   <th 
