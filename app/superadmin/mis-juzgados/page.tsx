@@ -790,9 +790,11 @@ export default function MisJuzgadosPage() {
           .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones, notas, removido, estado")
           .order("updated_at", { ascending: false });
         
-        // Si falla porque la columna no existe, intentar sin incluirla en el select
+        // Si falla porque la columna no existe, intentar cargar las columnas disponibles
         if (favoritosErr && (favoritosErr.message?.includes("removido") || favoritosErr.message?.includes("estado") || favoritosErr.message?.includes("notas"))) {
-          console.log(`[Mis Juzgados] Columnas removido/estado/notas no encontradas, cargando sin ellas...`);
+          console.log(`[Mis Juzgados] Algunas columnas no encontradas, intentando cargar sin ellas...`);
+          
+          // Intentar primero cargar sin las columnas problemáticas
           const { data: favoritosData2, error: favoritosErr2 } = await supabase
             .from("pjn_favoritos")
             .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones")
@@ -801,13 +803,65 @@ export default function MisJuzgadosPage() {
           if (favoritosErr2) {
             favoritosErr = favoritosErr2;
           } else {
-            // Agregar valores por defecto para removido, estado y notas si no existen
-            favoritosData = favoritosData2?.map((f: any) => ({
-              ...f,
-              removido: false,
-              estado: null,
-              notas: null
-            })) || [];
+            // Intentar cargar notas por separado solo si la columna notas existe
+            // Primero verificar si podemos leer notas de un favorito de prueba
+            let notasDisponibles = false;
+            if (favoritosData2 && favoritosData2.length > 0) {
+              try {
+                const { data: testNota, error: testErr } = await supabase
+                  .from("pjn_favoritos")
+                  .select("notas")
+                  .eq("id", favoritosData2[0].id)
+                  .single();
+                
+                if (!testErr && testNota !== null) {
+                  notasDisponibles = true;
+                }
+              } catch (e) {
+                // Si falla, asumir que la columna no existe
+                notasDisponibles = false;
+              }
+            }
+            
+            // Si las notas están disponibles, cargarlas para todos los favoritos
+            if (notasDisponibles) {
+              const favoritosConNotas = await Promise.all(
+                (favoritosData2 || []).map(async (f: any) => {
+                  try {
+                    const { data: notaData, error: notaErr } = await supabase
+                      .from("pjn_favoritos")
+                      .select("notas")
+                      .eq("id", f.id)
+                      .single();
+                    
+                    return {
+                      ...f,
+                      removido: false,
+                      estado: null,
+                      notas: (!notaErr && notaData) ? (notaData.notas || null) : null
+                    };
+                  } catch (e) {
+                    return {
+                      ...f,
+                      removido: false,
+                      estado: null,
+                      notas: null
+                    };
+                  }
+                })
+              );
+              
+              favoritosData = favoritosConNotas;
+            } else {
+              // Si las notas no están disponibles, establecer null para todos
+              favoritosData = favoritosData2?.map((f: any) => ({
+                ...f,
+                removido: false,
+                estado: null,
+                notas: null
+              })) || [];
+            }
+            
             favoritosErr = null;
           }
         }
