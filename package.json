@@ -8,7 +8,12 @@
     "start": "next start",
     "lint": "eslint",
     "pjn:login": "tsx scripts/pjn-scraper.ts login",
-    "pjn:check": "tsx scripts/pjn-scraper.ts check"
+    "pjn:check": "tsx scripts/pjn-scraper.ts check",
+    "sync:pjn-favoritos": "node scripts/sync-pjn-favoritos.mjs",
+    "remove:duplicates-cases": "node scripts/remove-duplicates-cases.mjs",
+    "verify:favoritos": "node scripts/verify-favoritos-discrepancy.mjs",
+    "analyze:scraper": "node scripts/analyze-scraper-completeness.mjs",
+    "view:scraper-errors": "node scripts/view-scraper-errors.mjs"
   },
   "dependencies": {
     "@playwright/test": "^1.57.0",

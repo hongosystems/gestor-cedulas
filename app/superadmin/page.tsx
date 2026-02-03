@@ -107,14 +107,37 @@ function ddmmaaaaToISO(ddmm: string | null): string | null {
   return `${anio}-${mes}-${dia}T00:00:00.000Z`;
 }
 
+/**
+ * Calcula los días desde una fecha, excluyendo los días de enero (feria judicial)
+ * @param fechaCargaISO Fecha en formato ISO
+ * @returns Número de días efectivos (excluyendo enero)
+ */
 function daysSince(fechaCargaISO: string | null) {
   if (!fechaCargaISO) return 0;
   const carga = new Date(fechaCargaISO);
   if (isNaN(carga.getTime())) return 0;
   const today = startOfDay(new Date());
   const base = startOfDay(carga);
+  
+  // Calcular días totales
   const diffMs = today.getTime() - base.getTime();
-  return Math.floor(diffMs / 86400000);
+  const totalDays = Math.floor(diffMs / 86400000);
+  
+  // Contar días de enero (feria judicial) en el rango
+  let eneroDays = 0;
+  const currentDate = new Date(base);
+  
+  while (currentDate <= today) {
+    // Si el día actual es de enero (mes 0 en JavaScript), contarlo
+    if (currentDate.getMonth() === 0) { // Enero es mes 0
+      eneroDays++;
+    }
+    // Avanzar un día
+    currentDate.setDate(currentDate.getDate() + 1);
+  }
+  
+  // Retornar días efectivos (total - días de enero)
+  return Math.max(0, totalDays - eneroDays);
 }
 
 function semaforoPorAntiguedad(diasDesdeCarga: number) {
@@ -761,7 +784,8 @@ export default function SuperAdminPage() {
   };
 
   // Obtener todos los juzgados únicos de cédulas, expedientes y favoritos, ordenados ascendente
-  const todosLosJuzgados = useMemo(() => {
+  // Separar entre asignados y sin asignar
+  const juzgadosData = useMemo(() => {
     const juzgadosSet = new Set<string>();
     
     // Agregar juzgados de cédulas
@@ -785,17 +809,115 @@ export default function SuperAdminPage() {
       }
     });
     
-    // Convertir a array y ordenar ascendente
+    // Obtener todos los juzgados asignados (de todos los usuarios)
+    const juzgadosAsignadosSet = new Set<string>();
+    Object.values(userJuzgadosMap).forEach(juzgadosDelUsuario => {
+      juzgadosDelUsuario.forEach(j => {
+        if (j && j.trim()) {
+          juzgadosAsignadosSet.add(j.trim());
+        }
+      });
+    });
+    
+    // Separar juzgados en asignados y sin asignar
+    // Primero, eliminar duplicados por número de juzgado, priorizando el formato "JUZGADO CIVIL [NÚMERO]"
     const juzgadosArray = Array.from(juzgadosSet);
-    juzgadosArray.sort((a, b) => {
+    const juzgadosPorNumero = new Map<string, string>(); // Map: número -> mejor formato
+    const juzgadosSinNumero = new Set<string>(); // Juzgados que no tienen número extraíble
+    
+    juzgadosArray.forEach(juzgado => {
+      // Intentar extraer número de cualquier formato
+      const numMatch = juzgado.match(/(?:N[°º]?\s*|NRO\.?\s*|NUMERO\s+)?(\d+)/i);
+      
+      if (numMatch && numMatch[1]) {
+        const numero = numMatch[1];
+        const formatoPreferido = `JUZGADO CIVIL ${numero}`;
+        const juzgadoUpper = juzgado.toUpperCase().trim();
+        const esFormatoPreferido = juzgadoUpper === formatoPreferido;
+        
+        // Si ya existe un juzgado con este número
+        if (juzgadosPorNumero.has(numero)) {
+          const existente = juzgadosPorNumero.get(numero)!;
+          const existenteUpper = existente.toUpperCase().trim();
+          const existenteEsPreferido = existenteUpper === formatoPreferido;
+          
+          // Priorizar el formato "JUZGADO CIVIL [NÚMERO]" sobre otros formatos
+          if (esFormatoPreferido && !existenteEsPreferido) {
+            juzgadosPorNumero.set(numero, formatoPreferido);
+          } else if (!esFormatoPreferido && !existenteEsPreferido) {
+            // Si ninguno es el formato preferido, usar el más corto
+            if (juzgado.length < existente.length) {
+              juzgadosPorNumero.set(numero, juzgado);
+            }
+          }
+          // Si ambos son el formato preferido o el existente ya es preferido, mantener el existente
+        } else {
+          // Si es el formato preferido, usarlo directamente
+          if (esFormatoPreferido) {
+            juzgadosPorNumero.set(numero, formatoPreferido);
+          } else {
+            juzgadosPorNumero.set(numero, juzgado);
+          }
+        }
+      } else {
+        // Si no tiene número extraíble, agregarlo directamente (sin duplicados por nombre exacto)
+        juzgadosSinNumero.add(juzgado);
+      }
+    });
+    
+    // Convertir el Map a array de juzgados únicos y agregar los que no tienen número
+    const juzgadosUnicos = [...Array.from(juzgadosPorNumero.values()), ...Array.from(juzgadosSinNumero)];
+    
+    const asignados: string[] = [];
+    const sinAsignar: string[] = [];
+    
+    juzgadosUnicos.forEach(juzgado => {
+      // Normalizar para comparar
+      const juzgadoNorm = normalizarJuzgado(juzgado);
+      const estaAsignado = Array.from(juzgadosAsignadosSet).some(jAsignado => {
+        const jAsignadoNorm = normalizarJuzgado(jAsignado);
+        return juzgadosCoinciden(juzgadoNorm, jAsignadoNorm);
+      });
+      
+      if (estaAsignado) {
+        asignados.push(juzgado);
+      } else {
+        sinAsignar.push(juzgado);
+      }
+    });
+    
+    // Función de ordenamiento
+    const sortJuzgados = (a: string, b: string) => {
       // Normalizar para comparación
       const aNorm = normalizarJuzgado(a);
       const bNorm = normalizarJuzgado(b);
+      
+      // Extraer números para ordenamiento numérico
+      const aNum = parseInt(aNorm.match(/\d+/)?.[0] || "0", 10);
+      const bNum = parseInt(bNorm.match(/\d+/)?.[0] || "0", 10);
+      
+      if (aNum !== bNum) {
+        return aNum - bNum;
+      }
+      
       return aNorm.localeCompare(bNorm, 'es', { numeric: true, sensitivity: 'base' });
-    });
+    };
     
-    return juzgadosArray;
-  }, [allCedulas, allExpedientes, pjnFavoritos]);
+    // Ordenar ambos grupos
+    asignados.sort(sortJuzgados);
+    sinAsignar.sort(sortJuzgados);
+    
+    return {
+      todosLosJuzgados: juzgadosUnicos.sort(sortJuzgados),
+      juzgadosAsignados: asignados,
+      juzgadosSinAsignar: sinAsignar
+    };
+  }, [allCedulas, allExpedientes, pjnFavoritos, userJuzgadosMap]);
+  
+  // Valores por defecto para evitar errores durante la carga inicial
+  const todosLosJuzgados = juzgadosData?.todosLosJuzgados || [];
+  const juzgadosAsignados = juzgadosData?.juzgadosAsignados || [];
+  const juzgadosSinAsignar = juzgadosData?.juzgadosSinAsignar || [];
 
   // Convertir favoritos de pjn-scraper a expedientes (SIN duplicar - solo mostrar favoritos filtrados por juzgado)
   const favoritosComoExpedientes = useMemo(() => {
@@ -1072,60 +1194,24 @@ export default function SuperAdminPage() {
   const rankingExpedientes = useMemo(() => {
     const perUser: Record<string, { rojos: number; amarillos: number; verdes: number; total: number; maxDias: number }> = {};
 
-    // IMPORTANTE: Calcular el ranking desde los datos originales, no desde el array filtrado
-    // Esto asegura que los favoritos PJN se cuenten para TODOS los usuarios que tienen ese juzgado asignado
+    // IMPORTANTE: Usar el array filtrado (expedientes) para que el ranking refleje los filtros aplicados
+    // Esto asegura que cuando se filtra por juzgado, el ranking solo muestre los expedientes filtrados
     
-    // Eliminar duplicados por ID (priorizar expedientes locales)
-    const expedientesMap = new Map<string, Expediente>();
-    allExpedientes.forEach(e => expedientesMap.set(e.id, e));
-    favoritosComoExpedientes.forEach(e => {
-      if (!expedientesMap.has(e.id)) {
-        expedientesMap.set(e.id, e);
-      }
-    });
-    
-    const expedientesUnicos = Array.from(expedientesMap.values());
-
-    for (const e of expedientesUnicos) {
-      const usuariosParaContar: string[] = [];
+    for (const e of expedientes) {
+      // Ignorar expedientes sin owner_user_id válido
+      if (!e.owner_user_id || e.owner_user_id.trim() === "") continue;
       
-      if (e.is_pjn_favorito) {
-        // Para favoritos PJN, contar para TODOS los usuarios que tienen ese juzgado asignado
-        if (e.juzgado) {
-          for (const [userId, juzgadosDelUsuario] of Object.entries(userJuzgadosMap)) {
-            const juzgadosNormalizados = juzgadosDelUsuario.map(j => normalizarJuzgado(j));
-            const matchJuzgado = juzgadosNormalizados.some(jAsignado => {
-              return juzgadosCoinciden(e.juzgado || "", jAsignado);
-            });
-            if (matchJuzgado) {
-              usuariosParaContar.push(userId);
-            }
-          }
-        }
-        // Si no tiene juzgado o no coincide con ningún usuario, no contar
-        if (usuariosParaContar.length === 0) continue;
-      } else {
-        // Para expedientes locales, contar solo para el owner
-        if (e.owner_user_id && e.owner_user_id.trim() !== "") {
-          usuariosParaContar.push(e.owner_user_id);
-        } else {
-          continue; // Sin owner, no contar
-        }
-      }
-
       const dias = daysSince(e.fecha_ultima_modificacion);
       const s = semaforoPorAntiguedad(dias);
+      const uid = e.owner_user_id;
 
-      // Contar para cada usuario
-      for (const uid of usuariosParaContar) {
-        perUser[uid] ||= { rojos: 0, amarillos: 0, verdes: 0, total: 0, maxDias: -1 };
-        perUser[uid].total++;
-        perUser[uid].maxDias = Math.max(perUser[uid].maxDias, dias);
+      perUser[uid] ||= { rojos: 0, amarillos: 0, verdes: 0, total: 0, maxDias: -1 };
+      perUser[uid].total++;
+      perUser[uid].maxDias = Math.max(perUser[uid].maxDias, dias);
 
-        if (s === "ROJO") perUser[uid].rojos++;
-        else if (s === "AMARILLO") perUser[uid].amarillos++;
-        else perUser[uid].verdes++;
-      }
+      if (s === "ROJO") perUser[uid].rojos++;
+      else if (s === "AMARILLO") perUser[uid].amarillos++;
+      else perUser[uid].verdes++;
     }
 
     return Object.entries(perUser).map(([uid, v]) => ({
@@ -1137,8 +1223,7 @@ export default function SuperAdminPage() {
       (b.amarillos - a.amarillos) ||
       (b.maxDias - a.maxDias)
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allExpedientes, favoritosComoExpedientes, userJuzgadosMap, profiles]);
+  }, [expedientes, profiles]);
 
   const metrics = useMemo(() => {
     const cedulasFiltered = cedulas.filter(c => !c.tipo_documento || c.tipo_documento === "CEDULA");
@@ -1197,26 +1282,25 @@ export default function SuperAdminPage() {
     const maxDias = ranking.length > 0 ? Math.max(...ranking.map(r => r.maxDias)) : 0;
     
     // Métricas de expedientes
-    // IMPORTANTE: Cuando selectedUserId === "all", contar EXPEDIENTES ÚNICOS (sin duplicar favoritos PJN)
-    // Cuando selectedUserId !== "all", usar el array filtrado (expedientes)
+    // IMPORTANTE: Cuando juzgadoFilter === "todos", usar todos los expedientes sin filtrar por juzgado
+    // Cuando hay un filtro de juzgado específico, usar el array filtrado (expedientes)
     let expedientesParaContar: Expediente[];
     
-    if (selectedUserId === "all") {
-      // Calcular desde datos originales: todos los expedientes locales + favoritos PJN únicos
-      // IMPORTANTE: Los favoritos PJN se cuentan UNA SOLA VEZ (no por cada usuario que lo tiene)
+    if (juzgadoFilter === "todos") {
+      // Cuando es "todos", contar desde los datos originales sin filtrar por juzgado
+      // Combinar expedientes locales y favoritos PJN únicos
       const expedientesMap = new Map<string, Expediente>();
       
-      // Agregar expedientes locales (tienen prioridad)
+      // Agregar todos los expedientes locales
       allExpedientes.forEach(e => {
         if (e.owner_user_id && e.owner_user_id.trim() !== "") {
           expedientesMap.set(e.id, e);
         }
       });
       
-      // Agregar favoritos PJN únicos (solo si no existe ya un expediente local con el mismo ID)
+      // Agregar favoritos PJN únicos (solo si tienen juzgado asignado a algún usuario)
       favoritosComoExpedientes.forEach(e => {
         if (!expedientesMap.has(e.id)) {
-          // Solo contar favoritos PJN que tienen juzgado y al menos un usuario lo tiene asignado
           if (e.juzgado) {
             let tieneUsuarioAsignado = false;
             for (const [, juzgadosDelUsuario] of Object.entries(userJuzgadosMap)) {
@@ -1238,18 +1322,36 @@ export default function SuperAdminPage() {
       
       expedientesParaContar = Array.from(expedientesMap.values());
       
-      // Debug log
-      console.log(`[Dashboard Metrics] Modo "Todos" - Expedientes únicos: ${expedientesParaContar.length}`, {
-        locales: allExpedientes.filter(e => e.owner_user_id && e.owner_user_id.trim() !== "").length,
-        favoritosPJN: expedientesParaContar.filter(e => e.is_pjn_favorito).length,
-        totalFavoritosPJN: favoritosComoExpedientes.length
-      });
+      // Si hay filtro de usuario, filtrar por usuario
+      if (selectedUserId !== "all") {
+        expedientesParaContar = expedientesParaContar.filter(e => {
+          // Para favoritos PJN, verificar si el usuario seleccionado tiene el juzgado asignado
+          if (e.is_pjn_favorito) {
+            if (!e.juzgado) return false;
+            const juzgadosDelUsuario = selectedUserJuzgados.map(j => normalizarJuzgado(j));
+            return juzgadosDelUsuario.some(jAsignado => {
+              return juzgadosCoinciden(e.juzgado || "", jAsignado);
+            });
+          }
+          // Para expedientes locales, verificar por owner
+          return e.owner_user_id === selectedUserId;
+        });
+      }
     } else {
-      // Usar el array filtrado (ya está filtrado por usuario y juzgado)
+      // Cuando hay filtro de juzgado específico, usar el array filtrado
       expedientesParaContar = expedientes.filter(e => {
         return e.owner_user_id && e.owner_user_id.trim() !== "";
       });
     }
+    
+    // Debug log
+    console.log(`[Dashboard Metrics] Expedientes para contar: ${expedientesParaContar.length}`, {
+      juzgadoFilter,
+      selectedUserId,
+      totalExpedientes: expedientes.length,
+      expedientesConOwner: expedientesParaContar.length,
+      usandoTodos: juzgadoFilter === "todos"
+    });
     
     const totalExpedientes = expedientesParaContar.length;
     const expedientesRojos = expedientesParaContar.filter(e => {
@@ -1305,8 +1407,7 @@ export default function SuperAdminPage() {
       maxDias,
       maxDiasExpedientes,
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cedulas, expedientes, ranking, rankingExpedientes]);
+  }, [cedulas, expedientes, ranking, rankingExpedientes, selectedUserId, juzgadoFilter, selectedUserJuzgados, allExpedientes, favoritosComoExpedientes, userJuzgadosMap]);
 
   async function logout() {
     await supabase.auth.signOut();
@@ -1999,7 +2100,9 @@ export default function SuperAdminPage() {
                   console.log(`[Dashboard] Filtro de juzgados cambiado a: ${newFilter}`, {
                     userJuzgadosCount: userJuzgados.length,
                     userJuzgados: userJuzgados,
-                    todosLosJuzgadosCount: todosLosJuzgados.length
+                    todosLosJuzgadosCount: todosLosJuzgados.length,
+                    asignadosCount: juzgadosAsignados.length,
+                    sinAsignarCount: juzgadosSinAsignar.length
                   });
                 }}
                 style={{
@@ -2028,9 +2131,27 @@ export default function SuperAdminPage() {
                   Mis Juzgados {selectedUserJuzgados.length === 0 ? "(sin asignar)" : `(${selectedUserJuzgados.length})`}
                 </option>
                 <option value="beneficio">Beneficio</option>
-                {todosLosJuzgados.length > 0 && (
+                {juzgadosAsignados.length > 0 && (
                   <optgroup label="Juzgados individuales">
-                    {todosLosJuzgados.map((juzgado) => (
+                    {juzgadosAsignados.map((juzgado) => (
+                      <option key={juzgado} value={juzgado}>
+                        {juzgado}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {juzgadosSinAsignar.length > 0 && (
+                  <optgroup label="Juzgados Sin Asignar">
+                    {juzgadosSinAsignar.map((juzgado) => (
+                      <option key={juzgado} value={juzgado}>
+                        {juzgado}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {juzgadosSinAsignar.length > 0 && (
+                  <optgroup label="Juzgados Sin Asignar">
+                    {juzgadosSinAsignar.map((juzgado) => (
                       <option key={juzgado} value={juzgado}>
                         {juzgado}
                       </option>
