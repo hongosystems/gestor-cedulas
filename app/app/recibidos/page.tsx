@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import NotificationBell from "@/app/components/NotificationBell";
 
 type Transfer = {
   id: string;
@@ -141,7 +140,6 @@ export default function RecibidosPage() {
         <header className="nav">
           <h1>Recibidos / Enviados</h1>
           <div className="spacer" />
-          <NotificationBell />
           <Link className="btn" href="/superadmin">
             Volver
           </Link>

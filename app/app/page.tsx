@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { daysSince } from "@/lib/semaforo";
-import NotificationBell from "@/app/components/NotificationBell";
 
 type Cedula = {
   id: string;
@@ -384,7 +383,6 @@ export default function MisCedulasPage() {
               </span>
             </div>
           )}
-          <NotificationBell />
           <Link className="btn primary" href="/app/nueva">
             Nueva
           </Link>

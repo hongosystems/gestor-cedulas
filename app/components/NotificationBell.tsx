@@ -12,18 +12,7 @@ type Notif = {
   created_at: string;
 };
 
-function fmtTime(iso: string) {
-  const d = new Date(iso);
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const yy = String(d.getFullYear()).slice(-2);
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mi = String(d.getMinutes()).padStart(2, "0");
-  return `${dd}/${mm}/${yy} ${hh}:${mi}`;
-}
-
 export default function NotificationBell() {
-  const [open, setOpen] = useState(false);
   const [items, setItems] = useState<Notif[]>([]);
   const unread = items.filter((n) => !n.is_read).length;
 
@@ -67,144 +56,85 @@ export default function NotificationBell() {
     };
   }, []);
 
-  async function markRead(id: string, link: string | null) {
-    await supabase.rpc("mark_notification_read", { p_id: id });
-    setItems((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
-    setOpen(false);
-    if (link) window.location.href = link;
+  const handleBellClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Redirigir al inbox para TODOS los usuarios usando window.location para asegurar que funcione
+    window.location.href = "/app/notificaciones";
+  };
+
+  // No mostrar la campanita si no hay sesión (página de login, etc.)
+  const [hasSession, setHasSession] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const { data: sess } = await supabase.auth.getSession();
+      setHasSession(!!sess.session);
+    })();
+  }, []);
+
+  if (!hasSession) {
+    return null;
   }
 
   return (
     <div style={{ position: "relative" }}>
       <button
-        className="btn"
-        onClick={() => setOpen((v) => !v)}
+        onClick={handleBellClick}
         aria-label="Notificaciones"
-        style={{ position: "relative" }}
+        style={{
+          position: "relative",
+          cursor: "pointer",
+          background: "rgba(11,47,85,.95)",
+          border: "1px solid rgba(255,255,255,.2)",
+          borderRadius: 12,
+          width: 48,
+          height: 48,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 20,
+          color: "rgba(234,243,255,.95)",
+          transition: "all 0.2s ease",
+          boxShadow: "0 4px 12px rgba(0,0,0,.2)",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "rgba(11,47,85,.98)";
+          e.currentTarget.style.borderColor = "rgba(96,141,186,.5)";
+          e.currentTarget.style.transform = "scale(1.05)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "rgba(11,47,85,.95)";
+          e.currentTarget.style.borderColor = "rgba(255,255,255,.2)";
+          e.currentTarget.style.transform = "scale(1)";
+        }}
       >
         🔔
         {unread > 0 && (
           <span
             style={{
               position: "absolute",
-              top: -6,
-              right: -6,
-              minWidth: 18,
-              height: 18,
+              top: -4,
+              right: -4,
+              minWidth: 20,
+              height: 20,
               borderRadius: 999,
               padding: "0 6px",
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
-              fontSize: 12,
+              fontSize: 11,
               fontWeight: 700,
-              background: "var(--brand, #0ea5e9)",
+              background: "var(--brand-red, #e13940)",
               color: "white",
+              boxShadow: "0 2px 8px rgba(225,57,64,.5)",
+              border: "2px solid rgba(11,47,85,.95)",
             }}
           >
-            {unread}
+            {unread > 99 ? "99+" : unread}
           </span>
         )}
       </button>
-
-      {open && (
-        <div
-          style={{
-            position: "absolute",
-            right: 0,
-            top: 44,
-            width: 360,
-            maxWidth: "80vw",
-            zIndex: 50,
-            background: "linear-gradient(180deg, rgba(11,47,85,.98), rgba(7,28,46,.98))",
-            border: "1px solid rgba(255,255,255,.2)",
-            borderRadius: 16,
-            boxShadow: "0 8px 32px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.1) inset",
-            backdropFilter: "blur(20px)",
-            overflow: "hidden",
-          }}
-        >
-          <div style={{ padding: 16 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-              <b style={{ color: "var(--text)", fontSize: 16 }}>Notificaciones</b>
-              <div className="spacer" />
-              <button 
-                className="btn" 
-                onClick={() => setOpen(false)}
-                style={{
-                  padding: "6px 12px",
-                  fontSize: 12,
-                  background: "rgba(255,255,255,.1)",
-                  border: "1px solid rgba(255,255,255,.2)",
-                }}
-              >
-                Cerrar
-              </button>
-            </div>
-
-            <div style={{ display: "grid", gap: 10, maxHeight: "400px", overflowY: "auto" }}>
-              {items.map((n) => (
-                <button
-                  key={n.id}
-                  onClick={() => markRead(n.id, n.link)}
-                  style={{
-                    textAlign: "left",
-                    border: n.is_read 
-                      ? "1px solid rgba(255,255,255,.15)" 
-                      : "1px solid rgba(96,141,186,.4)",
-                    borderRadius: 12,
-                    padding: 12,
-                    background: n.is_read 
-                      ? "rgba(255,255,255,.04)" 
-                      : "rgba(96,141,186,.15)",
-                    cursor: "pointer",
-                    transition: "all 0.2s ease",
-                    color: "var(--text)",
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = n.is_read 
-                      ? "rgba(255,255,255,.08)" 
-                      : "rgba(96,141,186,.25)";
-                    e.currentTarget.style.borderColor = n.is_read 
-                      ? "rgba(255,255,255,.25)" 
-                      : "rgba(96,141,186,.5)";
-                    e.currentTarget.style.transform = "translateY(-1px)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = n.is_read 
-                      ? "rgba(255,255,255,.04)" 
-                      : "rgba(96,141,186,.15)";
-                    e.currentTarget.style.borderColor = n.is_read 
-                      ? "rgba(255,255,255,.15)" 
-                      : "rgba(96,141,186,.4)";
-                    e.currentTarget.style.transform = "translateY(0)";
-                  }}
-                >
-                  <div style={{ fontWeight: 700, fontSize: 14, color: "var(--text)", marginBottom: 4 }}>
-                    {n.title}
-                  </div>
-                  <div style={{ fontSize: 13, color: "rgba(234,243,255,.85)", marginBottom: 6 }}>
-                    {n.body}
-                  </div>
-                  <div style={{ fontSize: 11, color: "rgba(234,243,255,.6)" }}>
-                    {fmtTime(n.created_at)}
-                  </div>
-                </button>
-              ))}
-              {items.length === 0 && (
-                <div style={{ 
-                  padding: 20, 
-                  textAlign: "center", 
-                  color: "rgba(234,243,255,.6)",
-                  fontSize: 13 
-                }}>
-                  No hay notificaciones.
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

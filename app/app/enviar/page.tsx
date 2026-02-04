@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import NotificationBell from "@/app/components/NotificationBell";
 
 type Profile = { id: string; full_name: string | null; email: string | null };
 
@@ -112,7 +111,6 @@ export default function EnviarPage() {
         <header className="nav">
           <h1>Enviar Cédula/Oficio</h1>
           <div className="spacer" />
-          <NotificationBell />
           <Link className="btn" href="/superadmin">
             Volver
           </Link>

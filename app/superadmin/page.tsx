@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import jsPDF from "jspdf";
-import NotificationBell from "@/app/components/NotificationBell";
 
 type Cedula = {
   id: string;
@@ -1931,7 +1930,6 @@ export default function SuperAdminPage() {
               </span>
             </div>
           )}
-          <NotificationBell />
           <button
             onClick={imprimirDashboard}
             style={{

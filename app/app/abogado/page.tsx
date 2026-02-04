@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { daysSince } from "@/lib/semaforo";
-import NotificationBell from "@/app/components/NotificationBell";
 
 type Expediente = {
   id: string;
@@ -614,7 +613,6 @@ export default function AbogadoHomePage() {
                 </span>
               </div>
             )}
-            <NotificationBell />
             <button 
               onClick={logout}
               style={{

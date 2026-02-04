@@ -109,6 +109,13 @@ function semaforoByAge(dias: number): Semaforo {
   return "VERDE";
 }
 
+type User = {
+  id: string;
+  email: string;
+  full_name: string | null;
+  username: string; // email sin dominio para @mentions
+};
+
 function NotasTextarea({
   itemId,
   isPjnFavorito,
@@ -117,7 +124,10 @@ function NotasTextarea({
   setNotasEditables,
   notasGuardando,
   setNotasGuardando,
-  setMsg
+  setMsg,
+  caratula,
+  numeroExpediente,
+  juzgado
 }: {
   itemId: string;
   isPjnFavorito: boolean;
@@ -127,12 +137,195 @@ function NotasTextarea({
   notasGuardando: Record<string, boolean>;
   setNotasGuardando: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   setMsg: React.Dispatch<React.SetStateAction<string>>;
+  caratula?: string | null;
+  numeroExpediente?: string | null;
+  juzgado?: string | null;
 }) {
   const timeoutRef = React.useRef<NodeJS.Timeout | null>(null);
   const [isEditing, setIsEditing] = React.useState(false);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const dropdownRef = React.useRef<HTMLDivElement>(null);
+  const [mentionState, setMentionState] = React.useState<{
+    show: boolean;
+    position: { top: number; left: number };
+    query: string;
+    selectedIndex: number;
+  } | null>(null);
+  const [users, setUsers] = React.useState<User[]>([]);
   const value = notasEditables[itemId] !== undefined ? notasEditables[itemId] : initialValue;
   const trimmedValue = value?.trim() || "";
+
+  // Cargar usuarios del sistema desde API (incluye todos los usuarios de auth.users)
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const { data: session } = await supabase.auth.getSession();
+        if (!session.session) return;
+
+        const res = await fetch("/api/users/list", {
+          headers: {
+            "Authorization": `Bearer ${session.session.access_token}`,
+          },
+        });
+
+        if (res.ok) {
+          const { users: usersList } = await res.json();
+          console.log(`[NotasTextarea] Usuarios cargados desde API: ${usersList?.length || 0}`);
+          console.log(`[NotasTextarea] Primeros usuarios:`, usersList?.slice(0, 5).map((u: any) => `${u.full_name || u.email} (@${u.username})`));
+          setUsers(usersList || []);
+        } else {
+          console.error("Error al cargar usuarios:", await res.text());
+          // Fallback: intentar cargar desde profiles
+          const { data: profiles } = await supabase
+            .from("profiles")
+            .select("id, email, full_name")
+            .order("full_name", { ascending: true });
+          
+          if (profiles) {
+            const fallbackUsers: User[] = profiles.map((p: any) => {
+              const username = (p.email || "").split("@")[0].toLowerCase();
+              return {
+                id: p.id,
+                email: p.email || "",
+                full_name: p.full_name,
+                username,
+              };
+            });
+            setUsers(fallbackUsers);
+          }
+        }
+      } catch (err) {
+        console.error("Error al cargar usuarios:", err);
+        // Fallback: intentar cargar desde profiles
+        const { data: profiles } = await supabase
+          .from("profiles")
+          .select("id, email, full_name")
+          .order("full_name", { ascending: true });
+        
+        if (profiles) {
+          const fallbackUsers: User[] = profiles.map((p: any) => {
+            const username = (p.email || "").split("@")[0].toLowerCase();
+            return {
+              id: p.id,
+              email: p.email || "",
+              full_name: p.full_name,
+              username,
+            };
+          });
+          setUsers(fallbackUsers);
+        }
+      }
+    })();
+  }, []);
+
+  // Detectar menciones en el texto y crear notificaciones
+  const detectarYNotificarMenciones = React.useCallback(async (texto: string, currentUserId: string) => {
+    // Buscar patrones @username en el texto
+    const mentionRegex = /@(\w+)/g;
+    const matches = [...texto.matchAll(mentionRegex)];
+    const mentionedUsernames = [...new Set(matches.map(m => m[1].toLowerCase()))];
+    
+    if (mentionedUsernames.length === 0) return;
+    
+    // Obtener información del usuario actual
+    const { data: currentUserProfile } = await supabase
+      .from("profiles")
+      .select("full_name, email")
+      .eq("id", currentUserId)
+      .single();
+    
+    const currentUserName = currentUserProfile?.full_name || currentUserProfile?.email || "Un usuario";
+    
+    // Crear notificaciones para cada usuario mencionado
+    for (const username of mentionedUsernames) {
+      const mentionedUser = users.find(u => u.username.toLowerCase() === username);
+      if (!mentionedUser || mentionedUser.id === currentUserId) continue;
+      
+      // Construir link al expediente
+      const link = isPjnFavorito 
+        ? `/superadmin/mis-juzgados#pjn_${itemId.replace(/^pjn_/, "")}`
+        : `/superadmin/mis-juzgados#${itemId}`;
+      
+      // Guardar la nota completa (no solo el contexto)
+      // El asunto será la parte donde fueron mencionados, pero el cuerpo tendrá la nota completa
+      const mentionIndex = texto.toLowerCase().indexOf(`@${username}`);
+      const startContext = Math.max(0, mentionIndex - 50);
+      const endContext = Math.min(texto.length, mentionIndex + username.length + 50);
+      const notaContextParaAsunto = texto.substring(startContext, endContext).trim();
+      
+      // La nota completa se guarda en nota_context
+      const notaCompleta = texto.trim();
+      
+      // Limpiar itemId para expediente_id (quitar prefijo pjn_ si existe, ya que expediente_id es UUID)
+      const expedienteIdLimpio = itemId.replace(/^pjn_/, "");
+      
+      // Obtener el ID del usuario actual (remitente)
+      const { data: session } = await supabase.auth.getSession();
+      const senderId = session.session?.user.id;
+      
+      // Crear metadata con información del expediente y el remitente
+      const metadata = {
+        caratula: caratula || null,
+        juzgado: juzgado || null,
+        numero: numeroExpediente || null,
+        expediente_id: itemId, // Guardar el ID completo con prefijo en metadata para referencia
+        is_pjn_favorito: isPjnFavorito,
+        sender_id: senderId, // Guardar el ID del remitente para poder responderle
+      };
+      
+      // Crear notificación
+      try {
+        const { data: session } = await supabase.auth.getSession();
+        if (!session.session) return;
+        
+        console.log("[NotasTextarea] Creando mención con metadata:", {
+          caratula,
+          juzgado,
+          numeroExpediente,
+          metadata
+        });
+
+        const res = await fetch("/api/notifications/create-mention", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${session.session.access_token}`,
+          },
+          body: JSON.stringify({
+            user_id: mentionedUser.id,
+            title: notaContextParaAsunto || (caratula ? `Mencionado en: ${caratula.substring(0, 50)}${caratula.length > 50 ? '...' : ''}` : "Fuiste mencionado en una nota"),
+            body: `${currentUserName} te mencionó en las notas${caratula ? ` del expediente "${caratula}"` : numeroExpediente ? ` del expediente ${numeroExpediente}` : ""}`,
+            link,
+            expediente_id: expedienteIdLimpio, // UUID sin prefijo pjn_
+            is_pjn_favorito: isPjnFavorito,
+            nota_context: notaCompleta, // Guardar la nota completa
+            metadata: metadata,
+          }),
+        });
+        
+        if (res.ok) {
+          const result = await res.json();
+          console.log("[NotasTextarea] Notificación creada:", result);
+          if (result.warning) {
+            console.warn("[NotasTextarea] Advertencia:", result.warning);
+          }
+        } else {
+          const errorText = await res.text();
+          let errorData;
+          try {
+            errorData = JSON.parse(errorText);
+          } catch {
+            errorData = { error: errorText };
+          }
+          console.error("[NotasTextarea] Error al crear notificación:", errorData);
+          console.error("[NotasTextarea] Status:", res.status);
+          console.error("[NotasTextarea] Response:", errorText);
+        }
+      } catch (err) {
+        console.error(`Error al crear notificación:`, err);
+      }
+    }
+  }, [users, isPjnFavorito, itemId, caratula, numeroExpediente, juzgado]);
 
   const guardarNotas = React.useCallback(async (newValue: string) => {
     if (notasGuardando[itemId]) return;
@@ -140,6 +333,14 @@ function NotasTextarea({
     setNotasGuardando(prev => ({ ...prev, [itemId]: true }));
     
     try {
+      // Obtener usuario actual para notificaciones
+      const { data: session } = await supabase.auth.getSession();
+      const currentUserId = session.session?.user.id;
+      
+      // Detectar y notificar menciones antes de guardar
+      if (currentUserId) {
+        await detectarYNotificarMenciones(newValue, currentUserId);
+      }
       if (isPjnFavorito) {
         // Para favoritos PJN, extraer el ID real (sin el prefijo "pjn_")
         const pjnId = itemId.replace(/^pjn_/, "");
@@ -271,11 +472,45 @@ function NotasTextarea({
         return newState;
       });
     }
-  }, [itemId, isPjnFavorito, notasGuardando, setMsg]);
+  }, [itemId, isPjnFavorito, notasGuardando, setMsg, detectarYNotificarMenciones]);
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newValue = e.target.value;
+    const textarea = e.target;
+    const cursorPos = textarea.selectionStart;
+    
     setNotasEditables(prev => ({ ...prev, [itemId]: newValue }));
+    
+    // Detectar si se está escribiendo después de "@"
+    const textBeforeCursor = newValue.substring(0, cursorPos);
+    const lastAtIndex = textBeforeCursor.lastIndexOf("@");
+    
+    if (lastAtIndex !== -1) {
+      // Verificar que no hay espacio entre @ y el cursor
+      const textAfterAt = textBeforeCursor.substring(lastAtIndex + 1);
+      if (!textAfterAt.includes(" ") && !textAfterAt.includes("\n")) {
+        const query = textAfterAt.toLowerCase();
+        
+        // Calcular posición del dropdown
+        const textareaRect = textarea.getBoundingClientRect();
+        const scrollTop = textarea.scrollTop;
+        const lineHeight = parseInt(getComputedStyle(textarea).lineHeight) || 20;
+        const lines = textBeforeCursor.split("\n");
+        const currentLine = lines.length - 1;
+        const top = textareaRect.top + (currentLine * lineHeight) - scrollTop + lineHeight;
+        
+        setMentionState({
+          show: true,
+          position: { top, left: textareaRect.left },
+          query,
+          selectedIndex: 0,
+        });
+      } else {
+        setMentionState(null);
+      }
+    } else {
+      setMentionState(null);
+    }
     
     // Cancelar timeout anterior
     if (timeoutRef.current) {
@@ -288,7 +523,77 @@ function NotasTextarea({
     }, 30000);
   };
 
+  const insertarMencion = (user: User) => {
+    const currentValue = notasEditables[itemId] !== undefined ? notasEditables[itemId] : initialValue;
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    
+    const cursorPos = textarea.selectionStart;
+    const textBeforeCursor = currentValue.substring(0, cursorPos);
+    const lastAtIndex = textBeforeCursor.lastIndexOf("@");
+    
+    if (lastAtIndex !== -1) {
+      const textAfterAt = textBeforeCursor.substring(lastAtIndex + 1);
+      const newText = 
+        currentValue.substring(0, lastAtIndex + 1) + 
+        user.username + 
+        " " + 
+        currentValue.substring(cursorPos);
+      
+      setNotasEditables(prev => ({ ...prev, [itemId]: newText }));
+      setMentionState(null);
+      
+      // Reposicionar cursor después de la mención
+      setTimeout(() => {
+        const newCursorPos = lastAtIndex + 1 + user.username.length + 1;
+        textarea.setSelectionRange(newCursorPos, newCursorPos);
+        textarea.focus();
+      }, 0);
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Manejar navegación en el dropdown de menciones
+    if (mentionState?.show) {
+      const query = mentionState.query.toLowerCase();
+      const filteredUsers = !query || query.length === 0
+        ? users.slice(0, 20)
+        : users.filter(u => 
+            u.username.toLowerCase().includes(query) ||
+            (u.full_name && u.full_name.toLowerCase().includes(query)) ||
+            u.email.toLowerCase().includes(query)
+          ).slice(0, 20);
+      
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setMentionState(prev => prev ? {
+          ...prev,
+          selectedIndex: Math.min(prev.selectedIndex + 1, filteredUsers.length - 1)
+        } : null);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setMentionState(prev => prev ? {
+          ...prev,
+          selectedIndex: Math.max(prev.selectedIndex - 1, 0)
+        } : null);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        if (filteredUsers[mentionState.selectedIndex]) {
+          insertarMencion(filteredUsers[mentionState.selectedIndex]);
+        }
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMentionState(null);
+        return;
+      }
+    }
+    
     // Guardar inmediatamente con ENTER (Ctrl+Enter o Cmd+Enter) o TAB
     if (e.key === "Tab" || (e.key === "Enter" && (e.ctrlKey || e.metaKey))) {
       e.preventDefault();
@@ -298,15 +603,17 @@ function NotasTextarea({
       }
       guardarNotas(currentValue);
       setIsEditing(false);
+      setMentionState(null);
     }
     // ESC para cancelar edición
-    if (e.key === "Escape") {
+    if (e.key === "Escape" && !mentionState?.show) {
       setNotasEditables(prev => {
         const newState = { ...prev };
         delete newState[itemId];
         return newState;
       });
       setIsEditing(false);
+      setMentionState(null);
     }
   };
 
@@ -337,6 +644,21 @@ function NotasTextarea({
     };
   }, []);
 
+  // Filtrar usuarios para el dropdown (mostrar hasta 20 usuarios)
+  const filteredUsers = mentionState ? (() => {
+    const query = mentionState.query.toLowerCase();
+    // Si no hay query o es muy corta, mostrar todos los usuarios (limitado a 20)
+    if (!query || query.length === 0) {
+      return users.slice(0, 20);
+    }
+    // Si hay query, filtrar y mostrar hasta 20
+    return users.filter(u => 
+      u.username.toLowerCase().includes(query) ||
+      (u.full_name && u.full_name.toLowerCase().includes(query)) ||
+      u.email.toLowerCase().includes(query)
+    ).slice(0, 20);
+  })() : [];
+
   // Si está editando, mostrar textarea
   if (isEditing) {
     return (
@@ -349,15 +671,24 @@ function NotasTextarea({
         display: "flex",
         flexDirection: "column",
         gap: 5,
-        boxSizing: "border-box"
+        boxSizing: "border-box",
+        position: "relative"
       }}>
         <textarea
           ref={textareaRef}
           value={value}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
-          onBlur={handleBlur}
-          placeholder="Agregar notas..."
+          onBlur={(e) => {
+            // Delay para permitir click en el dropdown
+            setTimeout(() => {
+              if (!dropdownRef.current?.contains(document.activeElement)) {
+                handleBlur();
+                setMentionState(null);
+              }
+            }, 200);
+          }}
+          placeholder="Agregar notas... (usa @ para mencionar usuarios)"
           disabled={notasGuardando[itemId]}
           style={{
             width: "100%",
@@ -379,6 +710,64 @@ function NotasTextarea({
             boxSizing: "border-box"
           }}
         />
+        
+        {/* Dropdown de menciones */}
+        {mentionState?.show && filteredUsers.length > 0 && (
+          <div
+            ref={dropdownRef}
+            style={{
+              position: "fixed",
+              top: mentionState.position.top,
+              left: mentionState.position.left,
+              zIndex: 1000,
+              background: "linear-gradient(180deg, rgba(11,47,85,.98), rgba(7,28,46,.98))",
+              border: "1px solid rgba(255,255,255,.2)",
+              borderRadius: 12,
+              boxShadow: "0 8px 24px rgba(0,0,0,.5)",
+              backdropFilter: "blur(20px)",
+              minWidth: 280,
+              maxWidth: 320,
+              maxHeight: 300,
+              overflowY: "auto",
+            }}
+            onMouseDown={(e) => e.preventDefault()} // Prevenir blur del textarea
+          >
+            {filteredUsers.map((user, idx) => (
+              <div
+                key={user.id}
+                onClick={() => insertarMencion(user)}
+                style={{
+                  padding: "10px 14px",
+                  cursor: "pointer",
+                  background: idx === mentionState.selectedIndex 
+                    ? "rgba(96,141,186,.3)" 
+                    : "transparent",
+                  borderLeft: idx === mentionState.selectedIndex 
+                    ? "3px solid rgba(96,141,186,.8)" 
+                    : "3px solid transparent",
+                  transition: "all 0.15s ease",
+                }}
+                onMouseEnter={() => setMentionState(prev => prev ? { ...prev, selectedIndex: idx } : null)}
+              >
+                <div style={{ 
+                  fontWeight: 600, 
+                  fontSize: 13, 
+                  color: "var(--text)",
+                  marginBottom: 2
+                }}>
+                  {user.full_name || user.email}
+                </div>
+                <div style={{ 
+                  fontSize: 11, 
+                  color: "rgba(234,243,255,.6)" 
+                }}>
+                  @{user.username}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        
         <div style={{
           padding: "2px 0 0 0",
           fontSize: 9.5,
@@ -568,6 +957,7 @@ export default function MisJuzgadosPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 15;
   const [currentUserName, setCurrentUserName] = useState<string>("");
+  const [searchTerm, setSearchTerm] = useState<string>("");
 
   const loadData = async () => {
     try {
@@ -1731,6 +2121,18 @@ export default function MisJuzgadosPage() {
       filtered = filteredByCreator.filter((item) => item.semaforo === semaforoFilter);
     }
 
+    // Aplicar filtro de búsqueda (busca en número de expediente y carátula)
+    if (searchTerm.trim()) {
+      const searchLower = searchTerm.trim().toLowerCase();
+      filtered = filtered.filter((item: any) => {
+        // Buscar en número de expediente (la propiedad se llama "numero" en los items mapeados)
+        const numeroExpediente = (item.numero || "").toLowerCase();
+        // Buscar en carátula
+        const caratula = (item.caratula || "").toLowerCase();
+        return numeroExpediente.includes(searchLower) || caratula.includes(searchLower);
+      });
+    }
+
     // Ordenar items
     const sorted = [...filtered];
     
@@ -1776,7 +2178,7 @@ export default function MisJuzgadosPage() {
     });
 
     return sorted;
-  }, [activeTab, expedientes, cedulasFiltered, oficiosFiltered, sortField, sortDirection, semaforoFilter, createdByFilter]);
+  }, [activeTab, expedientes, cedulasFiltered, oficiosFiltered, sortField, sortDirection, semaforoFilter, createdByFilter, searchTerm]);
 
   // Paginación: solo para expedientes
   const paginatedItems = useMemo(() => {
@@ -1796,7 +2198,7 @@ export default function MisJuzgadosPage() {
   // Resetear a página 1 cuando cambia el filtro o el tab
   useEffect(() => {
     setCurrentPage(1);
-  }, [juzgadoFilter, createdByFilter, semaforoFilter, activeTab]);
+  }, [juzgadoFilter, createdByFilter, semaforoFilter, activeTab, searchTerm]);
 
   async function logout() {
     await supabase.auth.signOut();
@@ -2168,6 +2570,39 @@ export default function MisJuzgadosPage() {
               </button>
             )}
 
+            {/* Campo de búsqueda */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ color: "var(--muted)", fontSize: 13, fontWeight: 600 }}>
+                Buscar:
+              </span>
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Expediente, Carátula..."
+                style={{
+                  padding: "8px 10px",
+                  background: "rgba(11,47,85,.95)",
+                  border: "1px solid rgba(255,255,255,.2)",
+                  borderRadius: 10,
+                  color: "rgba(234,243,255,.95)",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  outline: "none",
+                  minWidth: 250,
+                  transition: "all 0.2s ease",
+                }}
+                onFocus={(e) => {
+                  e.currentTarget.style.borderColor = "rgba(96,141,186,.5)";
+                  e.currentTarget.style.boxShadow = "0 0 0 3px rgba(96,141,186,.1)";
+                }}
+                onBlur={(e) => {
+                  e.currentTarget.style.borderColor = "rgba(255,255,255,.2)";
+                  e.currentTarget.style.boxShadow = "none";
+                }}
+              />
+            </div>
+
             {/* Filtro por Juzgado/Beneficio y Cargado por */}
             <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
               {juzgadosAsignadosOrdenados.length > 0 && (
@@ -2465,6 +2900,9 @@ export default function MisJuzgadosPage() {
                             notasGuardando={notasGuardando}
                             setNotasGuardando={setNotasGuardando}
                             setMsg={setMsg}
+                            caratula={item.caratula}
+                            numeroExpediente={item.numero}
+                            juzgado={item.juzgado}
                           />
                         </td>
                       )}
@@ -2500,8 +2938,39 @@ export default function MisJuzgadosPage() {
                 background: "rgba(255,255,255,.02)",
                 borderRadius: 12,
                 border: "1px solid rgba(255,255,255,.06)",
-                maxWidth: 520
+                maxWidth: 680
               }}>
+                <button
+                  onClick={() => setCurrentPage(1)}
+                  disabled={currentPage === 1}
+                  style={{
+                    padding: "8px 16px",
+                    background: currentPage === 1 ? "rgba(255,255,255,.05)" : "rgba(96,141,186,.2)",
+                    border: `1px solid ${currentPage === 1 ? "rgba(255,255,255,.1)" : "rgba(96,141,186,.4)"}`,
+                    borderRadius: 8,
+                    color: currentPage === 1 ? "rgba(255,255,255,.3)" : "var(--text)",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: currentPage === 1 ? "not-allowed" : "pointer",
+                    transition: "all 0.2s ease",
+                    opacity: currentPage === 1 ? 0.5 : 1
+                  }}
+                  onMouseEnter={(e) => {
+                    if (currentPage !== 1) {
+                      e.currentTarget.style.background = "rgba(96,141,186,.3)";
+                      e.currentTarget.style.borderColor = "rgba(96,141,186,.6)";
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (currentPage !== 1) {
+                      e.currentTarget.style.background = "rgba(96,141,186,.2)";
+                      e.currentTarget.style.borderColor = "rgba(96,141,186,.4)";
+                    }
+                  }}
+                >
+                  Inicio
+                </button>
+
                 <button
                   onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                   disabled={currentPage === 1}
@@ -2597,6 +3066,37 @@ export default function MisJuzgadosPage() {
                   }}
                 >
                   Siguiente →
+                </button>
+
+                <button
+                  onClick={() => setCurrentPage(totalPages)}
+                  disabled={currentPage === totalPages}
+                  style={{
+                    padding: "8px 16px",
+                    background: currentPage === totalPages ? "rgba(255,255,255,.05)" : "rgba(96,141,186,.2)",
+                    border: `1px solid ${currentPage === totalPages ? "rgba(255,255,255,.1)" : "rgba(96,141,186,.4)"}`,
+                    borderRadius: 8,
+                    color: currentPage === totalPages ? "rgba(255,255,255,.3)" : "var(--text)",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: currentPage === totalPages ? "not-allowed" : "pointer",
+                    transition: "all 0.2s ease",
+                    opacity: currentPage === totalPages ? 0.5 : 1
+                  }}
+                  onMouseEnter={(e) => {
+                    if (currentPage !== totalPages) {
+                      e.currentTarget.style.background = "rgba(96,141,186,.3)";
+                      e.currentTarget.style.borderColor = "rgba(96,141,186,.6)";
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (currentPage !== totalPages) {
+                      e.currentTarget.style.background = "rgba(96,141,186,.2)";
+                      e.currentTarget.style.borderColor = "rgba(96,141,186,.4)";
+                    }
+                  }}
+                >
+                  Fin
                 </button>
               </div>
             )}
