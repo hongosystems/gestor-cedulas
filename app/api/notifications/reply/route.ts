@@ -166,16 +166,35 @@ export async function POST(req: NextRequest) {
       sender_id: user.id, // El remitente de la respuesta es quien responde
     };
 
-    // Construir el link al expediente (usar el mismo que el padre si existe)
+    // Construir el link al expediente/cédula (usar el mismo que el padre si existe)
     let replyLink = null;
-    if (parentNotif.expediente_id) {
+    if (parentNotif.expediente_id || parentNotif.link) {
       const isPjn = is_pjn_favorito !== undefined ? is_pjn_favorito : parentNotif.is_pjn_favorito;
       const expId = expediente_id || parentNotif.expediente_id;
+      
+      // Verificar si es una cédula usando metadata
+      let parentMetadata = parentNotif.metadata;
+      if (typeof parentMetadata === 'string') {
+        try {
+          parentMetadata = JSON.parse(parentMetadata);
+        } catch (e) {
+          parentMetadata = {};
+        }
+      }
+      const isCedula = (parentMetadata as any)?.cedula_id || false;
+      
       if (isPjn) {
         replyLink = `/superadmin/mis-juzgados#pjn_${expId}`;
+      } else if (isCedula) {
+        // Para cédulas, el link debe apuntar a /app#cedula_id
+        const cedulaId = (parentMetadata as any)?.cedula_id || expId;
+        replyLink = `/app#${cedulaId}`;
       } else {
         replyLink = `/superadmin/mis-juzgados#${expId}`;
       }
+    } else if (parentNotif.link) {
+      // Si no hay expediente_id pero hay link, usar el link del padre
+      replyLink = parentNotif.link;
     }
 
     console.log("[API reply] Creando notificación de respuesta:", {
@@ -232,10 +251,21 @@ export async function POST(req: NextRequest) {
       console.log("[API reply] Verificación de notificación creada:", verifyNotif);
     }
 
-    // Actualizar la nota del expediente con la respuesta
+    // Actualizar la nota del expediente/cédula con la respuesta
     if (expediente_id || parentNotif.expediente_id) {
       const expId = expediente_id || parentNotif.expediente_id;
       const isPjn = is_pjn_favorito !== undefined ? is_pjn_favorito : parentNotif.is_pjn_favorito;
+
+      // Verificar si es una cédula usando metadata
+      let parentMetadata = parentNotif.metadata;
+      if (typeof parentMetadata === 'string') {
+        try {
+          parentMetadata = JSON.parse(parentMetadata);
+        } catch (e) {
+          parentMetadata = {};
+        }
+      }
+      const isCedula = (parentMetadata as any)?.cedula_id || false;
 
       try {
         if (isPjn) {
@@ -261,6 +291,30 @@ export async function POST(req: NextRequest) {
               .from("pjn_favoritos")
               .update({ notas: nuevaNota })
               .eq("id", pjnId);
+          }
+        } else if (isCedula) {
+          // Para cédulas/oficios
+          const cedulaId = (parentMetadata as any)?.cedula_id || expId;
+          const { data: cedula } = await svc
+            .from("cedulas")
+            .select("notas")
+            .eq("id", cedulaId)
+            .single();
+
+          if (cedula) {
+            const fechaHora = new Date().toLocaleString("es-AR", {
+              day: "2-digit",
+              month: "2-digit",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            });
+            const nuevaNota = `${cedula.notas || ""}\n\n[${fechaHora}] ${senderName}: ${message}`.trim();
+            
+            await svc
+              .from("cedulas")
+              .update({ notas: nuevaNota })
+              .eq("id", cedulaId);
           }
         } else {
           // Para expedientes locales

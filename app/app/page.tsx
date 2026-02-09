@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { daysSince } from "@/lib/semaforo";
 
@@ -13,6 +13,14 @@ type Cedula = {
   fecha_carga: string | null;
   pdf_path: string | null;
   tipo_documento: "CEDULA" | "OFICIO" | null;
+  notas?: string | null;
+};
+
+type User = {
+  id: string;
+  email: string;
+  full_name: string | null;
+  username: string; // email sin dominio para @mentions
 };
 
 type DocumentType = "CEDULA" | "OFICIO" | null;
@@ -95,6 +103,576 @@ async function requireSessionOrRedirect() {
 type SortField = "dias" | "semaforo" | "fecha_carga" | "juzgado" | null;
 type SortDirection = "asc" | "desc";
 
+// Componente NotasTextarea simplificado para cédulas
+function NotasTextareaCedula({
+  itemId,
+  initialValue,
+  notasEditables,
+  setNotasEditables,
+  notasGuardando,
+  setNotasGuardando,
+  setMsg,
+  caratula,
+  juzgado
+}: {
+  itemId: string;
+  initialValue: string;
+  notasEditables: Record<string, string>;
+  setNotasEditables: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  notasGuardando: Record<string, boolean>;
+  setNotasGuardando: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+  setMsg: React.Dispatch<React.SetStateAction<string>>;
+  caratula?: string | null;
+  juzgado?: string | null;
+}) {
+  const timeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+  const [isEditing, setIsEditing] = React.useState(false);
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const dropdownRef = React.useRef<HTMLDivElement>(null);
+  const [mentionState, setMentionState] = React.useState<{
+    show: boolean;
+    position: { top: number; left: number };
+    query: string;
+    selectedIndex: number;
+  } | null>(null);
+  const [users, setUsers] = React.useState<User[]>([]);
+  const value = notasEditables[itemId] !== undefined ? notasEditables[itemId] : initialValue;
+  const trimmedValue = value?.trim() || "";
+
+  // Cargar usuarios del sistema
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const { data: session } = await supabase.auth.getSession();
+        if (!session.session) return;
+
+        const res = await fetch("/api/users/list", {
+          headers: {
+            "Authorization": `Bearer ${session.session.access_token}`,
+          },
+        });
+
+        if (res.ok) {
+          const { users: usersList } = await res.json();
+          setUsers(usersList || []);
+        } else {
+          // Fallback: cargar desde profiles
+          const { data: profiles } = await supabase
+            .from("profiles")
+            .select("id, email, full_name")
+            .order("full_name", { ascending: true });
+          
+          if (profiles) {
+            const fallbackUsers: User[] = profiles.map((p: any) => {
+              const username = (p.email || "").split("@")[0].toLowerCase();
+              return {
+                id: p.id,
+                email: p.email || "",
+                full_name: p.full_name,
+                username,
+              };
+            });
+            setUsers(fallbackUsers);
+          }
+        }
+      } catch (err) {
+        console.error("Error al cargar usuarios:", err);
+        const { data: profiles } = await supabase
+          .from("profiles")
+          .select("id, email, full_name")
+          .order("full_name", { ascending: true });
+        
+        if (profiles) {
+          const fallbackUsers: User[] = profiles.map((p: any) => {
+            const username = (p.email || "").split("@")[0].toLowerCase();
+            return {
+              id: p.id,
+              email: p.email || "",
+              full_name: p.full_name,
+              username,
+            };
+          });
+          setUsers(fallbackUsers);
+        }
+      }
+    })();
+  }, []);
+
+  // Detectar menciones y crear notificaciones
+  const detectarYNotificarMenciones = React.useCallback(async (texto: string, currentUserId: string) => {
+    const mentionRegex = /@(\w+)/g;
+    const matches = [...texto.matchAll(mentionRegex)];
+    const mentionedUsernames = [...new Set(matches.map(m => m[1].toLowerCase()))];
+    
+    if (mentionedUsernames.length === 0) return;
+    
+    const { data: currentUserProfile } = await supabase
+      .from("profiles")
+      .select("full_name, email")
+      .eq("id", currentUserId)
+      .single();
+    
+    const currentUserName = currentUserProfile?.full_name || currentUserProfile?.email || "Un usuario";
+    
+    for (const username of mentionedUsernames) {
+      const mentionedUser = users.find(u => u.username.toLowerCase() === username);
+      if (!mentionedUser || mentionedUser.id === currentUserId) continue;
+      
+      const link = `/app#${itemId}`;
+      const mentionIndex = texto.toLowerCase().indexOf(`@${username}`);
+      const startContext = Math.max(0, mentionIndex - 50);
+      const endContext = Math.min(texto.length, mentionIndex + username.length + 50);
+      const notaContextParaAsunto = texto.substring(startContext, endContext).trim();
+      const notaCompleta = texto.trim();
+      
+      const { data: session } = await supabase.auth.getSession();
+      const senderId = session.session?.user.id;
+      
+      const metadata = {
+        caratula: caratula || null,
+        juzgado: juzgado || null,
+        cedula_id: itemId,
+        sender_id: senderId,
+      };
+      
+      try {
+        const { data: session } = await supabase.auth.getSession();
+        if (!session.session) return;
+        
+        const res = await fetch("/api/notifications/create-mention", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${session.session.access_token}`,
+          },
+          body: JSON.stringify({
+            user_id: mentionedUser.id,
+            title: notaContextParaAsunto || (caratula ? `Mencionado en: ${caratula.substring(0, 50)}${caratula.length > 50 ? '...' : ''}` : "Fuiste mencionado en una nota"),
+            body: `${currentUserName} te mencionó en las notas${caratula ? ` de la cédula/oficio "${caratula}"` : ""}`,
+            link,
+            expediente_id: itemId,
+            is_pjn_favorito: false,
+            nota_context: notaCompleta,
+            metadata: metadata,
+          }),
+        });
+        
+        if (res.ok) {
+          const result = await res.json();
+          console.log("[NotasTextareaCedula] Notificación creada:", result);
+        } else {
+          console.error("[NotasTextareaCedula] Error al crear notificación:", await res.text());
+        }
+      } catch (err) {
+        console.error(`Error al crear notificación:`, err);
+      }
+    }
+  }, [users, itemId, caratula, juzgado]);
+
+  const guardarNotas = React.useCallback(async (newValue: string) => {
+    if (notasGuardando[itemId]) return;
+    
+    setNotasGuardando(prev => ({ ...prev, [itemId]: true }));
+    
+    try {
+      const { data: session } = await supabase.auth.getSession();
+      const currentUserId = session.session?.user.id;
+      
+      if (currentUserId) {
+        await detectarYNotificarMenciones(newValue, currentUserId);
+      }
+      
+      const { error } = await supabase
+        .from("cedulas")
+        .update({ notas: newValue.trim() || null })
+        .eq("id", itemId);
+      
+      if (error) {
+        console.error(`Error al guardar notas para cédula ${itemId}:`, error);
+        setMsg(`Error al guardar notas: ${error.message}`);
+      }
+    } catch (err) {
+      console.error(`Error al guardar notas:`, err);
+      setMsg(`Error al guardar notas: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setNotasGuardando(prev => {
+        const newState = { ...prev };
+        delete newState[itemId];
+        return newState;
+      });
+    }
+  }, [itemId, notasGuardando, setMsg, detectarYNotificarMenciones]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newValue = e.target.value;
+    const textarea = e.target;
+    const cursorPos = textarea.selectionStart;
+    
+    setNotasEditables(prev => ({ ...prev, [itemId]: newValue }));
+    
+    const textBeforeCursor = newValue.substring(0, cursorPos);
+    const lastAtIndex = textBeforeCursor.lastIndexOf("@");
+    
+    if (lastAtIndex !== -1) {
+      const textAfterAt = textBeforeCursor.substring(lastAtIndex + 1);
+      if (!textAfterAt.includes(" ") && !textAfterAt.includes("\n")) {
+        const query = textAfterAt.toLowerCase();
+        const textareaRect = textarea.getBoundingClientRect();
+        const scrollTop = textarea.scrollTop;
+        const lineHeight = parseInt(getComputedStyle(textarea).lineHeight) || 20;
+        const lines = textBeforeCursor.split("\n");
+        const currentLine = lines.length - 1;
+        const top = textareaRect.top + (currentLine * lineHeight) - scrollTop + lineHeight;
+        
+        setMentionState({
+          show: true,
+          position: { top, left: textareaRect.left },
+          query,
+          selectedIndex: 0,
+        });
+      } else {
+        setMentionState(null);
+      }
+    } else {
+      setMentionState(null);
+    }
+    
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+    
+    timeoutRef.current = setTimeout(() => {
+      guardarNotas(newValue);
+    }, 30000);
+  };
+
+  const insertarMencion = (user: User) => {
+    const currentValue = notasEditables[itemId] !== undefined ? notasEditables[itemId] : initialValue;
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    
+    const cursorPos = textarea.selectionStart;
+    const textBeforeCursor = currentValue.substring(0, cursorPos);
+    const lastAtIndex = textBeforeCursor.lastIndexOf("@");
+    
+    if (lastAtIndex !== -1) {
+      const textAfterAt = textBeforeCursor.substring(lastAtIndex + 1);
+      const newText = 
+        currentValue.substring(0, lastAtIndex + 1) + 
+        user.username + 
+        " " + 
+        currentValue.substring(cursorPos);
+      
+      setNotasEditables(prev => ({ ...prev, [itemId]: newText }));
+      setMentionState(null);
+      
+      setTimeout(() => {
+        const newCursorPos = lastAtIndex + 1 + user.username.length + 1;
+        textarea.setSelectionRange(newCursorPos, newCursorPos);
+        textarea.focus();
+      }, 0);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mentionState?.show) {
+      const query = mentionState.query.toLowerCase();
+      const filteredUsers = !query || query.length === 0
+        ? users.slice(0, 20)
+        : users.filter(u => 
+            u.username.toLowerCase().includes(query) ||
+            (u.full_name && u.full_name.toLowerCase().includes(query)) ||
+            u.email.toLowerCase().includes(query)
+          ).slice(0, 20);
+      
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setMentionState(prev => prev ? {
+          ...prev,
+          selectedIndex: Math.min(prev.selectedIndex + 1, filteredUsers.length - 1)
+        } : null);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setMentionState(prev => prev ? {
+          ...prev,
+          selectedIndex: Math.max(prev.selectedIndex - 1, 0)
+        } : null);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        if (filteredUsers[mentionState.selectedIndex]) {
+          insertarMencion(filteredUsers[mentionState.selectedIndex]);
+        }
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMentionState(null);
+        return;
+      }
+    }
+    
+    if (e.key === "Tab" || (e.key === "Enter" && (e.ctrlKey || e.metaKey))) {
+      e.preventDefault();
+      const currentValue = notasEditables[itemId] !== undefined ? notasEditables[itemId] : initialValue;
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      guardarNotas(currentValue);
+      setIsEditing(false);
+      setMentionState(null);
+    }
+    if (e.key === "Escape" && !mentionState?.show) {
+      setNotasEditables(prev => {
+        const newState = { ...prev };
+        delete newState[itemId];
+        return newState;
+      });
+      setIsEditing(false);
+      setMentionState(null);
+    }
+  };
+
+  const handleBlur = () => {
+    const currentValue = notasEditables[itemId] !== undefined ? notasEditables[itemId] : initialValue;
+    if (currentValue !== initialValue) {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      guardarNotas(currentValue);
+    }
+    setIsEditing(false);
+  };
+
+  const handleClick = () => {
+    setIsEditing(true);
+    setTimeout(() => {
+      textareaRef.current?.focus();
+    }, 0);
+  };
+
+  React.useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
+
+  const filteredUsers = mentionState ? (() => {
+    const query = mentionState.query.toLowerCase();
+    if (!query || query.length === 0) {
+      return users.slice(0, 20);
+    }
+    return users.filter(u => 
+      u.username.toLowerCase().includes(query) ||
+      (u.full_name && u.full_name.toLowerCase().includes(query)) ||
+      u.email.toLowerCase().includes(query)
+    ).slice(0, 20);
+  })() : [];
+
+  if (isEditing) {
+    return (
+      <div style={{ 
+        width: "100%",
+        padding: "6px 8px",
+        background: "rgba(255,255,255,.03)",
+        borderRadius: 8,
+        border: "1px solid rgba(255,255,255,.06)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 5,
+        boxSizing: "border-box",
+        position: "relative"
+      }}>
+        <textarea
+          ref={textareaRef}
+          value={value}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          onBlur={(e) => {
+            setTimeout(() => {
+              if (!dropdownRef.current?.contains(document.activeElement)) {
+                handleBlur();
+                setMentionState(null);
+              }
+            }, 200);
+          }}
+          placeholder="Agregar notas... (usa @ para mencionar usuarios)"
+          disabled={notasGuardando[itemId]}
+          style={{
+            width: "100%",
+            minHeight: "50px",
+            padding: "6px 8px",
+            background: "rgba(255,255,255,.05)",
+            border: "1px solid rgba(255,255,255,.08)",
+            borderRadius: 6,
+            color: "rgba(234,243,255,.95)",
+            fontSize: 12.5,
+            fontFamily: "inherit",
+            resize: "vertical",
+            lineHeight: 1.6,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+            transition: "all 0.2s ease",
+            outline: "none",
+            textAlign: "left",
+            boxSizing: "border-box"
+          }}
+        />
+        
+        {mentionState?.show && filteredUsers.length > 0 && (
+          <div
+            ref={dropdownRef}
+            style={{
+              position: "fixed",
+              top: mentionState.position.top,
+              left: mentionState.position.left,
+              zIndex: 1000,
+              background: "linear-gradient(180deg, rgba(11,47,85,.98), rgba(7,28,46,.98))",
+              border: "1px solid rgba(255,255,255,.2)",
+              borderRadius: 12,
+              boxShadow: "0 8px 24px rgba(0,0,0,.5)",
+              backdropFilter: "blur(20px)",
+              minWidth: 280,
+              maxWidth: 320,
+              maxHeight: 300,
+              overflowY: "auto",
+            }}
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            {filteredUsers.map((user, idx) => (
+              <div
+                key={user.id}
+                onClick={() => insertarMencion(user)}
+                style={{
+                  padding: "10px 14px",
+                  cursor: "pointer",
+                  background: idx === mentionState.selectedIndex 
+                    ? "rgba(96,141,186,.3)" 
+                    : "transparent",
+                  borderLeft: idx === mentionState.selectedIndex 
+                    ? "3px solid rgba(96,141,186,.8)" 
+                    : "3px solid transparent",
+                  transition: "all 0.15s ease",
+                }}
+                onMouseEnter={() => setMentionState(prev => prev ? { ...prev, selectedIndex: idx } : null)}
+              >
+                <div style={{ 
+                  fontWeight: 600, 
+                  fontSize: 13, 
+                  color: "var(--text)",
+                  marginBottom: 2
+                }}>
+                  {user.full_name || user.email}
+                </div>
+                <div style={{ 
+                  fontSize: 11, 
+                  color: "rgba(234,243,255,.6)" 
+                }}>
+                  @{user.username}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        
+        <div style={{
+          padding: "2px 0 0 0",
+          fontSize: 9.5,
+          color: "rgba(234,243,255,.5)",
+          fontStyle: "italic",
+          textAlign: "left",
+          letterSpacing: "0.01em",
+          lineHeight: 1.3,
+          wordBreak: "break-word",
+          whiteSpace: "normal"
+        }}>
+          Autoguardado en 30 segundos, presionando Ctrl+Enter ó Tab
+        </div>
+        {notasGuardando[itemId] && (
+          <div style={{ 
+            fontSize: 9.5, 
+            color: "rgba(234,243,255,.5)", 
+            textAlign: "left",
+            fontStyle: "italic",
+            padding: "2px 0 0 0"
+          }}>
+            Guardando...
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (!trimmedValue) {
+    return (
+      <div
+        onClick={handleClick}
+        style={{
+          padding: "6px 8px",
+          background: "rgba(255,255,255,.03)",
+          borderRadius: 8,
+          border: "1px solid rgba(255,255,255,.06)",
+          lineHeight: 1.6,
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+          color: "rgba(234,243,255,.5)",
+          fontSize: 12.5,
+          letterSpacing: "0.01em",
+          cursor: "pointer",
+          transition: "all 0.2s ease",
+          textAlign: "left",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "rgba(255,255,255,.05)";
+          e.currentTarget.style.borderColor = "rgba(255,255,255,.1)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "rgba(255,255,255,.03)";
+          e.currentTarget.style.borderColor = "rgba(255,255,255,.06)";
+        }}
+      >
+        Agregar notas... (usa @ para mencionar)
+      </div>
+    );
+  }
+
+  return (
+    <div
+      onClick={handleClick}
+      style={{
+        padding: "6px 8px",
+        background: "rgba(255,255,255,.03)",
+        borderRadius: 8,
+        border: "1px solid rgba(255,255,255,.06)",
+        lineHeight: 1.6,
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-word",
+        color: "rgba(234,243,255,.9)",
+        fontSize: 12.5,
+        letterSpacing: "0.01em",
+        cursor: "pointer",
+        transition: "all 0.2s ease",
+        textAlign: "left",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = "rgba(255,255,255,.05)";
+        e.currentTarget.style.borderColor = "rgba(255,255,255,.1)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "rgba(255,255,255,.03)";
+        e.currentTarget.style.borderColor = "rgba(255,255,255,.06)";
+      }}
+    >
+      {trimmedValue}
+    </div>
+  );
+}
+
 export default function MisCedulasPage() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
@@ -103,6 +681,8 @@ export default function MisCedulasPage() {
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [semaforoFilter, setSemaforoFilter] = useState<Semaforo | null>(null);
   const [currentUserName, setCurrentUserName] = useState<string>("");
+  const [notasEditables, setNotasEditables] = useState<Record<string, string>>({});
+  const [notasGuardando, setNotasGuardando] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     (async () => {
@@ -164,17 +744,17 @@ export default function MisCedulasPage() {
       }
 
       // listar cédulas del usuario
-      // Intentar incluir tipo_documento, pero si no existe la columna, usar select sin ella
+      // Intentar incluir tipo_documento y notas, pero si no existen las columnas, usar select sin ellas
       let query = supabase
         .from("cedulas")
-        .select("id, owner_user_id, caratula, juzgado, fecha_carga, pdf_path, tipo_documento")
+        .select("id, owner_user_id, caratula, juzgado, fecha_carga, pdf_path, tipo_documento, notas")
         .eq("owner_user_id", uid)
         .order("fecha_carga", { ascending: false });
       
       const { data: cs, error: cErr } = await query;
       
-      // Si el error es porque la columna no existe, intentar sin tipo_documento
-      if (cErr && cErr.message?.includes("tipo_documento")) {
+      // Si el error es porque alguna columna no existe, intentar sin ellas
+      if (cErr && (cErr.message?.includes("tipo_documento") || cErr.message?.includes("notas"))) {
         const { data: cs2, error: cErr2 } = await supabase
           .from("cedulas")
           .select("id, owner_user_id, caratula, juzgado, fecha_carga, pdf_path")
@@ -186,8 +766,8 @@ export default function MisCedulasPage() {
           setLoading(false);
           return;
         }
-        // Agregar tipo_documento como null para cada registro
-        const csWithNull = (cs2 ?? []).map((c: any) => ({ ...c, tipo_documento: null }));
+        // Agregar tipo_documento y notas como null para cada registro
+        const csWithNull = (cs2 ?? []).map((c: any) => ({ ...c, tipo_documento: null, notas: null }));
         setCedulas(csWithNull as Cedula[]);
         setLoading(false);
         return;
@@ -200,6 +780,18 @@ export default function MisCedulasPage() {
       }
 
       setCedulas((cs ?? []) as Cedula[]);
+      
+      // Inicializar notas editables
+      setNotasEditables(prev => {
+        const merged = { ...prev };
+        (cs ?? []).forEach((c: any) => {
+          if (c.notas && !(c.id in merged)) {
+            merged[c.id] = c.notas;
+          }
+        });
+        return merged;
+      });
+      
       setLoading(false);
     })();
   }, []);
@@ -383,6 +975,9 @@ export default function MisCedulasPage() {
               </span>
             </div>
           )}
+          <Link className="btn" href="/app/notificaciones" style={{ marginRight: 8 }}>
+            📬 Bandeja
+          </Link>
           <Link className="btn primary" href="/app/nueva">
             Nueva
           </Link>
@@ -533,6 +1128,7 @@ export default function MisCedulasPage() {
                     </span>
                   </th>
                   <th style={{ width: 170, textAlign: "right" }}>Cédula/Oficio</th>
+                  <th style={{ width: 250, minWidth: 200 }}>Notas</th>
                 </tr>
               </thead>
 
@@ -579,12 +1175,26 @@ export default function MisCedulasPage() {
                         <span className="muted">Sin archivo</span>
                       )}
                     </td>
+                    
+                    <td>
+                      <NotasTextareaCedula
+                        itemId={c.id}
+                        initialValue={c.notas || ""}
+                        notasEditables={notasEditables}
+                        setNotasEditables={setNotasEditables}
+                        notasGuardando={notasGuardando}
+                        setNotasGuardando={setNotasGuardando}
+                        setMsg={setMsg}
+                        caratula={c.caratula}
+                        juzgado={c.juzgado}
+                      />
+                    </td>
                   </tr>
                 ))}
 
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="muted">
+                    <td colSpan={7} className="muted">
                       Todavía no cargaste cédulas/oficios.
                     </td>
                   </tr>

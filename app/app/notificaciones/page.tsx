@@ -302,20 +302,59 @@ export default function NotificacionesPage() {
 
     // Si no hay expediente_id, intentar extraerlo del link o body
     if (!expedienteId && notif.link) {
-      // El link tiene formato: /superadmin/mis-juzgados#pjn_123 o /superadmin/mis-juzgados#123
-      const hashMatch = notif.link.match(/#(pjn_)?([a-f0-9-]+)$/i);
-      if (hashMatch) {
-        expedienteId = hashMatch[1] ? hashMatch[0].substring(1) : hashMatch[2];
-        isPjn = !!hashMatch[1];
+      // El link puede tener formato:
+      // - /superadmin/mis-juzgados#pjn_123 (PJN favorito)
+      // - /superadmin/mis-juzgados#123 (expediente)
+      // - /app#cedula_id (cédula/oficio)
+      if (notif.link.startsWith("/app#")) {
+        // Es una cédula
+        const hashMatch = notif.link.match(/#([a-f0-9-]+)$/i);
+        if (hashMatch) {
+          expedienteId = hashMatch[1];
+          isPjn = false;
+        }
+      } else {
+        // Es un expediente o PJN favorito
+        const hashMatch = notif.link.match(/#(pjn_)?([a-f0-9-]+)$/i);
+        if (hashMatch) {
+          expedienteId = hashMatch[1] ? hashMatch[0].substring(1) : hashMatch[2];
+          isPjn = !!hashMatch[1];
+        }
       }
     }
 
     // Si aún no hay expediente_id, intentar extraer del body (buscar carátula mencionada)
     if (!expedienteId && notif.body) {
-      const caratulaMatch = notif.body.match(/expediente\s+"([^"]+)"/i);
+      // Buscar tanto en expedientes como en cédulas
+      const caratulaMatch = notif.body.match(/(?:expediente|cedula|oficio)\s+"([^"]+)"/i);
       if (caratulaMatch) {
         const caratulaBuscada = caratulaMatch[1];
-        // Buscar expediente por carátula
+        // Primero intentar buscar en cédulas (si el body menciona "cédula/oficio")
+        if (notif.body.toLowerCase().includes("cédula") || notif.body.toLowerCase().includes("oficio")) {
+          try {
+            const { data: cedula } = await supabase
+              .from("cedulas")
+              .select("id, caratula, juzgado")
+              .ilike("caratula", `%${caratulaBuscada}%`)
+              .limit(1)
+              .single();
+            
+            if (cedula) {
+              expedienteId = cedula.id;
+              isPjn = false;
+              setExpedienteInfo({
+                caratula: cedula.caratula,
+                juzgado: cedula.juzgado,
+                numero: null,
+              });
+              return; // Ya tenemos la info
+            }
+          } catch (err) {
+            // Continuar con otros métodos
+          }
+        }
+        
+        // Si no es cédula, buscar en expedientes
         try {
           const { data: exp } = await supabase
             .from("expedientes")
@@ -340,6 +379,10 @@ export default function NotificacionesPage() {
       }
     }
 
+    // Verificar si es una cédula usando metadata PRIMERO (antes de buscar en expedientes)
+    const metadata = notif.metadata || {};
+    const isCedula = metadata.cedula_id || (notif.link && notif.link.startsWith("/app#"));
+    
     // Si tenemos expediente_id, obtener la información
     if (expedienteId) {
       try {
@@ -357,8 +400,27 @@ export default function NotificacionesPage() {
               juzgado: pjnFav.juzgado,
               numero: pjnFav.numero,
             });
+            return; // Ya tenemos la info
+          }
+        } else if (isCedula || metadata.cedula_id) {
+          // Es una cédula/oficio, buscar en la tabla cedulas
+          const cedulaId = metadata.cedula_id || expedienteId;
+          const { data: cedula } = await supabase
+            .from("cedulas")
+            .select("caratula, juzgado")
+            .eq("id", cedulaId)
+            .single();
+          
+          if (cedula) {
+            setExpedienteInfo({
+              caratula: cedula.caratula,
+              juzgado: cedula.juzgado,
+              numero: null, // Las cédulas no tienen número de expediente
+            });
+            return; // Ya tenemos la info
           }
         } else {
+          // Es un expediente local - SOLO buscar aquí si NO es cédula
           const { data: exp } = await supabase
             .from("expedientes")
             .select("caratula, juzgado, numero_expediente")
@@ -371,11 +433,27 @@ export default function NotificacionesPage() {
               juzgado: exp.juzgado,
               numero: exp.numero_expediente,
             });
+            return; // Ya tenemos la info
           }
         }
       } catch (err) {
-        console.error("Error al obtener información del expediente:", err);
+        console.error("Error al obtener información del expediente/cédula:", err);
+        // Si falla la búsqueda, intentar usar metadata como fallback
+        if (metadata.caratula || metadata.juzgado) {
+          setExpedienteInfo({
+            caratula: metadata.caratula || null,
+            juzgado: metadata.juzgado || null,
+            numero: metadata.numero || null,
+          });
+        }
       }
+    } else if (metadata.caratula || metadata.juzgado) {
+      // Si no hay expediente_id pero hay metadata, usar la metadata directamente
+      setExpedienteInfo({
+        caratula: metadata.caratula || null,
+        juzgado: metadata.juzgado || null,
+        numero: metadata.numero || null,
+      });
     }
   }
 
@@ -384,8 +462,33 @@ export default function NotificacionesPage() {
     
     setReplying(true);
     try {
-      const { data: session } = await supabase.auth.getSession();
-      if (!session.session) return;
+      const { data: session, error: sessionError } = await supabase.auth.getSession();
+      if (!session.session) {
+        console.error("No hay sesión activa:", sessionError);
+        setToast({
+          type: "error",
+          message: "No hay sesión activa. Por favor, recarga la página."
+        });
+        setReplying(false);
+        return;
+      }
+
+      // Verificar si el token está expirado y refrescarlo si es necesario
+      const now = Math.floor(Date.now() / 1000);
+      if (session.session.expires_at && session.session.expires_at < now + 60) {
+        // El token expira en menos de 1 minuto, refrescarlo
+        const { data: refreshedSession, error: refreshError } = await supabase.auth.refreshSession();
+        if (refreshError || !refreshedSession.session) {
+          console.error("Error al refrescar sesión:", refreshError);
+          setToast({
+            type: "error",
+            message: "Error de autenticación. Por favor, recarga la página."
+          });
+          setReplying(false);
+          return;
+        }
+        session.session = refreshedSession.session;
+      }
 
       const res = await fetch("/api/notifications/reply", {
         method: "POST",
@@ -435,9 +538,22 @@ export default function NotificacionesPage() {
           }
           setSelectedNotif(null);
         } else {
-          const error = await res.json();
-          const errorMsg = error.error || "Error desconocido";
-          const suggestion = error.suggestion || "";
+          let errorMsg = "Error desconocido";
+          let suggestion = "";
+          
+          if (res.status === 401) {
+            errorMsg = "Error de autenticación. Por favor, recarga la página e intenta nuevamente.";
+            suggestion = "Si el problema persiste, cierra sesión y vuelve a iniciar sesión.";
+          } else {
+            try {
+              const error = await res.json();
+              errorMsg = error.error || `Error ${res.status}: ${res.statusText}`;
+              suggestion = error.suggestion || "";
+            } catch (e) {
+              errorMsg = `Error ${res.status}: ${res.statusText}`;
+            }
+          }
+          
           setToast({
             type: "error",
             message: errorMsg,
