@@ -200,7 +200,9 @@ function NotasTextareaCedula({
 
   // Detectar menciones y crear notificaciones
   const detectarYNotificarMenciones = React.useCallback(async (texto: string, currentUserId: string) => {
-    const mentionRegex = /@(\w+)/g;
+    // Regex mejorado: captura @username donde username puede tener letras, números, puntos, guiones y guiones bajos
+    // Ejemplos válidos: @victoria.estudiohisi, @juan.perez, @user_123, @test-user
+    const mentionRegex = /@([\w.-]+)/g;
     const matches = [...texto.matchAll(mentionRegex)];
     const mentionedUsernames = [...new Set(matches.map(m => m[1].toLowerCase()))];
     
