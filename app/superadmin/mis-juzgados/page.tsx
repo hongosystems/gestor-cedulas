@@ -2740,6 +2740,11 @@ export default function MisJuzgadosPage() {
                     <option value="mis_juzgados" style={{ background: "rgba(11,47,85,1)", color: "rgba(234,243,255,.95)" }}>
                       Mis Juzgados ({userJuzgados.length})
                     </option>
+                    {isAbogado && (
+                      <option value="todos" style={{ background: "rgba(11,47,85,1)", color: "rgba(234,243,255,.95)" }}>
+                        TODOS LOS JUZGADOS
+                      </option>
+                    )}
                     <option value="beneficio" style={{ background: "rgba(11,47,85,1)", color: "rgba(234,243,255,.95)" }}>
                       Beneficio
                     </option>
