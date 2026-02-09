@@ -22,6 +22,8 @@ type Notif = {
     numero?: string | null;
     expediente_id?: string;
     is_pjn_favorito?: boolean;
+    cedula_id?: string;
+    sender_id?: string;
   } | null;
 };
 

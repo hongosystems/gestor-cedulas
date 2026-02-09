@@ -56,13 +56,13 @@ function formatDate(dateStr: string | null | undefined): string | null {
     const mes = String(date.getMonth() + 1).padStart(2, '0');
     const anio = date.getFullYear();
     return `${dia}/${mes}/${anio}`;
-  } catch (e) {
+  } catch {
     return null;
   }
 }
 
 // Función para extraer observaciones de movimientos
-function extractObservaciones(movimientos: any): string | null {
+function extractObservaciones(movimientos: unknown): string | null {
   if (!movimientos) return null;
   
   try {
@@ -247,7 +247,7 @@ async function performSync(req: NextRequest) {
             fechaUltimaCarga = formatDate(date.toISOString());
             updatedAt = date.toISOString();
           }
-        } catch (e) {
+        } catch {
           // Fecha inválida, usar valores por defecto
         }
       }
@@ -270,7 +270,6 @@ async function performSync(req: NextRequest) {
     console.log(`[sync-favoritos] ${favoritosToUpsert.length} casos válidos para sincronizar`);
 
     // 3. Upsert en pjn_favoritos (insertar o actualizar)
-    let inserted = 0;
     let updated = 0;
     const batchSize = 100;
 

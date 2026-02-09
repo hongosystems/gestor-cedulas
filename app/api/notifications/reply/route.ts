@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
     // Obtener la notificación padre para obtener el thread_id y metadata
     const { data: parentNotif, error: parentError } = await svc
       .from("notifications")
-      .select("id, user_id, thread_id, expediente_id, is_pjn_favorito, metadata, title")
+      .select("id, user_id, thread_id, expediente_id, is_pjn_favorito, metadata, title, link")
       .eq("id", parent_notification_id)
       .single();
 
