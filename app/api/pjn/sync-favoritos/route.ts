@@ -112,14 +112,9 @@ function extractObservaciones(movimientos: any): string | null {
 }
 
 /**
- * Endpoint para sincronizar casos de pjn-scraper (cases) a pjn_favoritos
- * 
- * Este endpoint:
- * 1. Lee todos los casos de la tabla "cases" en pjn-scraper
- * 2. Los sincroniza a pjn_favoritos (inserta/actualiza)
- * 3. Elimina de pjn_favoritos los expedientes que ya no están en cases (fueron removidos)
+ * Función principal de sincronización (compartida entre GET y POST)
  */
-export async function POST(req: NextRequest) {
+async function performSync(req: NextRequest) {
   try {
     // Verificar autenticación opcional (secret para cron jobs)
     const syncSecret = process.env.PJN_SYNC_SECRET;
@@ -396,6 +391,41 @@ export async function POST(req: NextRequest) {
 
     console.log(`[sync-favoritos] ${deleted} expedientes eliminados`);
 
+    // 5. Actualizar metadata de última sincronización
+    try {
+      const fixedId = '00000000-0000-0000-0000-000000000001';
+      const syncTimestamp = new Date().toISOString();
+      console.log("[sync-favoritos] Intentando actualizar metadata con timestamp:", syncTimestamp);
+      
+      const { data: metadataData, error: metadataErr } = await mainSupabase
+        .from("pjn_sync_metadata")
+        .upsert(
+          { id: fixedId, last_sync_at: syncTimestamp },
+          { onConflict: "id" }
+        )
+        .select("last_sync_at");
+
+      if (metadataErr) {
+        console.error("[sync-favoritos] ❌ Error al actualizar metadata:", metadataErr);
+        const errDetails = metadataErr as { code?: string; details?: string; message?: string };
+        console.error("[sync-favoritos] Error code:", errDetails.code);
+        console.error("[sync-favoritos] Error message:", metadataErr.message);
+        console.error("[sync-favoritos] Error details:", errDetails.details);
+        
+        // Si la tabla no existe, sugerir ejecutar la migración
+        if (metadataErr.code === 'PGRST116' || metadataErr.message?.includes('does not exist')) {
+          console.error("[sync-favoritos] ⚠️  La tabla pjn_sync_metadata no existe. Ejecuta la migración SQL: migrations/create_pjn_sync_metadata_table.sql");
+        }
+      } else {
+        console.log("[sync-favoritos] ✅ Metadata de sincronización actualizada exitosamente");
+        console.log("[sync-favoritos] Datos guardados:", metadataData);
+      }
+    } catch (metadataError) {
+      console.error("[sync-favoritos] ❌ Error inesperado al actualizar metadata:", metadataError);
+      const err = metadataError as { stack?: string };
+      console.error("[sync-favoritos] Error stack:", err?.stack);
+    }
+
     return NextResponse.json({
       success: true,
       message: "Sincronización completada",
@@ -407,11 +437,29 @@ export async function POST(req: NextRequest) {
       totalFavoritos: favoritosToUpsert.length
     });
 
-  } catch (error: any) {
+  } catch (error) {
     console.error("[sync-favoritos] Error inesperado:", error);
+    const err = error as { message?: string };
     return NextResponse.json(
-      { error: "Error interno del servidor", details: error.message },
+      { error: "Error interno del servidor", details: err?.message || "Error desconocido" },
       { status: 500 }
     );
   }
+}
+
+/**
+ * Endpoint GET para sincronización (usado por Vercel Cron)
+ * Vercel cron jobs hacen GET requests por defecto
+ */
+export async function GET(req: NextRequest) {
+  console.log("[sync-favoritos] GET request recibido (probablemente desde Vercel Cron)");
+  return performSync(req);
+}
+
+/**
+ * Endpoint POST para sincronización (usado para llamadas manuales)
+ */
+export async function POST(req: NextRequest) {
+  console.log("[sync-favoritos] POST request recibido");
+  return performSync(req);
 }

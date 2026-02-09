@@ -958,6 +958,7 @@ export default function MisJuzgadosPage() {
   const itemsPerPage = 15;
   const [currentUserName, setCurrentUserName] = useState<string>("");
   const [searchTerm, setSearchTerm] = useState<string>("");
+  const [lastSyncDate, setLastSyncDate] = useState<string | null>(null);
 
   const loadData = async () => {
     try {
@@ -1914,6 +1915,47 @@ export default function MisJuzgadosPage() {
         setCedulas([]);
       }
 
+      // Cargar fecha de última sincronización con PJN
+      try {
+        // Intentar primero sin filtro por ID (puede haber problemas con el formato UUID)
+        let { data: syncMetadata, error: syncErr } = await supabase
+          .from("pjn_sync_metadata")
+          .select("last_sync_at")
+          .limit(1)
+          .maybeSingle();
+
+        // Si falla, intentar con el ID fijo
+        if (syncErr || !syncMetadata) {
+          const fixedId = '00000000-0000-0000-0000-000000000001';
+          const result = await supabase
+            .from("pjn_sync_metadata")
+            .select("last_sync_at")
+            .eq("id", fixedId)
+            .maybeSingle();
+          
+          syncMetadata = result.data;
+          syncErr = result.error;
+        }
+
+        if (syncErr) {
+          console.warn("[Mis Juzgados] Error al cargar fecha de sincronización:", syncErr);
+          console.warn("[Mis Juzgados] Error code:", (syncErr as { code?: string }).code);
+          console.warn("[Mis Juzgados] Error message:", syncErr.message);
+          // Si la tabla no existe, no es crítico, solo no mostramos la fecha
+          if ((syncErr as { code?: string }).code === 'PGRST116' || syncErr.message?.includes('does not exist')) {
+            console.log("[Mis Juzgados] Tabla pjn_sync_metadata no existe aún. Ejecuta la migración SQL.");
+          }
+        } else if (syncMetadata?.last_sync_at) {
+          console.log("[Mis Juzgados] ✅ Fecha de sincronización cargada:", syncMetadata.last_sync_at);
+          setLastSyncDate(syncMetadata.last_sync_at);
+        } else {
+          console.log("[Mis Juzgados] ⚠️  No hay fecha de sincronización disponible aún.");
+          console.log("[Mis Juzgados] syncMetadata:", syncMetadata);
+        }
+      } catch (syncError) {
+        console.error("[Mis Juzgados] ❌ Error inesperado al cargar fecha de sincronización:", syncError);
+      }
+
       setLoading(false);
     } catch (err) {
       console.error("Error loading data:", err);
@@ -2375,13 +2417,68 @@ export default function MisJuzgadosPage() {
               </div>
             )}
 
-            <div>
-              <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "var(--text)", letterSpacing: "0.2px" }}>
-                Mis Juzgados
-              </h1>
-              <p style={{ margin: "4px 0 0 0", fontSize: 13, color: "rgba(234,243,255,.65)", fontWeight: 400 }}>
-                Expedientes, cédulas y oficios de mis juzgados asignados
-              </p>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flex: 1, gap: 16, minWidth: 0 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "var(--text)", letterSpacing: "0.2px" }}>
+                  Mis Juzgados
+                </h1>
+                <p style={{ margin: "4px 0 0 0", fontSize: 13, color: "rgba(234,243,255,.65)", fontWeight: 400 }}>
+                  Expedientes, cédulas y oficios de mis juzgados asignados
+                </p>
+              </div>
+              {lastSyncDate && (
+                <div style={{ 
+                  display: "flex", 
+                  flexDirection: "column", 
+                  alignItems: "flex-end",
+                  padding: "8px 14px",
+                  background: "rgba(96,141,186,.12)",
+                  border: "1px solid rgba(96,141,186,.25)",
+                  borderRadius: 8,
+                  flexShrink: 0,
+                  minWidth: 200
+                }}>
+                  <span style={{ 
+                    fontSize: 11, 
+                    color: "rgba(234,243,255,.7)", 
+                    fontWeight: 500,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.5px",
+                    marginBottom: 4,
+                    whiteSpace: "nowrap"
+                  }}>
+                    Última Actualización con PJN
+                  </span>
+                  <span style={{ 
+                    fontSize: 13, 
+                    color: "rgba(234,243,255,.95)", 
+                    fontWeight: 600,
+                    fontFamily: "monospace",
+                    whiteSpace: "nowrap"
+                  }}>
+                    {(() => {
+                      try {
+                        if (!lastSyncDate) return "N/A";
+                        const date = new Date(lastSyncDate);
+                        if (isNaN(date.getTime())) {
+                          console.warn("[Mis Juzgados] Fecha inválida:", lastSyncDate);
+                          return "N/A";
+                        }
+                        // Convertir a hora local de Argentina (UTC-3)
+                        const day = String(date.getDate()).padStart(2, '0');
+                        const month = String(date.getMonth() + 1).padStart(2, '0');
+                        const year = String(date.getFullYear()).slice(-2);
+                        const hours = String(date.getHours()).padStart(2, '0');
+                        const minutes = String(date.getMinutes()).padStart(2, '0');
+                        return `${day}/${month}/${year} ${hours}:${minutes}`;
+                      } catch (err) {
+                        console.error("[Mis Juzgados] Error al formatear fecha:", err, "lastSyncDate:", lastSyncDate);
+                        return "N/A";
+                      }
+                    })()}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>

@@ -370,6 +370,25 @@ async function syncFavoritos() {
       console.log('   ✅ No hay expedientes para eliminar');
     }
 
+    // 5. Actualizar metadata de última sincronización
+    try {
+      const fixedId = '00000000-0000-0000-0000-000000000001';
+      const { error: metadataErr } = await mainSupabase
+        .from("pjn_sync_metadata")
+        .upsert(
+          { id: fixedId, last_sync_at: new Date().toISOString() },
+          { onConflict: "id" }
+        );
+
+      if (metadataErr) {
+        console.warn('⚠️  No se pudo actualizar metadata (puede que la tabla no exista aún):', metadataErr.message);
+      } else {
+        console.log('✅ Metadata de sincronización actualizada');
+      }
+    } catch (metadataError) {
+      console.warn('⚠️  Error al actualizar metadata:', metadataError.message);
+    }
+
     console.log('\n' + '='.repeat(50));
     console.log('📊 Resumen de sincronización:');
     console.log(`   ✅ Sincronizados: ${updated} casos`);
