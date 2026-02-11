@@ -24,6 +24,9 @@ type Notif = {
     is_pjn_favorito?: boolean;
     cedula_id?: string;
     sender_id?: string;
+    transfer_id?: string;
+    doc_type?: "CEDULA" | "OFICIO";
+    title?: string | null;
   } | null;
 };
 
