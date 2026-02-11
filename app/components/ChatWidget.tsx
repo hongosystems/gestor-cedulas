@@ -273,6 +273,8 @@ export default function ChatWidget() {
   useEffect(() => {
     if (!selectedConversation) return;
 
+    console.log("[ChatWidget] Suscribiéndose a mensajes de conversación:", selectedConversation);
+
     const channel = supabase
       .channel(`messages:${selectedConversation}`)
       .on(
@@ -284,31 +286,35 @@ export default function ChatWidget() {
           filter: `conversation_id=eq.${selectedConversation}`,
         },
         async (payload) => {
-          // Obtener el mensaje completo con datos del sender
-          const { data: session, error: sessionError } = await supabase.auth.getSession();
-          if (sessionError) {
-            await handleAuthError(sessionError);
+          console.log("[ChatWidget] Nuevo mensaje recibido via Realtime:", payload);
+          
+          const newMessage = payload.new as any;
+          if (!newMessage || newMessage.id === undefined) {
+            console.warn("[ChatWidget] Payload de mensaje inválido:", payload);
             return;
           }
-          if (!session?.session) return;
 
-          const res = await fetch(
-            `/api/chat/messages/${selectedConversation}`,
-            {
-              headers: {
-                Authorization: `Bearer ${session.session.access_token}`,
-              },
+          // Verificar si el mensaje ya existe en el estado (evitar duplicados)
+          setMessages((prevMessages) => {
+            const exists = prevMessages.some(msg => msg.id === newMessage.id);
+            if (exists) {
+              console.log("[ChatWidget] Mensaje ya existe en el estado, ignorando:", newMessage.id);
+              return prevMessages;
             }
-          );
-          
-          if (res.status === 401) {
-            await handleAuthError({ message: "Unauthorized" });
-            return;
-          }
-          
-          if (res.ok) {
-            const data = await res.json();
-            setMessages(data.data || []);
+
+            // Mientras tanto, agregar mensaje básico para feedback inmediato
+            const tempMessage: Message = {
+              id: newMessage.id,
+              conversation_id: newMessage.conversation_id,
+              sender_id: newMessage.sender_id,
+              content: newMessage.content,
+              created_at: newMessage.created_at,
+            };
+
+            const updatedMessages = [...prevMessages, tempMessage].sort((a, b) => 
+              new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+            );
+
             // Auto-scroll solo si el usuario está cerca del final
             setTimeout(() => {
               if (messagesContainerRef.current) {
@@ -320,19 +326,30 @@ export default function ChatWidget() {
               } else {
                 scrollToBottom(true);
               }
-            }, 100);
-          }
+            }, 50);
+
+            return updatedMessages;
+          });
+
+          // Recargar mensajes para obtener el sender completo (en background)
+          // Esto asegura que el mensaje tenga todos los datos necesarios
+          setTimeout(() => {
+            loadMessages(selectedConversation).catch(console.error);
+          }, 100);
 
           // Actualizar conversaciones para reflejar el nuevo mensaje
           loadData().catch(console.error);
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log("[ChatWidget] Estado de suscripción a mensajes:", status);
+      });
 
     return () => {
+      console.log("[ChatWidget] Desuscribiéndose de mensajes de conversación:", selectedConversation);
       supabase.removeChannel(channel);
     };
-  }, [selectedConversation, handleAuthError, loadData, loadMessages]);
+  }, [selectedConversation, handleAuthError, loadData, isScrolledUp]);
 
   // Suscribirse a actualizaciones de conversaciones, participantes y mensajes globales
   useEffect(() => {
@@ -374,10 +391,9 @@ export default function ChatWidget() {
           // Recargar conversaciones para actualizar el último mensaje y contador de no leídos
           loadData().catch(console.error);
           
-          // Si el mensaje es de la conversación actual, también recargar mensajes
-          if (selectedConversation && payload.new?.conversation_id === selectedConversation) {
-            loadMessages(selectedConversation).catch(console.error);
-          }
+          // NO recargar mensajes aquí si es de la conversación actual
+          // La suscripción específica ya se encarga de eso
+          // Esto evita duplicados y conflictos
         }
       )
       .subscribe((status) => {
