@@ -11,6 +11,7 @@ type Cedula = {
   caratula: string | null;
   juzgado: string | null;
   fecha_carga: string | null;
+  fecha_vencimiento: string | null;
   estado: string;
   tipo_documento: "CEDULA" | "OFICIO" | null;
   created_by_user_id?: string | null;
@@ -97,13 +98,34 @@ function getDateRange(filter: TimeFilter, customStart?: string, customEnd?: stri
   }
 }
 
-// Convertir fecha DD/MM/AAAA a ISO (YYYY-MM-DD)
-function ddmmaaaaToISO(ddmm: string | null): string | null {
-  if (!ddmm || ddmm.trim() === "") return null;
-  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(ddmm.trim());
-  if (!m) return null;
-  const [, dia, mes, anio] = m;
-  return `${anio}-${mes}-${dia}T00:00:00.000Z`;
+// Convertir fecha a ISO (YYYY-MM-DD)
+// Maneja múltiples formatos:
+// - DD/MM/AAAA (formato esperado)
+// - YYYY-MM-DD (formato actual en BD)
+// - AAAA-MM-DD (variante)
+function ddmmaaaaToISO(fecha: string | null): string | null {
+  if (!fecha || fecha.trim() === "") return null;
+  
+  const fechaTrim = fecha.trim();
+  
+  // Intentar formato DD/MM/AAAA
+  const m1 = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(fechaTrim);
+  if (m1) {
+    const [, dia, mes, anio] = m1;
+    return `${anio}-${mes}-${dia}T00:00:00.000Z`;
+  }
+  
+  // Intentar formato YYYY-MM-DD o AAAA-MM-DD (formato actual en BD)
+  const m2 = /^(\d{4})-(\d{2})-(\d{2})$/.exec(fechaTrim);
+  if (m2) {
+    const [, anio, mes, dia] = m2;
+    // Ya está en formato ISO, solo agregar la hora
+    return `${anio}-${mes}-${dia}T00:00:00.000Z`;
+  }
+  
+  // Si no coincide con ningún formato, retornar null
+  console.warn(`[Dashboard] Formato de fecha no reconocido: ${fechaTrim}`);
+  return null;
 }
 
 /**
@@ -137,6 +159,25 @@ function daysSince(fechaCargaISO: string | null) {
   
   // Retornar días efectivos (total - días de enero)
   return Math.max(0, totalDays - eneroDays);
+}
+
+/**
+ * Obtiene la fecha base para calcular el semáforo
+ * Para cédulas/oficios: usa fecha_carga
+ * Para expedientes: usa fecha_ultima_modificacion
+ */
+function getFechaBaseParaSemaforo(
+  fechaCarga: string | null | undefined,
+  fechaUltimaModificacion: string | null | undefined,
+  esExpediente: boolean = false
+): string | null {
+  // Para expedientes, usar fecha_ultima_modificacion
+  if (esExpediente) {
+    return fechaUltimaModificacion || null;
+  }
+  
+  // Para cédulas/oficios, usar fecha_carga
+  return fechaCarga || null;
 }
 
 function semaforoPorAntiguedad(diasDesdeCarga: number) {
@@ -425,18 +466,18 @@ export default function SuperAdminPage() {
       // (esto se hará en un useEffect separado después de cargar los datos)
       setProfiles(map);
 
-      // Intentar obtener con tipo_documento y created_by_user_id, pero hacer fallback si no existe la columna
+      // Intentar obtener con tipo_documento, created_by_user_id y fecha_vencimiento, pero hacer fallback si no existen las columnas
       const query = supabase
         .from("cedulas")
-        .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado, tipo_documento, created_by_user_id")
+        .select("id, owner_user_id, caratula, juzgado, fecha_carga, fecha_vencimiento, estado, tipo_documento, created_by_user_id")
         .neq("estado", "CERRADA")
         .order("fecha_carga", { ascending: true });
 
       const { data: cs, error: cErr } = await query;
 
       if (cErr) {
-        // Si falla por columna tipo_documento o created_by_user_id inexistente, reintentar sin ellas
-        if (cErr.message?.includes("tipo_documento") || cErr.message?.includes("created_by_user_id")) {
+        // Si falla por columna inexistente, reintentar sin ellas
+        if (cErr.message?.includes("tipo_documento") || cErr.message?.includes("created_by_user_id") || cErr.message?.includes("fecha_vencimiento")) {
           const { data: cs2, error: cErr2 } = await supabase
         .from("cedulas")
         .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado")
@@ -449,7 +490,7 @@ export default function SuperAdminPage() {
             return; 
           }
           
-          const csWithNull = (cs2 ?? []).map((c) => ({ ...(c as Record<string, unknown>), tipo_documento: null, created_by_user_id: null }));
+          const csWithNull = (cs2 ?? []).map((c) => ({ ...(c as Record<string, unknown>), tipo_documento: null, created_by_user_id: null, fecha_vencimiento: null }));
           setAllCedulas(csWithNull as Cedula[]);
         } else {
           setMsg(cErr.message);
@@ -472,6 +513,7 @@ export default function SuperAdminPage() {
       }
       
       // Cargar expedientes (incluyendo created_by_user_id)
+      // NOTA: No cargar fecha_vencimiento porque no existe en la tabla - se calcula desde fecha_ultima_modificacion
       const { data: exps, error: eErr } = await supabase
         .from("expedientes")
         .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado, created_by_user_id")
@@ -922,9 +964,25 @@ export default function SuperAdminPage() {
   const favoritosComoExpedientes = useMemo(() => {
     // Convertir TODOS los favoritos a expedientes, sin asignar a usuarios específicos
     // El filtrado por juzgado se hará después en el useEffect de filtrado
+    let fechasConvertidas = 0;
+    let fechasNoConvertidas = 0;
+    const fechasEjemplo: string[] = [];
+    
     const expedientesFromFavoritos: Expediente[] = pjnFavoritos.map((favorito) => {
       const numeroExpediente = `${favorito.jurisdiccion} ${favorito.numero}/${favorito.anio}`;
       const fechaISO = ddmmaaaaToISO(favorito.fecha_ultima_carga);
+      
+      if (fechaISO) {
+        fechasConvertidas++;
+        if (fechasEjemplo.length < 3) {
+          fechasEjemplo.push(`${favorito.fecha_ultima_carga} -> ${fechaISO}`);
+        }
+      } else {
+        fechasNoConvertidas++;
+        if (fechasNoConvertidas <= 3) {
+          console.warn(`[Dashboard] No se pudo convertir fecha de favorito PJN: ${favorito.fecha_ultima_carga} (ID: ${favorito.id})`);
+        }
+      }
       
       return {
         id: `pjn_${favorito.id}`, // ID único por favorito (sin duplicar por usuario)
@@ -932,14 +990,18 @@ export default function SuperAdminPage() {
         caratula: favorito.caratula,
         juzgado: favorito.juzgado,
         numero_expediente: numeroExpediente,
-        fecha_ultima_modificacion: fechaISO,
+        fecha_ultima_modificacion: fechaISO, // IMPORTANTE: Para expedientes, el semáforo se calcula desde fecha_ultima_modificacion
         estado: "ABIERTO",
         created_by_user_id: null,
         is_pjn_favorito: true,
       };
     });
     
-    console.log(`[Dashboard] Favoritos convertidos a expedientes: ${expedientesFromFavoritos.length} (de ${pjnFavoritos.length} favoritos únicos)`);
+    console.log(`[Dashboard] Favoritos convertidos a expedientes: ${expedientesFromFavoritos.length} (de ${pjnFavoritos.length} favoritos únicos)`, {
+      fechasConvertidas,
+      fechasNoConvertidas,
+      ejemplos: fechasEjemplo
+    });
     return expedientesFromFavoritos;
   }, [pjnFavoritos]);
 
@@ -1103,6 +1165,7 @@ export default function SuperAdminPage() {
     const perUser: Record<string, { rojos: number; amarillos: number; verdes: number; total: number; maxDias: number }> = {};
 
     // Contar cédulas (tipo_documento === "CEDULA" o null)
+    // IMPORTANTE: Para cédulas, el semáforo se calcula desde fecha_carga
     for (const c of cedulas) {
       // Solo contar cédulas, no oficios (los oficios se cuentan por separado)
       if (c.tipo_documento === "OFICIO") continue;
@@ -1110,7 +1173,8 @@ export default function SuperAdminPage() {
       // Ignorar cédulas sin owner_user_id válido
       if (!c.owner_user_id || c.owner_user_id.trim() === "") continue;
       
-      const dias = daysSince(c.fecha_carga);
+      const fechaBase = getFechaBaseParaSemaforo(c.fecha_carga, null, false);
+      const dias = daysSince(fechaBase);
       const s = semaforoPorAntiguedad(dias);
       const uid = c.owner_user_id;
 
@@ -1124,13 +1188,15 @@ export default function SuperAdminPage() {
     }
 
     // Contar oficios (tipo_documento === "OFICIO")
+    // IMPORTANTE: Para oficios, el semáforo se calcula desde fecha_carga
     for (const c of cedulas) {
       if (c.tipo_documento !== "OFICIO") continue;
       
       // Ignorar oficios sin owner_user_id válido
       if (!c.owner_user_id || c.owner_user_id.trim() === "") continue;
       
-      const dias = daysSince(c.fecha_carga);
+      const fechaBase = getFechaBaseParaSemaforo(c.fecha_carga, null, false);
+      const dias = daysSince(fechaBase);
       const s = semaforoPorAntiguedad(dias);
       const uid = c.owner_user_id;
 
@@ -1144,11 +1210,13 @@ export default function SuperAdminPage() {
     }
 
     // Contar expedientes (ignorar los que no tienen owner_user_id válido)
+    // IMPORTANTE: Para expedientes, el semáforo se calcula desde fecha_ultima_modificacion
     for (const e of expedientes) {
       // Ignorar expedientes sin owner_user_id (favoritos PJN sin asignar a usuario)
       if (!e.owner_user_id || e.owner_user_id.trim() === "") continue;
       
-      const dias = daysSince(e.fecha_ultima_modificacion);
+      const fechaBase = getFechaBaseParaSemaforo(null, e.fecha_ultima_modificacion, true);
+      const dias = daysSince(fechaBase);
       const s = semaforoPorAntiguedad(dias);
       const uid = e.owner_user_id;
 
@@ -1196,11 +1264,13 @@ export default function SuperAdminPage() {
     // IMPORTANTE: Usar el array filtrado (expedientes) para que el ranking refleje los filtros aplicados
     // Esto asegura que cuando se filtra por juzgado, el ranking solo muestre los expedientes filtrados
     
+    // IMPORTANTE: Para expedientes, el semáforo se calcula desde fecha_ultima_modificacion
     for (const e of expedientes) {
       // Ignorar expedientes sin owner_user_id válido
       if (!e.owner_user_id || e.owner_user_id.trim() === "") continue;
       
-      const dias = daysSince(e.fecha_ultima_modificacion);
+      const fechaBase = getFechaBaseParaSemaforo(null, e.fecha_ultima_modificacion, true);
+      const dias = daysSince(fechaBase);
       const s = semaforoPorAntiguedad(dias);
       const uid = e.owner_user_id;
 
@@ -1232,57 +1302,7 @@ export default function SuperAdminPage() {
     const totalCedulas = cedulasFiltered.length;
     const totalOficios = oficiosFiltered.length;
     
-    const totalRojas = ranking.reduce((a, r) => a + r.rojos, 0);
-    const totalAmarillas = ranking.reduce((a, r) => a + r.amarillos, 0);
-    const totalVerdes = ranking.reduce((a, r) => a + r.verdes, 0);
-    
-    // Calcular métricas por tipo de documento
-    const cedulasRojas = cedulasFiltered.filter(c => {
-      const dias = daysSince(c.fecha_carga);
-      return semaforoPorAntiguedad(dias) === "ROJO";
-    }).length;
-    const cedulasAmarillas = cedulasFiltered.filter(c => {
-      const dias = daysSince(c.fecha_carga);
-      return semaforoPorAntiguedad(dias) === "AMARILLO";
-    }).length;
-    const cedulasVerdes = cedulasFiltered.filter(c => {
-      const dias = daysSince(c.fecha_carga);
-      return semaforoPorAntiguedad(dias) === "VERDE";
-    }).length;
-    
-    const oficiosRojos = oficiosFiltered.filter(c => {
-      const dias = daysSince(c.fecha_carga);
-      return semaforoPorAntiguedad(dias) === "ROJO";
-    }).length;
-    const oficiosAmarillos = oficiosFiltered.filter(c => {
-      const dias = daysSince(c.fecha_carga);
-      return semaforoPorAntiguedad(dias) === "AMARILLO";
-    }).length;
-    const oficiosVerdes = oficiosFiltered.filter(c => {
-      const dias = daysSince(c.fecha_carga);
-      return semaforoPorAntiguedad(dias) === "VERDE";
-    }).length;
-    
-    const totalUsuarios = ranking.length;
-    const promedioPorUsuario = totalUsuarios > 0 ? (totalAbiertas / totalUsuarios).toFixed(1) : "0";
-    
-    const pctRojas = totalAbiertas > 0 ? ((totalRojas / totalAbiertas) * 100).toFixed(1) : "0";
-    const pctAmarillas = totalAbiertas > 0 ? ((totalAmarillas / totalAbiertas) * 100).toFixed(1) : "0";
-    const pctVerdes = totalAbiertas > 0 ? ((totalVerdes / totalAbiertas) * 100).toFixed(1) : "0";
-    
-    const pctCedulasRojas = totalCedulas > 0 ? ((cedulasRojas / totalCedulas) * 100).toFixed(1) : "0";
-    const pctCedulasAmarillas = totalCedulas > 0 ? ((cedulasAmarillas / totalCedulas) * 100).toFixed(1) : "0";
-    const pctCedulasVerdes = totalCedulas > 0 ? ((cedulasVerdes / totalCedulas) * 100).toFixed(1) : "0";
-    
-    const pctOficiosRojos = totalOficios > 0 ? ((oficiosRojos / totalOficios) * 100).toFixed(1) : "0";
-    const pctOficiosAmarillos = totalOficios > 0 ? ((oficiosAmarillos / totalOficios) * 100).toFixed(1) : "0";
-    const pctOficiosVerdes = totalOficios > 0 ? ((oficiosVerdes / totalOficios) * 100).toFixed(1) : "0";
-    
-    const maxDias = ranking.length > 0 ? Math.max(...ranking.map(r => r.maxDias)) : 0;
-    
-    // Métricas de expedientes
-    // IMPORTANTE: Cuando juzgadoFilter === "todos", usar todos los expedientes sin filtrar por juzgado
-    // Cuando hay un filtro de juzgado específico, usar el array filtrado (expedientes)
+    // Calcular expedientesParaContar primero (misma lógica que más abajo)
     let expedientesParaContar: Expediente[];
     
     if (juzgadoFilter === "todos") {
@@ -1313,7 +1333,17 @@ export default function SuperAdminPage() {
               }
             }
             if (tieneUsuarioAsignado) {
-              expedientesMap.set(e.id, e);
+              // Asignar al primer usuario que coincida para contar en métricas
+              for (const [userId, juzgadosDelUsuario] of Object.entries(userJuzgadosMap)) {
+                const juzgadosNormalizados = juzgadosDelUsuario.map(j => normalizarJuzgado(j));
+                const matchJuzgado = juzgadosNormalizados.some(jAsignado => {
+                  return juzgadosCoinciden(e.juzgado || "", jAsignado);
+                });
+                if (matchJuzgado) {
+                  expedientesMap.set(e.id, { ...e, owner_user_id: userId });
+                  break;
+                }
+              }
             }
           }
         }
@@ -1343,6 +1373,120 @@ export default function SuperAdminPage() {
       });
     }
     
+    // Calcular métricas generales del semáforo contando TODOS los documentos (cédulas + oficios + expedientes)
+    // Esto asegura que se cuenten todos los expedientes, no solo los filtrados
+    let totalRojas = 0;
+    let totalAmarillas = 0;
+    let totalVerdes = 0;
+    
+    // Contar cédulas (semáforo desde fecha_carga)
+    for (const c of cedulasFiltered) {
+      if (!c.owner_user_id || c.owner_user_id.trim() === "") continue;
+      const fechaBase = getFechaBaseParaSemaforo(c.fecha_carga, null, false);
+      const dias = daysSince(fechaBase);
+      const s = semaforoPorAntiguedad(dias);
+      if (s === "ROJO") totalRojas++;
+      else if (s === "AMARILLO") totalAmarillas++;
+      else totalVerdes++;
+    }
+    
+    // Contar oficios (semáforo desde fecha_carga)
+    for (const c of oficiosFiltered) {
+      if (!c.owner_user_id || c.owner_user_id.trim() === "") continue;
+      const fechaBase = getFechaBaseParaSemaforo(c.fecha_carga, null, false);
+      const dias = daysSince(fechaBase);
+      const s = semaforoPorAntiguedad(dias);
+      if (s === "ROJO") totalRojas++;
+      else if (s === "AMARILLO") totalAmarillas++;
+      else totalVerdes++;
+    }
+    
+    // Contar expedientes (usando expedientesParaContar que incluye todos cuando juzgadoFilter === "todos")
+    // IMPORTANTE: Para expedientes, el semáforo se calcula desde fecha_ultima_modificacion
+    let expedientesSinFecha = 0;
+    let expedientesConFecha = 0;
+    for (const e of expedientesParaContar) {
+      if (!e.owner_user_id || e.owner_user_id.trim() === "") continue;
+      const fechaBase = getFechaBaseParaSemaforo(null, e.fecha_ultima_modificacion, true);
+      if (!fechaBase) {
+        expedientesSinFecha++;
+        continue; // Si no hay fecha, no se puede calcular el semáforo
+      }
+      expedientesConFecha++;
+      const dias = daysSince(fechaBase);
+      const s = semaforoPorAntiguedad(dias);
+      if (s === "ROJO") totalRojas++;
+      else if (s === "AMARILLO") totalAmarillas++;
+      else totalVerdes++;
+    }
+    
+    if (expedientesSinFecha > 0) {
+      console.warn(`[Dashboard Metrics] ${expedientesSinFecha} expedientes sin fecha_ultima_modificacion (no se pueden calcular en semáforo)`);
+    }
+    
+    console.log(`[Dashboard Metrics] Expedientes contados en semáforo:`, {
+      total: expedientesParaContar.length,
+      conFecha: expedientesConFecha,
+      sinFecha: expedientesSinFecha,
+      rojos: totalRojas,
+      amarillos: totalAmarillas,
+      verdes: totalVerdes
+    });
+    
+    // Calcular métricas por tipo de documento
+    // IMPORTANTE: Cédulas y oficios usan fecha_carga para el semáforo
+    const cedulasRojas = cedulasFiltered.filter(c => {
+      const fechaBase = getFechaBaseParaSemaforo(c.fecha_carga, null, false);
+      const dias = daysSince(fechaBase);
+      return semaforoPorAntiguedad(dias) === "ROJO";
+    }).length;
+    const cedulasAmarillas = cedulasFiltered.filter(c => {
+      const fechaBase = getFechaBaseParaSemaforo(c.fecha_carga, null, false);
+      const dias = daysSince(fechaBase);
+      return semaforoPorAntiguedad(dias) === "AMARILLO";
+    }).length;
+    const cedulasVerdes = cedulasFiltered.filter(c => {
+      const fechaBase = getFechaBaseParaSemaforo(c.fecha_carga, null, false);
+      const dias = daysSince(fechaBase);
+      return semaforoPorAntiguedad(dias) === "VERDE";
+    }).length;
+    
+    const oficiosRojos = oficiosFiltered.filter(c => {
+      const fechaBase = getFechaBaseParaSemaforo(c.fecha_carga, null, false);
+      const dias = daysSince(fechaBase);
+      return semaforoPorAntiguedad(dias) === "ROJO";
+    }).length;
+    const oficiosAmarillos = oficiosFiltered.filter(c => {
+      const fechaBase = getFechaBaseParaSemaforo(c.fecha_carga, null, false);
+      const dias = daysSince(fechaBase);
+      return semaforoPorAntiguedad(dias) === "AMARILLO";
+    }).length;
+    const oficiosVerdes = oficiosFiltered.filter(c => {
+      const fechaBase = getFechaBaseParaSemaforo(c.fecha_carga, null, false);
+      const dias = daysSince(fechaBase);
+      return semaforoPorAntiguedad(dias) === "VERDE";
+    }).length;
+    
+    const totalUsuarios = ranking.length;
+    const promedioPorUsuario = totalUsuarios > 0 ? (totalAbiertas / totalUsuarios).toFixed(1) : "0";
+    
+    const pctRojas = totalAbiertas > 0 ? ((totalRojas / totalAbiertas) * 100).toFixed(1) : "0";
+    const pctAmarillas = totalAbiertas > 0 ? ((totalAmarillas / totalAbiertas) * 100).toFixed(1) : "0";
+    const pctVerdes = totalAbiertas > 0 ? ((totalVerdes / totalAbiertas) * 100).toFixed(1) : "0";
+    
+    const pctCedulasRojas = totalCedulas > 0 ? ((cedulasRojas / totalCedulas) * 100).toFixed(1) : "0";
+    const pctCedulasAmarillas = totalCedulas > 0 ? ((cedulasAmarillas / totalCedulas) * 100).toFixed(1) : "0";
+    const pctCedulasVerdes = totalCedulas > 0 ? ((cedulasVerdes / totalCedulas) * 100).toFixed(1) : "0";
+    
+    const pctOficiosRojos = totalOficios > 0 ? ((oficiosRojos / totalOficios) * 100).toFixed(1) : "0";
+    const pctOficiosAmarillos = totalOficios > 0 ? ((oficiosAmarillos / totalOficios) * 100).toFixed(1) : "0";
+    const pctOficiosVerdes = totalOficios > 0 ? ((oficiosVerdes / totalOficios) * 100).toFixed(1) : "0";
+    
+    const maxDias = ranking.length > 0 ? Math.max(...ranking.map(r => r.maxDias)) : 0;
+    
+    // Métricas de expedientes
+    // NOTA: expedientesParaContar ya fue calculado arriba para las métricas generales del semáforo
+    
     // Debug log
     console.log(`[Dashboard Metrics] Expedientes para contar: ${expedientesParaContar.length}`, {
       juzgadoFilter,
@@ -1352,17 +1496,48 @@ export default function SuperAdminPage() {
       usandoTodos: juzgadoFilter === "todos"
     });
     
+    // Debug: Contar expedientes por estado del semáforo
+    const expedientesRojosDebug = expedientesParaContar.filter(e => {
+      if (!e.owner_user_id || e.owner_user_id.trim() === "") return false;
+      const fechaBase = getFechaBaseParaSemaforo(null, e.fecha_ultima_modificacion, true);
+      const dias = daysSince(fechaBase);
+      return semaforoPorAntiguedad(dias) === "ROJO";
+    }).length;
+    const expedientesAmarillosDebug = expedientesParaContar.filter(e => {
+      if (!e.owner_user_id || e.owner_user_id.trim() === "") return false;
+      const fechaBase = getFechaBaseParaSemaforo(null, e.fecha_ultima_modificacion, true);
+      const dias = daysSince(fechaBase);
+      return semaforoPorAntiguedad(dias) === "AMARILLO";
+    }).length;
+    const expedientesVerdesDebug = expedientesParaContar.filter(e => {
+      if (!e.owner_user_id || e.owner_user_id.trim() === "") return false;
+      const fechaBase = getFechaBaseParaSemaforo(null, e.fecha_ultima_modificacion, true);
+      const dias = daysSince(fechaBase);
+      return semaforoPorAntiguedad(dias) === "VERDE";
+    }).length;
+    
+    console.log(`[Dashboard Metrics] Expedientes por semáforo:`, {
+      rojos: expedientesRojosDebug,
+      amarillos: expedientesAmarillosDebug,
+      verdes: expedientesVerdesDebug,
+      total: expedientesParaContar.length
+    });
+    
     const totalExpedientes = expedientesParaContar.length;
+    // IMPORTANTE: Expedientes usan fecha_ultima_modificacion para el semáforo
     const expedientesRojos = expedientesParaContar.filter(e => {
-      const dias = daysSince(e.fecha_ultima_modificacion);
+      const fechaBase = getFechaBaseParaSemaforo(null, e.fecha_ultima_modificacion, true);
+      const dias = daysSince(fechaBase);
       return semaforoPorAntiguedad(dias) === "ROJO";
     }).length;
     const expedientesAmarillos = expedientesParaContar.filter(e => {
-      const dias = daysSince(e.fecha_ultima_modificacion);
+      const fechaBase = getFechaBaseParaSemaforo(null, e.fecha_ultima_modificacion, true);
+      const dias = daysSince(fechaBase);
       return semaforoPorAntiguedad(dias) === "AMARILLO";
     }).length;
     const expedientesVerdes = expedientesParaContar.filter(e => {
-      const dias = daysSince(e.fecha_ultima_modificacion);
+      const fechaBase = getFechaBaseParaSemaforo(null, e.fecha_ultima_modificacion, true);
+      const dias = daysSince(fechaBase);
       return semaforoPorAntiguedad(dias) === "VERDE";
     }).length;
     
