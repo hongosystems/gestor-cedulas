@@ -49,6 +49,7 @@ type Expediente = {
   juzgado: string | null;
   numero_expediente: string | null;
   fecha_ultima_modificacion: string | null;
+  fecha_ultima_carga?: string | null; // Formato DD/MM/AAAA (solo para favoritos PJN)
   estado: string;
   observaciones: string | null;
   notas: string | null;
@@ -81,6 +82,28 @@ function normalizeJuzgado(raw: string | null): string | null {
   return stripped || null;
 }
 
+// Función para limpiar el juzgado y mostrar solo "JUZGADO CIVIL NUMERO" sin secretaría
+function limpiarJuzgadoParaMostrar(juzgado: string | null | undefined): string {
+  if (!juzgado || !juzgado.trim()) return "";
+  
+  let juzgadoLimpio = juzgado.trim();
+  
+  // Extraer número del juzgado (buscar patrón JUZGADO CIVIL seguido de número)
+  const matchCivil = /JUZGADO\s+CIVIL\s+(\d+)/i.exec(juzgadoLimpio);
+  if (matchCivil) {
+    const numero = matchCivil[1];
+    return `JUZGADO CIVIL ${numero}`;
+  }
+  
+  // Si no coincide con el patrón, intentar limpiar quitando todo desde "- SECRETARIA" en adelante
+  juzgadoLimpio = juzgadoLimpio.replace(/\s*-\s*SECRETAR[ÍI]A\s*.*$/i, "").trim();
+  
+  // Normalizar espacios múltiples
+  juzgadoLimpio = juzgadoLimpio.replace(/\s+/g, " ").trim();
+  
+  return juzgadoLimpio || "";
+}
+
 function isoToDDMMAAAA(iso: string | null): string {
   if (!iso || iso.trim() === "") return "";
   const datePart = iso.substring(0, 10);
@@ -89,13 +112,45 @@ function isoToDDMMAAAA(iso: string | null): string {
   return `${m[3]}/${m[2]}/${m[1]}`;
 }
 
+// Función para formatear fecha: si está en formato DD/MM/AAAA, devolverla tal cual
+// Si está en formato ISO (YYYY-MM-DD), convertirla a DD/MM/AAAA
+function formatFecha(fecha: string | null | undefined): string {
+  if (!fecha || fecha.trim() === "") return "";
+  
+  // Verificar si ya está en formato DD/MM/AAAA
+  const ddmmaaaaPattern = /^(\d{2})\/(\d{2})\/(\d{4})$/;
+  if (ddmmaaaaPattern.test(fecha.trim())) {
+    return fecha.trim();
+  }
+  
+  // Si está en formato ISO (YYYY-MM-DD), convertirla
+  return isoToDDMMAAAA(fecha);
+}
+
 // Convertir fecha DD/MM/AAAA a ISO (YYYY-MM-DD)
 function ddmmaaaaToISO(ddmm: string | null): string | null {
   if (!ddmm || ddmm.trim() === "") return null;
-  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(ddmm.trim());
-  if (!m) return null;
-  const [, dia, mes, anio] = m;
-  return `${anio}-${mes}-${dia}T00:00:00.000Z`;
+  
+  const fechaTrim = ddmm.trim();
+  
+  // Intentar formato DD/MM/AAAA
+  let m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(fechaTrim);
+  if (m) {
+    const [, dia, mes, anio] = m;
+    return `${anio}-${mes}-${dia}T00:00:00.000Z`;
+  }
+  
+  // Si ya está en formato ISO (YYYY-MM-DD), devolverla tal cual
+  const isoPattern = /^(\d{4})-(\d{2})-(\d{2})/;
+  if (isoPattern.test(fechaTrim)) {
+    // Asegurar que tenga el formato completo con hora
+    if (fechaTrim.length === 10) {
+      return `${fechaTrim}T00:00:00.000Z`;
+    }
+    return fechaTrim;
+  }
+  
+  return null;
 }
 
 type Semaforo = "VERDE" | "AMARILLO" | "ROJO";
@@ -1586,17 +1641,37 @@ export default function MisJuzgadosPage() {
       // Convertir favoritos a formato Expediente y combinar con expedientes locales
       const favoritosComoExpedientes: Expediente[] = favoritosFiltrados.map((f: PjnFavorito) => {
         const numeroExpediente = `${f.jurisdiccion} ${f.numero}/${f.anio}`;
+        // Convertir fecha_ultima_carga a ISO para fecha_ultima_modificacion
+        // Si la conversión falla, fecha_ultima_modificacion será null pero mantendremos fecha_ultima_carga
         const fechaISO = ddmmaaaaToISO(f.fecha_ultima_carga);
+        
+        // Debug: verificar expediente específico (manejar ceros a la izquierda)
+        const numeroSinCeros = String(f.numero).replace(/^0+/, "");
+        if ((numeroSinCeros === "35586" || f.numero === "35586") && f.anio === 2025) {
+          console.log(`[Mis Juzgados] 🔍 Expediente 35586/2025 encontrado en favoritos:`, {
+            id: f.id,
+            jurisdiccion: f.jurisdiccion,
+            numero: f.numero,
+            numeroSinCeros: numeroSinCeros,
+            anio: f.anio,
+            juzgado: f.juzgado,
+            observaciones: f.observaciones,
+            caratula: f.caratula?.substring(0, 50),
+            tieneJuzgado: !!f.juzgado,
+            tieneObservaciones: !!f.observaciones
+          });
+        }
         
         return {
           id: `pjn_${f.id}`, // Prefijo para identificar que viene de pjn
           owner_user_id: "", // Los favoritos no tienen owner
           caratula: f.caratula,
-          juzgado: f.juzgado,
+          juzgado: f.juzgado, // Asegurar que se pasa el juzgado
           numero_expediente: numeroExpediente,
-          fecha_ultima_modificacion: fechaISO,
+          fecha_ultima_modificacion: fechaISO, // ISO para cálculos, puede ser null si fecha_ultima_carga no es válida
+          fecha_ultima_carga: f.fecha_ultima_carga, // Guardar la fecha original en formato DD/MM/AAAA
           estado: "ABIERTO", // Los favoritos siempre están abiertos
-          observaciones: f.observaciones,
+          observaciones: f.observaciones, // Asegurar que se pasan las observaciones
           notas: (f as any).notas || null, // Usar notas del favorito si existe
           created_by_user_id: null,
           created_by_name: "PJN Favoritos", // Indicar que viene de favoritos
@@ -2093,21 +2168,58 @@ export default function MisJuzgadosPage() {
   const sortedItems = useMemo(() => {
     // Preparar items según el tab activo
     const itemsToShow = activeTab === "expedientes" 
-      ? expedientes.map(e => ({
-          type: "expediente" as const,
-          id: e.id,
-          caratula: e.caratula,
-          juzgado: e.juzgado,
-          fecha: e.fecha_ultima_modificacion,
-          numero: e.numero_expediente,
-          created_by: e.created_by_name,
-          created_by_user_id: e.created_by_user_id,
-          is_pjn_favorito: e.is_pjn_favorito === true,
-          observaciones: e.observaciones,
-          notas: e.notas || null,
-          dias: e.fecha_ultima_modificacion ? daysSince(e.fecha_ultima_modificacion) : null,
-          semaforo: e.fecha_ultima_modificacion ? semaforoByAge(daysSince(e.fecha_ultima_modificacion)) : "VERDE" as Semaforo,
-        }))
+      ? expedientes.map(e => {
+          // Determinar la fecha para calcular días
+          // Prioridad: 1) fecha_ultima_modificacion (ya convertida a ISO), 2) fecha_ultima_carga (convertir a ISO)
+          let fechaParaCalcularDias: string | null = null;
+          
+          // Primero intentar usar fecha_ultima_modificacion si existe y es válida
+          if (e.fecha_ultima_modificacion && e.fecha_ultima_modificacion.trim() !== "") {
+            fechaParaCalcularDias = e.fecha_ultima_modificacion;
+          } 
+          // Si no hay fecha_ultima_modificacion válida, intentar convertir fecha_ultima_carga
+          else if (e.fecha_ultima_carga && e.fecha_ultima_carga.trim() !== "") {
+            const fechaConvertida = ddmmaaaaToISO(e.fecha_ultima_carga);
+            if (fechaConvertida) {
+              fechaParaCalcularDias = fechaConvertida;
+            }
+          }
+          
+          const dias = fechaParaCalcularDias ? daysSince(fechaParaCalcularDias) : null;
+          const semaforo = dias !== null ? semaforoByAge(dias) : "VERDE" as Semaforo;
+          
+          // Debug: verificar expediente específico
+          if (e.numero_expediente && (e.numero_expediente.includes("35586/2025") || e.numero_expediente.includes("035586/2025"))) {
+            console.log(`[Mis Juzgados] 🔍 Expediente 35586/2025 en itemsToShow:`, {
+              id: e.id,
+              numero_expediente: e.numero_expediente,
+              juzgado: e.juzgado,
+              observaciones: e.observaciones,
+              is_pjn_favorito: e.is_pjn_favorito,
+              tieneJuzgado: !!e.juzgado,
+              tieneObservaciones: !!e.observaciones,
+              juzgadoLength: e.juzgado?.length || 0,
+              observacionesLength: e.observaciones?.length || 0
+            });
+          }
+          
+          return {
+            type: "expediente" as const,
+            id: e.id,
+            caratula: e.caratula,
+            juzgado: e.juzgado, // Asegurar que se pasa el juzgado original
+            fecha: e.fecha_ultima_modificacion,
+            fecha_ultima_carga: e.fecha_ultima_carga, // Para favoritos PJN, guardar fecha original
+            numero: e.numero_expediente,
+            created_by: e.created_by_name,
+            created_by_user_id: e.created_by_user_id,
+            is_pjn_favorito: e.is_pjn_favorito === true,
+            observaciones: e.observaciones, // Asegurar que se pasan las observaciones
+            notas: e.notas || null,
+            dias: dias,
+            semaforo: semaforo,
+          };
+        })
       : activeTab === "cedulas"
       ? cedulasFiltered.map(c => ({
           type: "cedula" as const,
@@ -2932,9 +3044,13 @@ export default function MisJuzgadosPage() {
                       <td style={{ fontWeight: 650 }}>
                         {item.caratula?.trim() ? item.caratula : <span className="muted">Sin carátula</span>}
                       </td>
-                      <td>{item.juzgado?.trim() ? item.juzgado : <span className="muted">—</span>}</td>
+                      <td>{item.juzgado ? limpiarJuzgadoParaMostrar(item.juzgado) : <span className="muted">—</span>}</td>
                       <td>
-                        {item.fecha ? isoToDDMMAAAA(item.fecha) : <span className="muted">—</span>}
+                        {item.fecha_ultima_carga 
+                          ? formatFecha(item.fecha_ultima_carga)
+                          : item.fecha 
+                            ? formatFecha(item.fecha) 
+                            : <span className="muted">—</span>}
                       </td>
                       <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
                         {typeof dias === "number" && !isNaN(dias) ? dias : <span className="muted">—</span>}
