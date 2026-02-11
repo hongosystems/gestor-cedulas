@@ -131,11 +131,18 @@ export async function POST(req: Request) {
     const tipoTxt = doc_type === "CEDULA" ? "Cédula" : "Oficio";
 
     // 5) Crear notificación para el destinatario
+    const notificationTitle = title ? `${tipoTxt}: ${title}` : `${tipoTxt} nueva`;
     await svc.from("notifications").insert({
       user_id: recipient_user_id,
-      title: `${tipoTxt} nueva`,
-      body: `${tipoTxt} enviada por ${senderName}.`,
+      title: notificationTitle,
+      body: `${senderName} te envió un ${tipoTxt.toLowerCase()}${title ? `: "${title}"` : ""}. Haz clic en "Descargar archivo" para obtener el documento adjunto.`,
       link: `/app/recibidos`,
+      metadata: {
+        transfer_id: transferId,
+        sender_id: user.id,
+        doc_type: doc_type,
+        title: title || null,
+      },
     });
 
     return NextResponse.json({ ok: true, transferId });

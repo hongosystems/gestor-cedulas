@@ -60,6 +60,7 @@ export default function NotificacionesPage() {
   const [backUrl, setBackUrl] = useState<string>("/app");
   const [selectedNotif, setSelectedNotif] = useState<Notif | null>(null);
   const [replyText, setReplyText] = useState<string>("");
+  const [replyFile, setReplyFile] = useState<File | null>(null);
   const [replying, setReplying] = useState(false);
   const [expedienteInfo, setExpedienteInfo] = useState<{
     caratula?: string | null;
@@ -148,11 +149,14 @@ export default function NotificacionesPage() {
               id: item.id,
               title: item.title,
               metadata: parsedMetadata,
-              metadataType: typeof item.metadata
+              metadataType: typeof item.metadata,
+              nota_context: item.nota_context,
+              nota_context_length: item.nota_context?.length || 0
             });
             return {
               ...item,
-              metadata: parsedMetadata || {}
+              metadata: parsedMetadata || {},
+              nota_context: item.nota_context || null // Asegurar que nota_context se preserve
             };
           });
           setItems(parsedData as Notif[]);
@@ -296,6 +300,7 @@ export default function NotificacionesPage() {
     }
     setSelectedNotif(notif);
     setReplyText("");
+    setReplyFile(null);
     setExpedienteInfo(null);
 
     // Intentar obtener información del expediente de varias formas
@@ -492,18 +497,42 @@ export default function NotificacionesPage() {
         session.session = refreshedSession.session;
       }
 
-      const res = await fetch("/api/notifications/reply", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      // Si hay un archivo adjunto, usar FormData; si no, usar JSON
+      let body: FormData | string;
+      let headers: HeadersInit;
+      
+      if (replyFile) {
+        const formData = new FormData();
+        formData.append("parent_notification_id", selectedNotif.id);
+        formData.append("message", replyText.trim());
+        formData.append("file", replyFile);
+        if (selectedNotif.expediente_id) {
+          formData.append("expediente_id", selectedNotif.expediente_id);
+        }
+        if (selectedNotif.is_pjn_favorito !== undefined) {
+          formData.append("is_pjn_favorito", String(selectedNotif.is_pjn_favorito));
+        }
+        body = formData;
+        headers = {
           "Authorization": `Bearer ${session.session.access_token}`,
-        },
-        body: JSON.stringify({
+        };
+      } else {
+        body = JSON.stringify({
           parent_notification_id: selectedNotif.id,
           message: replyText.trim(),
           expediente_id: selectedNotif.expediente_id,
           is_pjn_favorito: selectedNotif.is_pjn_favorito,
-        }),
+        });
+        headers = {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${session.session.access_token}`,
+        };
+      }
+
+      const res = await fetch("/api/notifications/reply", {
+        method: "POST",
+        headers,
+        body,
       });
 
         if (res.ok) {
@@ -514,10 +543,13 @@ export default function NotificacionesPage() {
           if (result.ok) {
             setToast({
               type: "success",
-              message: "Respuesta enviada correctamente. El remitente original recibirá una notificación."
+              message: replyFile 
+                ? "Respuesta y archivo enviados correctamente. El remitente original recibirá una notificación."
+                : "Respuesta enviada correctamente. El remitente original recibirá una notificación."
             });
             // Auto-ocultar después de 4 segundos
             setTimeout(() => setToast(null), 4000);
+            setReplyFile(null); // Limpiar el archivo después de enviar
           }
           
           // Recargar notificaciones
@@ -531,10 +563,28 @@ export default function NotificacionesPage() {
               .order("created_at", { ascending: false });
             if (data) {
               // Parsear metadata si viene como string JSON
-              const parsedData = data.map((item: any) => ({
-                ...item,
-                metadata: typeof item.metadata === 'string' ? JSON.parse(item.metadata) : item.metadata
-              }));
+              const parsedData = data.map((item: any) => {
+                let parsedMetadata = item.metadata;
+                if (typeof item.metadata === 'string') {
+                  try {
+                    parsedMetadata = JSON.parse(item.metadata);
+                  } catch (e) {
+                    console.error("Error parseando metadata:", e, item.metadata);
+                    parsedMetadata = {};
+                  }
+                }
+                console.log("[Notificaciones] Item recargado después de responder:", {
+                  id: item.id,
+                  title: item.title,
+                  nota_context: item.nota_context,
+                  nota_context_length: item.nota_context?.length || 0
+                });
+                return {
+                  ...item,
+                  metadata: parsedMetadata || {},
+                  nota_context: item.nota_context || null // Asegurar que nota_context se preserve
+                };
+              });
               setItems(parsedData as Notif[]);
             }
           }
@@ -988,45 +1038,134 @@ export default function NotificacionesPage() {
                   </div>
                 )}
 
-                {/* Cuerpo del email - Segunda parte: Metadata (Carátula, Juzgado, etc.) */}
-                <div style={{
-                  padding: 16,
-                  background: "rgba(96,141,186,.1)",
-                  borderRadius: 8,
-                  border: "1px solid rgba(96,141,186,.2)"
-                }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "rgba(234,243,255,.8)", marginBottom: 8 }}>
-                    Información del expediente:
+                {/* Cuerpo del email - Segunda parte: Metadata (Carátula, Juzgado, etc.) o Información de Transferencia */}
+                {selectedNotif.link === "/app/recibidos" ? (
+                  // Es una notificación de transferencia (Cédula/Oficio enviado)
+                  <div style={{
+                    padding: 16,
+                    background: "rgba(96,141,186,.1)",
+                    borderRadius: 8,
+                    border: "1px solid rgba(96,141,186,.2)"
+                  }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "rgba(234,243,255,.8)", marginBottom: 8 }}>
+                      Archivo adjunto:
+                    </div>
+                    <div style={{ fontSize: 13, color: "rgba(234,243,255,.9)", lineHeight: 1.8 }}>
+                      {selectedNotif.metadata?.transfer_id ? (
+                        <div style={{ marginBottom: 12 }}>
+                          <div style={{ marginBottom: 8 }}>
+                            <strong>Tipo:</strong> {selectedNotif.metadata.doc_type === "OFICIO" ? "Oficio" : "Cédula"}
+                          </div>
+                          {selectedNotif.title && (
+                            <div style={{ marginBottom: 8 }}>
+                              <strong>Título:</strong> {selectedNotif.title}
+                            </div>
+                          )}
+                          <button
+                            onClick={async () => {
+                              try {
+                                const { data: sess } = await supabase.auth.getSession();
+                                const token = sess.session?.access_token;
+                                if (!token) {
+                                  setToast({
+                                    type: "error",
+                                    message: "No hay sesión activa. Por favor, recarga la página."
+                                  });
+                                  return;
+                                }
+
+                                const res = await fetch("/api/transfers/sign-download", {
+                                  method: "POST",
+                                  headers: {
+                                    "Content-Type": "application/json",
+                                    "Authorization": `Bearer ${token}`,
+                                  },
+                                  body: JSON.stringify({ transferId: selectedNotif.metadata?.transfer_id }),
+                                });
+
+                                const json = await res.json().catch(() => ({}));
+                                if (!res.ok) {
+                                  setToast({
+                                    type: "error",
+                                    message: json?.error || "No se pudo descargar el archivo."
+                                  });
+                                  return;
+                                }
+
+                                if (json.url) {
+                                  window.open(json.url, "_blank");
+                                  setToast({
+                                    type: "success",
+                                    message: "Descargando archivo..."
+                                  });
+                                  setTimeout(() => setToast(null), 3000);
+                                }
+                              } catch (err) {
+                                console.error("Error al descargar:", err);
+                                setToast({
+                                  type: "error",
+                                  message: "Error al descargar el archivo."
+                                });
+                              }
+                            }}
+                            className="btn"
+                            style={{
+                              padding: "8px 16px",
+                              fontSize: 13,
+                              marginTop: 8
+                            }}
+                          >
+                            📥 Descargar archivo
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ color: "rgba(234,243,255,.5)", fontStyle: "italic" }}>
+                          No se encontró información del archivo adjunto.
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <div style={{ fontSize: 13, color: "rgba(234,243,255,.9)", lineHeight: 1.8 }}>
-                    {/* Usar metadata si existe, sino usar expedienteInfo cargado dinámicamente */}
-                    {(() => {
-                      const info = selectedNotif.metadata && Object.keys(selectedNotif.metadata).length > 0 
-                        ? selectedNotif.metadata 
-                        : expedienteInfo;
-                      
-                      return (
-                        <>
-                          {info?.caratula ? (
-                            <div style={{ marginBottom: 6 }}><strong>Carátula:</strong> {info.caratula}</div>
-                          ) : (
-                            <div style={{ marginBottom: 6, color: "rgba(234,243,255,.5)", fontStyle: "italic" }}>Sin carátula</div>
-                          )}
-                          {info?.juzgado ? (
-                            <div style={{ marginBottom: 6 }}><strong>Juzgado:</strong> {info.juzgado}</div>
-                          ) : (
-                            <div style={{ marginBottom: 6, color: "rgba(234,243,255,.5)", fontStyle: "italic" }}>Sin juzgado</div>
-                          )}
-                          {info?.numero ? (
-                            <div style={{ marginBottom: 6 }}><strong>Número:</strong> {info.numero}</div>
-                          ) : (
-                            <div style={{ marginBottom: 6, color: "rgba(234,243,255,.5)", fontStyle: "italic" }}>Sin número</div>
-                          )}
-                        </>
-                      );
-                    })()}
+                ) : (
+                  // Es una notificación de expediente/cédula normal
+                  <div style={{
+                    padding: 16,
+                    background: "rgba(96,141,186,.1)",
+                    borderRadius: 8,
+                    border: "1px solid rgba(96,141,186,.2)"
+                  }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "rgba(234,243,255,.8)", marginBottom: 8 }}>
+                      Información del expediente:
+                    </div>
+                    <div style={{ fontSize: 13, color: "rgba(234,243,255,.9)", lineHeight: 1.8 }}>
+                      {/* Usar metadata si existe, sino usar expedienteInfo cargado dinámicamente */}
+                      {(() => {
+                        const info = selectedNotif.metadata && Object.keys(selectedNotif.metadata).length > 0 
+                          ? selectedNotif.metadata 
+                          : expedienteInfo;
+                        
+                        return (
+                          <>
+                            {info?.caratula ? (
+                              <div style={{ marginBottom: 6 }}><strong>Carátula:</strong> {info.caratula}</div>
+                            ) : (
+                              <div style={{ marginBottom: 6, color: "rgba(234,243,255,.5)", fontStyle: "italic" }}>Sin carátula</div>
+                            )}
+                            {info?.juzgado ? (
+                              <div style={{ marginBottom: 6 }}><strong>Juzgado:</strong> {info.juzgado}</div>
+                            ) : (
+                              <div style={{ marginBottom: 6, color: "rgba(234,243,255,.5)", fontStyle: "italic" }}>Sin juzgado</div>
+                            )}
+                            {info?.numero ? (
+                              <div style={{ marginBottom: 6 }}><strong>Número:</strong> {info.numero}</div>
+                            ) : (
+                              <div style={{ marginBottom: 6, color: "rgba(234,243,255,.5)", fontStyle: "italic" }}>Sin número</div>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Botón de responder */}
                 <div style={{ borderTop: "1px solid rgba(255,255,255,.1)", paddingTop: 16 }}>
@@ -1051,29 +1190,70 @@ export default function NotificacionesPage() {
                     />
                   </div>
                   <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                    <button
-                      onClick={() => {
-                        setSelectedNotif(null);
-                        setReplyText("");
-                      }}
-                      className="btn"
-                      disabled={replying}
-                      style={{ padding: "8px 16px", fontSize: 13 }}
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      onClick={handleReply}
-                      className="btn"
-                      disabled={replying || !replyText.trim()}
-                      style={{ 
-                        padding: "8px 16px", 
-                        fontSize: 13,
-                        opacity: (!replyText.trim() || replying) ? 0.6 : 1
-                      }}
-                    >
-                      {replying ? "Enviando..." : "Responder"}
-                    </button>
+                    {/* Campo para adjuntar archivo (solo para notificaciones de transferencia) */}
+                    {selectedNotif.link === "/app/recibidos" && (
+                      <div style={{ marginBottom: 12 }}>
+                        <label style={{ 
+                          display: "block", 
+                          fontSize: 12, 
+                          fontWeight: 600, 
+                          color: "rgba(234,243,255,.8)", 
+                          marginBottom: 6 
+                        }}>
+                          Adjuntar archivo (.docx) - Opcional
+                        </label>
+                        <input
+                          type="file"
+                          accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                          onChange={(e) => setReplyFile(e.target.files?.[0] ?? null)}
+                          style={{
+                            width: "100%",
+                            padding: 8,
+                            background: "rgba(255,255,255,.05)",
+                            border: "1px solid rgba(255,255,255,.15)",
+                            borderRadius: 8,
+                            color: "var(--text)",
+                            fontSize: 13,
+                            fontFamily: "inherit",
+                          }}
+                        />
+                        {replyFile && (
+                          <div style={{ 
+                            marginTop: 6, 
+                            fontSize: 12, 
+                            color: "rgba(234,243,255,.7)" 
+                          }}>
+                            Archivo seleccionado: {replyFile.name}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                      <button
+                        onClick={() => {
+                          setSelectedNotif(null);
+                          setReplyText("");
+                          setReplyFile(null);
+                        }}
+                        className="btn"
+                        disabled={replying}
+                        style={{ padding: "8px 16px", fontSize: 13 }}
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        onClick={handleReply}
+                        className="btn"
+                        disabled={replying || !replyText.trim()}
+                        style={{ 
+                          padding: "8px 16px", 
+                          fontSize: 13,
+                          opacity: (!replyText.trim() || replying) ? 0.6 : 1
+                        }}
+                      >
+                        {replying ? "Enviando..." : replyFile ? "Responder con archivo" : "Responder"}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>

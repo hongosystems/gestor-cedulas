@@ -12,7 +12,16 @@ function initSupabase(): SupabaseClient {
     return createClient("https://placeholder.supabase.co", "placeholder-key");
   }
   
-  return createClient(supabaseUrl, supabaseAnonKey);
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: false,
+      storage: typeof window !== 'undefined' ? window.localStorage : undefined,
+      storageKey: 'sb-auth-token',
+      flowType: 'pkce',
+    },
+  });
 }
 
 export const supabase = new Proxy({} as SupabaseClient, {
