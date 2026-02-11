@@ -50,6 +50,9 @@ export default function ChatWidget() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [isScrolledUp, setIsScrolledUp] = useState(false);
+  const [showScrollButton, setShowScrollButton] = useState(false);
 
   // Función para manejar errores de autenticación
   const handleAuthError = useCallback(async (error: any) => {
@@ -193,11 +196,11 @@ export default function ChatWidget() {
       if (data.ok && data.data) {
         console.log("[ChatWidget] Estableciendo mensajes:", data.data.length, "mensajes");
         setMessages(data.data || []);
-        setTimeout(scrollToBottom, 100);
+        setTimeout(() => scrollToBottom(true), 100);
       } else {
         console.warn("[ChatWidget] Formato de respuesta inesperado para mensajes:", data);
         setMessages(data.data || []);
-        setTimeout(scrollToBottom, 100);
+        setTimeout(() => scrollToBottom(true), 100);
       }
     } catch (error) {
       console.error("Error loading messages:", error);
@@ -306,7 +309,18 @@ export default function ChatWidget() {
           if (res.ok) {
             const data = await res.json();
             setMessages(data.data || []);
-            scrollToBottom();
+            // Auto-scroll solo si el usuario está cerca del final
+            setTimeout(() => {
+              if (messagesContainerRef.current) {
+                const container = messagesContainerRef.current;
+                const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 200;
+                if (isNearBottom || !isScrolledUp) {
+                  scrollToBottom(true);
+                }
+              } else {
+                scrollToBottom(true);
+              }
+            }, 100);
           }
 
           // Actualizar conversaciones para reflejar el nuevo mensaje
@@ -442,6 +456,12 @@ export default function ChatWidget() {
 
       if (res.ok) {
         setNewMessage("");
+        // Resetear altura del textarea
+        if (textareaRef.current) {
+          textareaRef.current.style.height = "auto";
+        }
+        // Auto-scroll al enviar
+        setTimeout(() => scrollToBottom(true), 100);
         // El mensaje se agregará automáticamente vía Realtime
         // También recargar conversaciones para asegurar que se actualice la lista
         setTimeout(() => {
@@ -502,11 +522,78 @@ export default function ChatWidget() {
     }
   };
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  const scrollToBottom = (force: boolean = false) => {
+    if (messagesContainerRef.current) {
+      const container = messagesContainerRef.current;
+      const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 200;
+      
+      if (force || isNearBottom || !isScrolledUp) {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        setIsScrolledUp(false);
+        setShowScrollButton(false);
+      }
+    }
   };
 
-  const formatTime = (dateString: string) => {
+  // Detectar si el usuario scrolleó hacia arriba
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container || !selectedConversation) return;
+
+    const handleScroll = () => {
+      const scrollTop = container.scrollTop;
+      const scrollHeight = container.scrollHeight;
+      const clientHeight = container.clientHeight;
+      const isNearBottom = scrollHeight - scrollTop - clientHeight < 200;
+      setIsScrolledUp(!isNearBottom);
+      setShowScrollButton(!isNearBottom && scrollTop > 200);
+    };
+
+    container.addEventListener("scroll", handleScroll);
+    // Verificar estado inicial
+    handleScroll();
+    
+    return () => container.removeEventListener("scroll", handleScroll);
+  }, [selectedConversation, messages]);
+
+  // Función para obtener iniciales del nombre
+  const getInitials = (name: string | null, email: string) => {
+    if (name) {
+      const parts = name.trim().split(" ");
+      if (parts.length >= 2) {
+        return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+      }
+      return name.substring(0, 2).toUpperCase();
+    }
+    return email.substring(0, 2).toUpperCase();
+  };
+
+  // Función para formatear fecha como separador
+  const formatDateSeparator = (dateString: string) => {
+    const date = new Date(dateString);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    
+    if (date.toDateString() === today.toDateString()) {
+      return "Hoy";
+    } else if (date.toDateString() === yesterday.toDateString()) {
+      return "Ayer";
+    } else {
+      const daysDiff = Math.floor((today.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
+      if (daysDiff < 7) {
+        return date.toLocaleDateString("es-AR", { weekday: "long" });
+      }
+      return date.toLocaleDateString("es-AR", { 
+        day: "numeric", 
+        month: "long",
+        year: date.getFullYear() !== today.getFullYear() ? "numeric" : undefined
+      });
+    }
+  };
+
+  // Mejorar formatTime para mostrar hora exacta cuando es hoy
+  const formatTime = (dateString: string, forList: boolean = false) => {
     const date = new Date(dateString);
     const now = new Date();
     const diff = now.getTime() - date.getTime();
@@ -514,11 +601,38 @@ export default function ChatWidget() {
     const hours = Math.floor(diff / 3600000);
     const days = Math.floor(diff / 86400000);
 
+    // Para la lista de conversaciones, mostrar hora si es hoy
+    if (forList) {
+      if (days === 0 && hours < 24) {
+        return date.toLocaleTimeString("es-AR", { 
+          hour: "2-digit", 
+          minute: "2-digit" 
+        });
+      }
+      if (days === 1) return "Ayer";
+      if (days < 7) return `Hace ${days}d`;
+      return date.toLocaleDateString("es-AR", {
+        day: "2-digit",
+        month: "2-digit"
+      });
+    }
+
+    // Para mensajes en el chat
+    if (days === 0 && hours < 24) {
+      return date.toLocaleTimeString("es-AR", { 
+        hour: "2-digit", 
+        minute: "2-digit" 
+      });
+    }
+    
     if (minutes < 1) return "Ahora";
     if (minutes < 60) return `Hace ${minutes}m`;
     if (hours < 24) return `Hace ${hours}h`;
     if (days < 7) return `Hace ${days}d`;
-    return date.toLocaleDateString("es-AR");
+    return date.toLocaleDateString("es-AR", {
+      day: "2-digit",
+      month: "2-digit"
+    });
   };
 
 
@@ -577,25 +691,27 @@ export default function ChatWidget() {
 
       {isOpen && (
         <div className={styles.chatPanel}>
-          <div className={styles.chatHeader}>
-            <h3>Chat</h3>
-            <div className={styles.chatActions}>
-              <button
-                className={styles.newChatButton}
-                onClick={() => setShowUserList(!showUserList)}
-                title="Nueva conversación"
-              >
-                +
-              </button>
-              <button
-                className={styles.closeButton}
-                onClick={() => setIsOpen(false)}
-                aria-label="Cerrar chat"
-              >
-                ×
-              </button>
+          {!selectedConversation && (
+            <div className={styles.chatHeader}>
+              <h3>Chat</h3>
+              <div className={styles.chatActions}>
+                <button
+                  className={styles.newChatButton}
+                  onClick={() => setShowUserList(!showUserList)}
+                  title="Nueva conversación"
+                >
+                  +
+                </button>
+                <button
+                  className={styles.closeButton}
+                  onClick={() => setIsOpen(false)}
+                  aria-label="Cerrar chat"
+                >
+                  ×
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
           {showUserList ? (
             <div className={styles.userList}>
@@ -617,7 +733,8 @@ export default function ChatWidget() {
             </div>
           ) : (
             <>
-              <div className={styles.conversationsList}>
+              {!selectedConversation && (
+                <div className={styles.conversationsList}>
                 {conversations.length === 0 ? (
                   <div className={styles.emptyState}>
                     <p>No hay conversaciones</p>
@@ -632,103 +749,228 @@ export default function ChatWidget() {
                     </button>
                   </div>
                 ) : (
-                  conversations.map((conv) => {
-                    console.log("[ChatWidget] Renderizando conversación:", conv.id, conv.name);
+                  // Filtrar la conversación activa y ordenar: primero no leídas, luego por fecha
+                  conversations
+                    .filter(conv => !selectedConversation || conv.id !== selectedConversation)
+                    .sort((a, b) => {
+                      // Primero las que tienen mensajes no leídos
+                      if (a.unread_count > 0 && b.unread_count === 0) return -1;
+                      if (a.unread_count === 0 && b.unread_count > 0) return 1;
+                      // Luego ordenar por fecha del último mensaje (más reciente primero)
+                      const dateA = a.last_message?.created_at || a.updated_at;
+                      const dateB = b.last_message?.created_at || b.updated_at;
+                      return new Date(dateB).getTime() - new Date(dateA).getTime();
+                    })
+                    .map((conv) => {
+                    const otherUser = conv.other_user;
+                    const displayName = conv.type === "direct" && otherUser
+                      ? (otherUser.full_name || otherUser.email || "Usuario")
+                      : conv.name || "Conversación";
+                    const initials = conv.type === "direct" && otherUser
+                      ? getInitials(otherUser.full_name, otherUser.email)
+                      : "GC";
+                    
                     return (
-                    <button
-                      key={conv.id}
-                      className={`${styles.conversationItem} ${
-                        selectedConversation === conv.id ? styles.active : ""
-                      }`}
-                      onClick={() => {
-                        setSelectedConversation(conv.id);
-                        markAsRead(conv.id);
-                      }}
-                    >
-                      <div className={styles.conversationInfo}>
-                        <div className={styles.conversationName}>
-                          {conv.type === "direct" && conv.other_user
-                            ? (conv.other_user.full_name || conv.other_user.email || "Usuario")
-                            : conv.name || "Conversación"}
+                      <button
+                        key={conv.id}
+                        className={`${styles.conversationItem} ${
+                          selectedConversation === conv.id ? styles.active : ""
+                        }`}
+                        onClick={() => {
+                          setSelectedConversation(conv.id);
+                          markAsRead(conv.id);
+                        }}
+                      >
+                        <div className={styles.conversationAvatar}>
+                          {initials}
                         </div>
-                        {conv.last_message && (
-                          <div className={styles.conversationPreview}>
-                            {conv.last_message.content.substring(0, 50)}
-                            {conv.last_message.content.length > 50 ? "..." : ""}
+                        <div className={styles.conversationInfo}>
+                          <div className={styles.conversationItemHeader}>
+                            <div className={styles.conversationName}>{displayName}</div>
+                            {conv.last_message && (
+                              <div className={styles.conversationTime}>
+                                {formatTime(conv.last_message.created_at, true)}
+                              </div>
+                            )}
                           </div>
+                          {conv.last_message && (
+                            <div className={styles.conversationPreview}>
+                              {conv.last_message.content.substring(0, 50)}
+                              {conv.last_message.content.length > 50 ? "..." : ""}
+                            </div>
+                          )}
+                        </div>
+                        {conv.unread_count > 0 && (
+                          <span className={styles.conversationUnread}>
+                            {conv.unread_count}
+                          </span>
                         )}
-                      </div>
-                      {conv.unread_count > 0 && (
-                        <span className={styles.conversationUnread}>
-                          {conv.unread_count}
-                        </span>
-                      )}
-                    </button>
+                      </button>
                     );
                   })
                 )}
-              </div>
+                </div>
+              )}
 
-              {selectedConversation && (
-                <div className={styles.messagesPanel}>
-                  <div
-                    className={styles.messagesContainer}
-                    ref={messagesContainerRef}
-                  >
-                    {messages.length === 0 ? (
-                      <div style={{ padding: "20px", textAlign: "center", color: "#666" }}>
-                        <p>No hay mensajes en esta conversación</p>
+              {selectedConversation ? (() => {
+                const selectedConv = conversations.find(c => c.id === selectedConversation);
+                const otherUser = selectedConv?.other_user;
+                const displayName = selectedConv?.type === "direct" && otherUser
+                  ? (otherUser.full_name || otherUser.email || "Usuario")
+                  : selectedConv?.name || "Conversación";
+                const initials = selectedConv?.type === "direct" && otherUser
+                  ? getInitials(otherUser.full_name, otherUser.email)
+                  : "GC";
+                
+                return (
+                  <div className={styles.messagesPanel}>
+                    {/* Header de conversación estilo WhatsApp */}
+                    <div className={styles.conversationHeader}>
+                      <div className={styles.conversationHeaderInfo}>
+                        <button
+                          className={styles.backButton}
+                          onClick={() => setSelectedConversation(null)}
+                          title="Volver a conversaciones"
+                        >
+                          ←
+                        </button>
+                        <div className={styles.conversationHeaderAvatar}>
+                          {initials}
+                        </div>
+                        <div className={styles.conversationHeaderName}>
+                          {displayName}
+                        </div>
                       </div>
-                    ) : (
-                      messages.map((msg) => {
-                        console.log("[ChatWidget] Renderizando mensaje:", msg.id, msg.content.substring(0, 50));
-                        return (
-                          <div
-                            key={msg.id}
-                            className={`${styles.message} ${
-                              msg.sender_id === currentUserId
-                                ? styles.messageSent
-                                : styles.messageReceived
-                            }`}
-                          >
-                            <div className={styles.messageContent}>
-                              {msg.sender_id !== currentUserId && (
-                                <div className={styles.messageSender}>
-                                  {msg.sender?.full_name || msg.sender?.email || "Usuario"}
+                      <div className={styles.chatActions}>
+                        <button
+                          className={styles.closeButton}
+                          onClick={() => setIsOpen(false)}
+                          aria-label="Cerrar chat"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+
+                    <div
+                      className={styles.messagesContainer}
+                      ref={messagesContainerRef}
+                    >
+                      {messages.length === 0 ? (
+                        <div className={styles.emptyMessages}>
+                          <p>No hay mensajes en esta conversación</p>
+                        </div>
+                      ) : (
+                        messages.map((msg, index) => {
+                          const msgDate = new Date(msg.created_at);
+                          const prevMsg = index > 0 ? messages[index - 1] : null;
+                          const prevMsgDate = prevMsg ? new Date(prevMsg.created_at) : null;
+                          const showDateSeparator = !prevMsgDate || 
+                            msgDate.toDateString() !== prevMsgDate.toDateString();
+                          
+                          const isSent = msg.sender_id === currentUserId;
+                          const isSameSender = prevMsg && prevMsg.sender_id === msg.sender_id;
+                          const timeDiff = prevMsg ? 
+                            (new Date(msg.created_at).getTime() - new Date(prevMsg.created_at).getTime()) : 
+                            Infinity;
+                          const isConsecutive = prevMsg && isSameSender && timeDiff < 300000; // 5 minutos
+                          const showAvatar = !isSent && (!isSameSender || !isConsecutive);
+                          const showSenderName = !isSent && (!isSameSender || !isConsecutive);
+                          const senderInitials = msg.sender
+                            ? getInitials(msg.sender.full_name, msg.sender.email)
+                            : "U";
+                          
+                          return (
+                            <div key={msg.id}>
+                              {showDateSeparator && (
+                                <div className={styles.dateSeparator}>
+                                  <span>{formatDateSeparator(msg.created_at)}</span>
                                 </div>
                               )}
-                              <div className={styles.messageText}>{msg.content}</div>
-                              <div className={styles.messageTime}>
-                                {formatTime(msg.created_at)}
+                              <div
+                                className={`${styles.message} ${
+                                  isSent ? styles.messageSent : styles.messageReceived
+                                } ${isSameSender && isConsecutive ? styles.messageGrouped : ""}`}
+                              >
+                                {showAvatar && (
+                                  <div className={styles.messageAvatar}>
+                                    {senderInitials}
+                                  </div>
+                                )}
+                                {!showAvatar && !isSent && <div className={styles.messageAvatarSpacer} />}
+                                <div className={styles.messageContent}>
+                                  {showSenderName && (
+                                    <div className={styles.messageSender}>
+                                      {msg.sender?.full_name || msg.sender?.email || "Usuario"}
+                                    </div>
+                                  )}
+                                  <div className={styles.messageBubble}>
+                                    <div className={styles.messageText}>{msg.content}</div>
+                                    <div className={styles.messageTime}>
+                                      {formatTime(msg.created_at)}
+                                      {isSent && (
+                                        <span className={styles.messageStatus}>✓✓</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        );
-                      })
-                    )}
-                    <div ref={messagesEndRef} />
+                          );
+                        })
+                      )}
+                      <div ref={messagesEndRef} />
+                      {showScrollButton && (
+                        <button
+                          className={styles.scrollToBottomButton}
+                          onClick={() => scrollToBottom(true)}
+                          title="Ir al último mensaje"
+                          aria-label="Ir al último mensaje"
+                        >
+                          ⬇
+                        </button>
+                      )}
+                    </div>
+                    <div className={styles.messageInput}>
+                      <textarea
+                        ref={textareaRef}
+                        value={newMessage}
+                        onChange={(e) => {
+                          setNewMessage(e.target.value);
+                          // Auto-resize
+                          e.target.style.height = "auto";
+                          e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            sendMessage();
+                          }
+                        }}
+                        onFocus={() => {
+                          // Auto-scroll cuando el usuario empieza a escribir
+                          setTimeout(() => scrollToBottom(true), 100);
+                        }}
+                        placeholder="Escribe un mensaje..."
+                        disabled={sending}
+                        rows={1}
+                        className={styles.messageTextarea}
+                      />
+                      <button
+                        onClick={sendMessage}
+                        disabled={!newMessage.trim() || sending}
+                        className={styles.sendButton}
+                        title="Enviar (Enter)"
+                      >
+                        {sending ? "..." : "✈"}
+                      </button>
+                    </div>
                   </div>
-                  <div className={styles.messageInput}>
-                    <input
-                      type="text"
-                      value={newMessage}
-                      onChange={(e) => setNewMessage(e.target.value)}
-                      onKeyPress={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey) {
-                          e.preventDefault();
-                          sendMessage();
-                        }
-                      }}
-                      placeholder="Escribe un mensaje..."
-                      disabled={sending}
-                    />
-                    <button
-                      onClick={sendMessage}
-                      disabled={!newMessage.trim() || sending}
-                      className={styles.sendButton}
-                    >
-                      {sending ? "..." : "Enviar"}
-                    </button>
+                );
+              })() : (
+                <div className={styles.emptyMessagesPanel}>
+                  <div className={styles.emptyMessagesContent}>
+                    <p>Selecciona una conversación para comenzar a chatear</p>
                   </div>
                 </div>
               )}
