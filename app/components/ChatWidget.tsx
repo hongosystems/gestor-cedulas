@@ -296,9 +296,17 @@ export default function ChatWidget() {
 
           // Verificar si el mensaje ya existe en el estado (evitar duplicados)
           setMessages((prevMessages) => {
-            const exists = prevMessages.some(msg => msg.id === newMessage.id);
-            if (exists) {
-              console.log("[ChatWidget] Mensaje ya existe en el estado, ignorando:", newMessage.id);
+            const existingIndex = prevMessages.findIndex(msg => msg.id === newMessage.id);
+            if (existingIndex !== -1) {
+              // Si ya existe, actualizar con datos más completos si los hay
+              const existing = prevMessages[existingIndex];
+              // Si el mensaje existente no tiene sender completo, esperar a que loadMessages lo actualice
+              if (existing.sender && existing.sender.email) {
+                console.log("[ChatWidget] Mensaje ya existe en el estado con sender completo, ignorando:", newMessage.id);
+                return prevMessages;
+              }
+              // Si no tiene sender completo, mantener el existente y dejar que loadMessages lo actualice
+              console.log("[ChatWidget] Mensaje ya existe pero sin sender completo, esperando actualización:", newMessage.id);
               return prevMessages;
             }
 
@@ -471,6 +479,37 @@ export default function ChatWidget() {
       }
 
       if (res.ok) {
+        const responseData = await res.json();
+        const sentMessage = responseData.data;
+        
+        // Agregar mensaje inmediatamente al estado (optimistic update)
+        if (sentMessage && currentUserId) {
+          const optimisticMessage: Message = {
+            id: sentMessage.id,
+            conversation_id: sentMessage.conversation_id,
+            sender_id: sentMessage.sender_id,
+            content: sentMessage.content,
+            created_at: sentMessage.created_at,
+            sender: sentMessage.sender || {
+              id: currentUserId,
+              full_name: null,
+              email: "",
+            },
+          };
+          
+          setMessages((prevMessages) => {
+            // Verificar si ya existe (por si llegó por Realtime antes)
+            const exists = prevMessages.some(msg => msg.id === optimisticMessage.id);
+            if (exists) {
+              return prevMessages;
+            }
+            // Agregar al final y ordenar por fecha
+            return [...prevMessages, optimisticMessage].sort((a, b) => 
+              new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+            );
+          });
+        }
+        
         setNewMessage("");
         // Resetear altura del textarea
         if (textareaRef.current) {
@@ -478,11 +517,10 @@ export default function ChatWidget() {
         }
         // Auto-scroll al enviar
         setTimeout(() => scrollToBottom(true), 100);
-        // El mensaje se agregará automáticamente vía Realtime
-        // También recargar conversaciones para asegurar que se actualice la lista
+        // Recargar conversaciones para asegurar que se actualice la lista
         setTimeout(() => {
           loadData().catch(console.error);
-        }, 500);
+        }, 300);
       } else {
         const error = await res.json();
         alert(error.error || "Error al enviar mensaje");
