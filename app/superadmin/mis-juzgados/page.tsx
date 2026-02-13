@@ -40,6 +40,8 @@ type Cedula = {
   pdf_path: string | null;
   created_by_user_id?: string | null;
   created_by_name?: string | null;
+  read_by_user_id?: string | null;
+  read_by_name?: string | null;
 };
 
 type Expediente = {
@@ -70,6 +72,7 @@ type PjnFavorito = {
   notas?: string | null;
   removido?: boolean | null;
   estado?: string | null;
+  movimientos?: any; // Agregar movimientos para filtro de Prueba/Pericia
 };
 
 // Normalizar juzgado para mostrar SIN "- SECRETARIA N° X"
@@ -151,6 +154,72 @@ function ddmmaaaaToISO(ddmm: string | null): string | null {
   }
   
   return null;
+}
+
+// Función para detectar si un expediente tiene Prueba/Pericia en sus movimientos
+function tienePruebaPericia(movimientos: any): boolean {
+  if (!movimientos) return false;
+  
+  try {
+    // Si movimientos es un string JSON, parsearlo
+    let movs = movimientos;
+    if (typeof movimientos === 'string') {
+      try {
+        movs = JSON.parse(movimientos);
+      } catch {
+        return false;
+      }
+    }
+    
+    // Si es un array de objetos
+    if (Array.isArray(movs) && movs.length > 0) {
+      for (const mov of movs) {
+        if (typeof mov === 'object' && mov !== null) {
+          // Buscar en el campo "Detalle" o en "cols"
+          let detalleText = '';
+          
+          if (mov.Detalle) {
+            detalleText = String(mov.Detalle).toUpperCase();
+          } else if (mov.cols && Array.isArray(mov.cols)) {
+            // Buscar en cols el campo "Detalle:"
+            for (const col of mov.cols) {
+              const colStr = String(col).trim();
+              const matchDetalle = colStr.match(/^Detalle:\s*(.+)$/i);
+              if (matchDetalle) {
+                detalleText = matchDetalle[1].toUpperCase();
+                break;
+              }
+            }
+          }
+          
+          // Patrones canónicos para Prueba/Pericia
+          const patrones = [
+            /SE\s+ORDENA.*PERICI/i,
+            /ORDENA.*PERICI/i,
+            /SOLICITA.*PROVEE.*PRUEBA\s+PERICI/i,
+            /PRUEBA\s+PERICIAL/i,
+            /PERITO.*ACEPTA\s+CARGO/i,
+            /LLAMA.*PERICI/i,
+            /DISPONE.*PERICI/i,
+            /TRASLADO.*PERICI/i,
+            /PERICI.*M[EÉ]DIC/i,
+            /PERICI.*PSICOL/i,
+            /PERICI.*CONTAB/i
+          ];
+          
+          for (const patron of patrones) {
+            if (patron.test(detalleText)) {
+              return true;
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(`[Prueba/Pericia] Error al analizar movimientos:`, err);
+  }
+  
+  return false;
 }
 
 type Semaforo = "VERDE" | "AMARILLO" | "ROJO";
@@ -1007,7 +1076,7 @@ export default function MisJuzgadosPage() {
   const [semaforoFilter, setSemaforoFilter] = useState<Semaforo | null>(null);
   const [notasEditables, setNotasEditables] = useState<Record<string, string>>({});
   const [notasGuardando, setNotasGuardando] = useState<Record<string, boolean>>({});
-  const [juzgadoFilter, setJuzgadoFilter] = useState<"mis_juzgados" | "todos" | "beneficio" | string>("mis_juzgados");
+  const [juzgadoFilter, setJuzgadoFilter] = useState<"mis_juzgados" | "todos" | "beneficio" | "prueba_pericia" | string>("mis_juzgados");
   const [userJuzgados, setUserJuzgados] = useState<string[]>([]);
   const [isAbogado, setIsAbogado] = useState(false);
   const [createdByFilter, setCreatedByFilter] = useState<string>("all"); // "all" | user_id | "pjn"
@@ -1235,21 +1304,38 @@ export default function MisJuzgadosPage() {
         // IMPORTANTE: Filtrar favoritos removidos (si existe columna removido o estado)
         let { data: favoritosData, error: favoritosErr } = await supabase
           .from("pjn_favoritos")
-          .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones, notas, removido, estado")
+          .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones, notas, removido, estado, movimientos")
           .order("updated_at", { ascending: false });
         
         // Si falla porque la columna no existe, intentar cargar las columnas disponibles
-        if (favoritosErr && (favoritosErr.message?.includes("removido") || favoritosErr.message?.includes("estado") || favoritosErr.message?.includes("notas"))) {
+        if (favoritosErr && (favoritosErr.message?.includes("removido") || favoritosErr.message?.includes("estado") || favoritosErr.message?.includes("notas") || favoritosErr.message?.includes("movimientos"))) {
           console.log(`[Mis Juzgados] Algunas columnas no encontradas, intentando cargar sin ellas...`);
           
-          // Intentar primero cargar sin las columnas problemáticas
+          // Intentar primero cargar sin las columnas problemáticas (incluyendo movimientos)
           const { data: favoritosData2, error: favoritosErr2 } = await supabase
             .from("pjn_favoritos")
             .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones")
             .order("updated_at", { ascending: false });
           
           if (favoritosErr2) {
-            favoritosErr = favoritosErr2;
+            // Si también falla sin movimientos, intentar sin ninguna columna opcional
+            const { data: favoritosData3, error: favoritosErr3 } = await supabase
+              .from("pjn_favoritos")
+              .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones")
+              .order("updated_at", { ascending: false });
+            
+            if (!favoritosErr3 && favoritosData3) {
+              favoritosData = favoritosData3.map((f: any) => ({
+                ...f,
+                removido: false,
+                estado: null,
+                notas: null,
+                movimientos: null
+              }));
+              favoritosErr = null;
+            } else {
+              favoritosErr = favoritosErr3 || favoritosErr2;
+            }
           } else {
             // Intentar cargar notas por separado solo si la columna notas existe
             // Primero verificar si podemos leer notas de un favorito de prueba
@@ -1286,14 +1372,16 @@ export default function MisJuzgadosPage() {
                       ...f,
                       removido: false,
                       estado: null,
-                      notas: (!notaErr && notaData) ? (notaData.notas || null) : null
+                      notas: (!notaErr && notaData) ? (notaData.notas || null) : null,
+                      movimientos: null // La columna movimientos no existe, establecer null
                     };
                   } catch (e) {
                     return {
                       ...f,
                       removido: false,
                       estado: null,
-                      notas: null
+                      notas: null,
+                      movimientos: null
                     };
                   }
                 })
@@ -1306,7 +1394,8 @@ export default function MisJuzgadosPage() {
                 ...f,
                 removido: false,
                 estado: null,
-                notas: null
+                notas: null,
+                movimientos: null // La columna movimientos no existe, establecer null
               })) || [];
             }
             
@@ -1342,10 +1431,30 @@ export default function MisJuzgadosPage() {
             const pjnKey = process.env.NEXT_PUBLIC_PJN_SCRAPER_SUPABASE_ANON_KEY;
             
             if (pjnUrl && pjnKey) {
-              const { data: favoritosData2, error: favoritosErr2 } = await pjnScraperSupabase
+              // Intentar primero con movimientos
+              let { data: favoritosData2, error: favoritosErr2 } = await pjnScraperSupabase
                 .from("pjn_favoritos")
-                .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones")
+                .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones, movimientos")
                 .order("updated_at", { ascending: false });
+              
+              // Si falla por movimientos, intentar sin esa columna
+              if (favoritosErr2 && favoritosErr2.message?.includes("movimientos")) {
+                console.log(`[Mis Juzgados] Columna movimientos no encontrada en pjn-scraper, cargando sin ella...`);
+                const { data: favoritosData3, error: favoritosErr3 } = await pjnScraperSupabase
+                  .from("pjn_favoritos")
+                  .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones")
+                  .order("updated_at", { ascending: false });
+                
+                if (!favoritosErr3 && favoritosData3) {
+                  favoritosData2 = favoritosData3.map((f: any) => ({
+                    ...f,
+                    movimientos: null
+                  }));
+                  favoritosErr2 = null;
+                } else {
+                  favoritosErr2 = favoritosErr3;
+                }
+              }
               
               if (favoritosErr2) {
                 console.error(`[Mis Juzgados] ❌ Error también con cliente pjn-scraper:`, favoritosErr2);
@@ -1365,6 +1474,8 @@ export default function MisJuzgadosPage() {
           } else if (favoritosData) {
             pjnFavoritos = favoritosData as PjnFavorito[];
             console.log(`[Mis Juzgados] ✅ Favoritos cargados desde base de datos principal: ${pjnFavoritos.length}`);
+            const favoritosConMovimientos = pjnFavoritos.filter(f => f.movimientos).length;
+            console.log(`[Mis Juzgados] Favoritos con movimientos cargados desde BD: ${favoritosConMovimientos} de ${pjnFavoritos.length}`);
             
             // Si pjn_favoritos está vacía, intentar leer desde cases como fallback
             // NOTA: cases está en la base de datos de pjn-scraper, no en la principal
@@ -1524,6 +1635,7 @@ export default function MisJuzgadosPage() {
                       juzgado: normalizeJuzgado(c.dependencia || null),
                       fecha_ultima_carga: fechaUltimaCarga,
                       observaciones: observaciones,
+                      movimientos: c.movimientos || null, // Guardar movimientos para filtro de Prueba/Pericia
                     } as PjnFavorito;
                   }
                   return null;
@@ -1558,6 +1670,77 @@ export default function MisJuzgadosPage() {
         setMsg(msg ? `${msg} Error al cargar favoritos: ${err?.message || 'Error desconocido'}` : `Error al cargar favoritos: ${err?.message || 'Error desconocido'}`);
       }
 
+      // Si el filtro es "prueba_pericia" y los favoritos no tienen movimientos, cargarlos desde cases
+      if (juzgadoFilter === "prueba_pericia" && pjnFavoritos.length > 0) {
+        const favoritosSinMovimientos = pjnFavoritos.filter(f => !f.movimientos);
+        if (favoritosSinMovimientos.length > 0) {
+          console.log(`[Mis Juzgados] Cargando movimientos desde cases para ${favoritosSinMovimientos.length} favoritos...`);
+          
+          try {
+            const pjnUrl = process.env.NEXT_PUBLIC_PJN_SCRAPER_SUPABASE_URL;
+            const pjnKey = process.env.NEXT_PUBLIC_PJN_SCRAPER_SUPABASE_ANON_KEY;
+            
+            if (pjnUrl && pjnKey) {
+              // Construir los keys de los favoritos sin movimientos
+              // El key en cases tiene formato "JURISDICCION NUMERO/ANIO" (ej: "CIV 000050/2021")
+              const keys = favoritosSinMovimientos
+                .filter(f => f.jurisdiccion && f.numero && f.anio)
+                .map(f => {
+                  // Normalizar número con ceros a la izquierda (6 dígitos)
+                  const numeroNormalizado = String(f.numero).padStart(6, '0');
+                  return `${f.jurisdiccion} ${numeroNormalizado}/${f.anio}`;
+                });
+              
+              if (keys.length === 0) {
+                console.log(`[Mis Juzgados] No hay favoritos con datos completos para buscar en cases`);
+              } else {
+                // Cargar movimientos desde cases en lotes
+                const batchSize = 50;
+                for (let i = 0; i < keys.length; i += batchSize) {
+                  const batch = keys.slice(i, i + batchSize);
+                  const { data: casesData, error: casesErr } = await pjnScraperSupabase
+                    .from("cases")
+                    .select("key, movimientos")
+                    .in("key", batch);
+                  
+                  if (!casesErr && casesData) {
+                    // Crear un mapa de key -> movimientos
+                    const movimientosMap = new Map<string, any>();
+                    casesData.forEach((c: any) => {
+                      if (c.movimientos) {
+                        movimientosMap.set(c.key, c.movimientos);
+                      }
+                    });
+                    
+                    // Actualizar los favoritos con los movimientos
+                    pjnFavoritos.forEach(f => {
+                      if (!f.movimientos && f.jurisdiccion && f.numero && f.anio) {
+                        // Construir el key para este favorito
+                        const numeroNormalizado = String(f.numero).padStart(6, '0');
+                        const key = `${f.jurisdiccion} ${numeroNormalizado}/${f.anio}`;
+                        
+                        if (movimientosMap.has(key)) {
+                          f.movimientos = movimientosMap.get(key);
+                        }
+                      }
+                    });
+                  } else if (casesErr) {
+                    console.warn(`[Mis Juzgados] Error al cargar batch ${i / batchSize + 1} desde cases:`, casesErr);
+                  }
+                }
+              }
+              
+              const favoritosConMovimientos = pjnFavoritos.filter(f => f.movimientos).length;
+              console.log(`[Mis Juzgados] ✅ Movimientos cargados desde cases: ${favoritosConMovimientos} de ${pjnFavoritos.length} favoritos`);
+            } else {
+              console.warn(`[Mis Juzgados] ⚠️  Variables de entorno de pjn-scraper no configuradas. No se pueden cargar movimientos desde cases.`);
+            }
+          } catch (err: any) {
+            console.warn(`[Mis Juzgados] ⚠️  Error al cargar movimientos desde cases:`, err);
+          }
+        }
+      }
+
       // Filtrar favoritos por juzgados asignados (si aplica)
       let favoritosFiltrados = pjnFavoritos;
       if (juzgadoFilter === "beneficio") {
@@ -1587,7 +1770,40 @@ export default function MisJuzgadosPage() {
           return true;
         });
         console.log(`[Mis Juzgados] ✅ Favoritos filtrados por BENEFICIO: ${favoritosFiltrados.length} de ${pjnFavoritos.length}`);
-      } else if (juzgadoFilter && juzgadoFilter !== "mis_juzgados" && juzgadoFilter !== "todos" && juzgadoFilter !== "beneficio") {
+      } else if (juzgadoFilter === "prueba_pericia") {
+        // Filtrar favoritos por Prueba/Pericia en movimientos
+        console.log(`[Mis Juzgados] Filtrando por PRUEBA/PERICIA. Total favoritos: ${pjnFavoritos.length}`);
+        const favoritosConMovimientos = pjnFavoritos.filter(f => f.movimientos).length;
+        console.log(`[Mis Juzgados] Favoritos con movimientos: ${favoritosConMovimientos} de ${pjnFavoritos.length}`);
+        
+        favoritosFiltrados = pjnFavoritos.filter((f: PjnFavorito) => {
+          if (!f.movimientos) {
+            return false;
+          }
+          
+          const tienePericia = tienePruebaPericia(f.movimientos);
+          if (!tienePericia) return false;
+          
+          // Respetar la distribución por juzgados asignados
+          if (juzgadosNormalizados.length > 0) {
+            if (!f.juzgado) return false;
+            const juzgadoNormalizado = normalizarJuzgado(f.juzgado);
+            return juzgadosNormalizados.some(jAsignado => {
+              if (juzgadoNormalizado === jAsignado) return true;
+              const numAsignado = jAsignado.match(/N[°º]\s*(\d+)/i)?.[1];
+              const numFavorito = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
+              if (numAsignado && numFavorito && numAsignado === numFavorito) {
+                if (jAsignado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
+                  return true;
+                }
+              }
+              return false;
+            });
+          }
+          return true;
+        });
+        console.log(`[Mis Juzgados] ✅ Favoritos filtrados por PRUEBA/PERICIA: ${favoritosFiltrados.length} de ${pjnFavoritos.length}`);
+      } else if (juzgadoFilter && juzgadoFilter !== "mis_juzgados" && juzgadoFilter !== "todos" && juzgadoFilter !== "beneficio" && juzgadoFilter !== "prueba_pericia") {
         // Filtro por juzgado específico
         const juzgadoFiltroNormalizado = normalizarJuzgado(juzgadoFilter);
         favoritosFiltrados = pjnFavoritos.filter((f: PjnFavorito) => {
@@ -1713,7 +1929,13 @@ export default function MisJuzgadosPage() {
           return true;
         });
         console.log(`[Mis Juzgados] Expedientes con BENEFICIO: ${exps.length} de ${allExpsData?.length || 0}`);
-      } else if (juzgadoFilter && juzgadoFilter !== "mis_juzgados" && juzgadoFilter !== "todos" && juzgadoFilter !== "beneficio") {
+      } else if (juzgadoFilter === "prueba_pericia") {
+        // Filtrar expedientes por Prueba/Pericia
+        // Los expedientes locales no tienen movimientos, así que este filtro solo aplica a favoritos
+        // Los favoritos ya están filtrados arriba, así que aquí solo filtramos expedientes locales (que no tienen movimientos)
+        exps = [];
+        console.log(`[Mis Juzgados] Filtro "prueba_pericia" solo aplica a favoritos de PJN con movimientos`);
+      } else if (juzgadoFilter && juzgadoFilter !== "mis_juzgados" && juzgadoFilter !== "todos" && juzgadoFilter !== "beneficio" && juzgadoFilter !== "prueba_pericia") {
         // Filtro por juzgado específico
         exps = (allExpsData ?? []).filter((e: any) => {
           if (!e.juzgado) return false;
@@ -1798,10 +2020,10 @@ export default function MisJuzgadosPage() {
       }
 
       // Cargar todas las cédulas y oficios y filtrar por juzgados asignados
-      // Intentar incluir tipo_documento, pdf_path y created_by_user_id, pero si no existen, usar select sin ellas
+      // Intentar incluir tipo_documento, pdf_path, created_by_user_id, read_by_user_id y read_by_name, pero si no existen, usar select sin ellas
       let queryCedulas = supabase
         .from("cedulas")
-        .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado, tipo_documento, pdf_path, created_by_user_id")
+        .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado, tipo_documento, pdf_path, created_by_user_id, read_by_user_id, read_by_name")
         .neq("estado", "CERRADA")
         .order("fecha_carga", { ascending: true }); // Por defecto: más viejo primero
       
@@ -1819,15 +2041,19 @@ export default function MisJuzgadosPage() {
           errorMsg.includes("tipo_documento") || 
           errorMsg.includes("created_by_user_id") ||
           errorMsg.includes("pdf_path") ||
+          errorMsg.includes("read_by_user_id") ||
+          errorMsg.includes("read_by_name") ||
           errorMsg.includes("does not exist") ||
           errorMsg.includes("column") ||
           errorCode === "PGRST116" ||
           errorDetails?.includes("tipo_documento") ||
           errorDetails?.includes("created_by_user_id") ||
-          errorDetails?.includes("pdf_path");
+          errorDetails?.includes("pdf_path") ||
+          errorDetails?.includes("read_by_user_id") ||
+          errorDetails?.includes("read_by_name");
         
         if (isColumnError) {
-          // Intentar primero con pdf_path pero sin tipo_documento y created_by_user_id
+          // Intentar primero con pdf_path pero sin tipo_documento, created_by_user_id y read_by fields
           let { data: allCs2, error: cErr2 } = await supabase
             .from("cedulas")
             .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado, pdf_path")
@@ -1849,7 +2075,9 @@ export default function MisJuzgadosPage() {
                 ...c, 
                 tipo_documento: null, 
                 created_by_user_id: null,
-                pdf_path: null
+                pdf_path: null,
+                read_by_user_id: null,
+                read_by_name: null
               })) ?? [];
             }
           } else if (cErr2) {
@@ -1859,7 +2087,9 @@ export default function MisJuzgadosPage() {
             allCsData = allCs2?.map((c: any) => ({ 
               ...c, 
               tipo_documento: null, 
-              created_by_user_id: null 
+              created_by_user_id: null,
+              read_by_user_id: null,
+              read_by_name: null
             })) ?? [];
           }
         } else {
@@ -1910,7 +2140,11 @@ export default function MisJuzgadosPage() {
         // El filtro "beneficio" solo aplica a expedientes (tienen carátula), no a cédulas
         cs = [];
         console.log(`[Mis Juzgados] Filtro "beneficio" no aplica a cédulas, mostrando 0`);
-      } else if (juzgadoFilter && juzgadoFilter !== "mis_juzgados" && juzgadoFilter !== "todos" && juzgadoFilter !== "beneficio") {
+      } else if (juzgadoFilter === "prueba_pericia") {
+        // El filtro "prueba_pericia" solo aplica a expedientes (tienen movimientos), no a cédulas
+        cs = [];
+        console.log(`[Mis Juzgados] Filtro "prueba_pericia" no aplica a cédulas, mostrando 0`);
+      } else if (juzgadoFilter && juzgadoFilter !== "mis_juzgados" && juzgadoFilter !== "todos" && juzgadoFilter !== "beneficio" && juzgadoFilter !== "prueba_pericia") {
         // Filtro por juzgado específico
         const juzgadoFiltroNormalizado = normalizarJuzgado(juzgadoFilter);
         cs = (allCsData ?? []).filter((c: any) => {
@@ -2096,7 +2330,7 @@ export default function MisJuzgadosPage() {
     });
   }, [userJuzgados]);
 
-  async function abrirArchivo(path: string) {
+  async function abrirArchivo(path: string, cedulaId?: string) {
     if (!path) {
       setMsg("No hay archivo disponible para abrir");
       return;
@@ -2108,6 +2342,47 @@ export default function MisJuzgadosPage() {
       if (!sessionData.session) {
         setMsg("No estás autenticado");
         return;
+      }
+
+      const userId = sessionData.session.user.id;
+      const userName = currentUserName || sessionData.session.user.email || "Usuario";
+
+      // Registrar que el usuario leyó la cédula (solo si no está ya registrado)
+      if (cedulaId) {
+        try {
+          // Verificar si ya fue leída por este usuario
+          const { data: cedulaData } = await supabase
+            .from("cedulas")
+            .select("read_by_user_id")
+            .eq("id", cedulaId)
+            .single();
+
+          // Solo actualizar si no fue leída por este usuario o no tiene registro
+          if (!cedulaData?.read_by_user_id || cedulaData.read_by_user_id !== userId) {
+            const { error: updateError } = await supabase
+              .from("cedulas")
+              .update({
+                read_by_user_id: userId,
+                read_by_name: userName
+              })
+              .eq("id", cedulaId);
+
+            if (updateError) {
+              console.error("Error al registrar lectura:", updateError);
+              // No bloquear la apertura del archivo si falla el registro
+            } else {
+              // Actualizar el estado local para reflejar el cambio inmediatamente
+              setCedulas(prev => prev.map(c => 
+                c.id === cedulaId 
+                  ? { ...c, read_by_user_id: userId, read_by_name: userName }
+                  : c
+              ));
+            }
+          }
+        } catch (err) {
+          console.error("Error al registrar lectura de cédula:", err);
+          // No bloquear la apertura del archivo si falla el registro
+        }
       }
 
       // Usar el endpoint API que sirve el archivo con headers para abrirlo en el navegador
@@ -2232,6 +2507,8 @@ export default function MisJuzgadosPage() {
           created_by_user_id: c.created_by_user_id || null,
           pdf_path: c.pdf_path,
           tipo_documento: c.tipo_documento,
+          read_by_user_id: c.read_by_user_id || null,
+          read_by_name: c.read_by_name || null,
           dias: c.fecha_carga ? daysSince(c.fecha_carga) : null,
           semaforo: c.fecha_carga ? semaforoByAge(daysSince(c.fecha_carga)) : "VERDE" as Semaforo,
         }))
@@ -2246,6 +2523,8 @@ export default function MisJuzgadosPage() {
           created_by_user_id: o.created_by_user_id || null,
           pdf_path: o.pdf_path,
           tipo_documento: o.tipo_documento,
+          read_by_user_id: o.read_by_user_id || null,
+          read_by_name: o.read_by_name || null,
           observaciones: null,
           dias: o.fecha_carga ? daysSince(o.fecha_carga) : null,
           semaforo: o.fecha_carga ? semaforoByAge(daysSince(o.fecha_carga)) : "VERDE" as Semaforo,
@@ -2860,6 +3139,9 @@ export default function MisJuzgadosPage() {
                     <option value="beneficio" style={{ background: "rgba(11,47,85,1)", color: "rgba(234,243,255,.95)" }}>
                       Beneficio
                     </option>
+                    <option value="prueba_pericia" style={{ background: "rgba(11,47,85,1)", color: "rgba(234,243,255,.95)" }}>
+                      Prueba/Pericia
+                    </option>
                     {juzgadosAsignadosOrdenados.map((juzgado) => (
                       <option key={juzgado} value={juzgado} style={{ background: "rgba(11,47,85,1)", color: "rgba(234,243,255,.95)" }}>
                         {juzgado}
@@ -3070,17 +3352,29 @@ export default function MisJuzgadosPage() {
                       {isAbogado && (activeTab === "cedulas" || activeTab === "oficios") && (
                         <td>
                           {item.pdf_path ? (
-                            <button
-                              className="btn primary"
-                              onClick={() => abrirArchivo(item.pdf_path)}
-                              style={{
-                                fontSize: 12,
-                                padding: "6px 12px",
-                                whiteSpace: "nowrap"
-                              }}
-                            >
-                              {item.tipo_documento === "OFICIO" ? "VER OFICIO" : "VER CÉDULA"}
-                            </button>
+                            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                              <button
+                                className="btn primary"
+                                onClick={() => abrirArchivo(item.pdf_path, item.id)}
+                                style={{
+                                  fontSize: 12,
+                                  padding: "6px 12px",
+                                  whiteSpace: "nowrap"
+                                }}
+                              >
+                                {item.tipo_documento === "OFICIO" ? "VER OFICIO" : "VER CÉDULA"}
+                              </button>
+                              {item.read_by_name && (
+                                <div style={{ 
+                                  fontSize: 10, 
+                                  color: "rgba(234,243,255,.6)",
+                                  textAlign: "center",
+                                  fontStyle: "italic"
+                                }}>
+                                  LEIDA POR {item.read_by_name.toUpperCase()}
+                                </div>
+                              )}
+                            </div>
                           ) : (
                             <span className="muted" style={{ fontSize: 12 }}>—</span>
                           )}

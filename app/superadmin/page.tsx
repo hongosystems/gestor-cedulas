@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { pjnScraperSupabase } from "@/lib/pjn-scraper-supabase";
 import jsPDF from "jspdf";
 
 type Cedula = {
@@ -41,6 +42,7 @@ type PjnFavorito = {
   notas?: string | null;
   removido?: boolean | null;
   estado?: string | null;
+  movimientos?: any; // Agregar movimientos para filtro de Prueba/Pericia
 };
 
 type Profile = { id: string; full_name: string | null; email: string | null };
@@ -126,6 +128,72 @@ function ddmmaaaaToISO(fecha: string | null): string | null {
   // Si no coincide con ningún formato, retornar null
   console.warn(`[Dashboard] Formato de fecha no reconocido: ${fechaTrim}`);
   return null;
+}
+
+// Función para detectar si un expediente tiene Prueba/Pericia en sus movimientos
+function tienePruebaPericia(movimientos: any): boolean {
+  if (!movimientos) return false;
+  
+  try {
+    // Si movimientos es un string JSON, parsearlo
+    let movs = movimientos;
+    if (typeof movimientos === 'string') {
+      try {
+        movs = JSON.parse(movimientos);
+      } catch {
+        return false;
+      }
+    }
+    
+    // Si es un array de objetos
+    if (Array.isArray(movs) && movs.length > 0) {
+      for (const mov of movs) {
+        if (typeof mov === 'object' && mov !== null) {
+          // Buscar en el campo "Detalle" o en "cols"
+          let detalleText = '';
+          
+          if (mov.Detalle) {
+            detalleText = String(mov.Detalle).toUpperCase();
+          } else if (mov.cols && Array.isArray(mov.cols)) {
+            // Buscar en cols el campo "Detalle:"
+            for (const col of mov.cols) {
+              const colStr = String(col).trim();
+              const matchDetalle = colStr.match(/^Detalle:\s*(.+)$/i);
+              if (matchDetalle) {
+                detalleText = matchDetalle[1].toUpperCase();
+                break;
+              }
+            }
+          }
+          
+          // Patrones canónicos para Prueba/Pericia
+          const patrones = [
+            /SE\s+ORDENA.*PERICI/i,
+            /ORDENA.*PERICI/i,
+            /SOLICITA.*PROVEE.*PRUEBA\s+PERICI/i,
+            /PRUEBA\s+PERICIAL/i,
+            /PERITO.*ACEPTA\s+CARGO/i,
+            /LLAMA.*PERICI/i,
+            /DISPONE.*PERICI/i,
+            /TRASLADO.*PERICI/i,
+            /PERICI.*M[EÉ]DIC/i,
+            /PERICI.*PSICOL/i,
+            /PERICI.*CONTAB/i
+          ];
+          
+          for (const patron of patrones) {
+            if (patron.test(detalleText)) {
+              return true;
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(`[Prueba/Pericia] Error al analizar movimientos:`, err);
+  }
+  
+  return false;
 }
 
 /**
@@ -352,7 +420,7 @@ export default function SuperAdminPage() {
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("all");
   const [selectedUserId, setSelectedUserId] = useState<string>("all");
-  const [juzgadoFilter, setJuzgadoFilter] = useState<"mis_juzgados" | "todos" | "beneficio" | string>("todos");
+  const [juzgadoFilter, setJuzgadoFilter] = useState<"mis_juzgados" | "todos" | "beneficio" | "prueba_pericia" | string>("todos");
   const [userJuzgados, setUserJuzgados] = useState<string[]>([]);
   const [customStartDate, setCustomStartDate] = useState<string>("");
   const [customEndDate, setCustomEndDate] = useState<string>("");
@@ -551,12 +619,12 @@ export default function SuperAdminPage() {
       
       const { data: favoritosDataWithStatus, error: favoritosErrWithStatus } = await supabase
         .from("pjn_favoritos")
-        .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones, notas, removido, estado")
+        .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones, notas, removido, estado, movimientos")
         .order("updated_at", { ascending: false });
       
       // Si falla porque la columna no existe, intentar sin incluirla en el select
-      if (favoritosErrWithStatus && (favoritosErrWithStatus.message?.includes("removido") || favoritosErrWithStatus.message?.includes("estado") || favoritosErrWithStatus.message?.includes("notas"))) {
-        console.log(`[Dashboard] Columnas removido/estado/notas no encontradas, cargando sin ellas...`);
+      if (favoritosErrWithStatus && (favoritosErrWithStatus.message?.includes("removido") || favoritosErrWithStatus.message?.includes("estado") || favoritosErrWithStatus.message?.includes("notas") || favoritosErrWithStatus.message?.includes("movimientos"))) {
+        console.log(`[Dashboard] Columnas removido/estado/notas/movimientos no encontradas, cargando sin ellas...`);
         const { data: favoritosData2, error: favoritosErr2 } = await supabase
           .from("pjn_favoritos")
           .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones")
@@ -565,8 +633,8 @@ export default function SuperAdminPage() {
         if (favoritosErr2) {
           favoritosErr = favoritosErr2;
         } else {
-          // Agregar propiedades removido, estado y notas como undefined/null para mantener consistencia
-          favoritosData = (favoritosData2 || []).map((f: PjnFavorito) => ({ ...f, removido: undefined, estado: undefined, notas: null }));
+          // Agregar propiedades removido, estado, notas y movimientos como undefined/null para mantener consistencia
+          favoritosData = (favoritosData2 || []).map((f: PjnFavorito) => ({ ...f, removido: undefined, estado: undefined, notas: null, movimientos: null }));
           favoritosErr = null;
         }
       } else {
@@ -590,7 +658,9 @@ export default function SuperAdminPage() {
         setPjnFavoritos([]);
       } else {
         setPjnFavoritos((favoritosData ?? []) as PjnFavorito[]);
+        const favoritosConMovimientos = (favoritosData ?? []).filter((f: any) => f.movimientos).length;
         console.log(`[Dashboard] ✅ Favoritos de pjn-scraper cargados: ${(favoritosData ?? []).length}`);
+        console.log(`[Dashboard] Favoritos con movimientos desde BD: ${favoritosConMovimientos} de ${(favoritosData ?? []).length}`);
       }
       
       // Cargar juzgados asignados a TODOS los usuarios (para asignar favoritos)
@@ -1005,6 +1075,78 @@ export default function SuperAdminPage() {
     return expedientesFromFavoritos;
   }, [pjnFavoritos]);
 
+  // Cargar movimientos desde cases cuando el filtro es "prueba_pericia"
+  useEffect(() => {
+    if (juzgadoFilter === "prueba_pericia" && pjnFavoritos.length > 0) {
+      const favoritosSinMovimientos = pjnFavoritos.filter(f => !f.movimientos);
+      if (favoritosSinMovimientos.length > 0) {
+        console.log(`[Dashboard] Cargando movimientos desde cases para ${favoritosSinMovimientos.length} favoritos...`);
+        
+        (async () => {
+          try {
+            const pjnUrl = process.env.NEXT_PUBLIC_PJN_SCRAPER_SUPABASE_URL;
+            const pjnKey = process.env.NEXT_PUBLIC_PJN_SCRAPER_SUPABASE_ANON_KEY;
+            
+            if (pjnUrl && pjnKey) {
+              // Construir los keys de los favoritos sin movimientos
+              const keys = favoritosSinMovimientos
+                .filter(f => f.jurisdiccion && f.numero && f.anio)
+                .map(f => {
+                  const numeroNormalizado = String(f.numero).padStart(6, '0');
+                  return `${f.jurisdiccion} ${numeroNormalizado}/${f.anio}`;
+                });
+              
+              if (keys.length > 0) {
+                // Cargar movimientos desde cases en lotes
+                const batchSize = 50;
+                const movimientosMap = new Map<string, any>();
+                
+                for (let i = 0; i < keys.length; i += batchSize) {
+                  const batch = keys.slice(i, i + batchSize);
+                  const { data: casesData, error: casesErr } = await pjnScraperSupabase
+                    .from("cases")
+                    .select("key, movimientos")
+                    .in("key", batch);
+                  
+                  if (!casesErr && casesData) {
+                    casesData.forEach((c: any) => {
+                      if (c.movimientos) {
+                        movimientosMap.set(c.key, c.movimientos);
+                      }
+                    });
+                  }
+                }
+                
+                // Actualizar los favoritos con los movimientos (crear nuevo array para que React detecte el cambio)
+                if (movimientosMap.size > 0) {
+                  setPjnFavoritos(prev => {
+                    const actualizados = prev.map(f => {
+                      if (!f.movimientos && f.jurisdiccion && f.numero && f.anio) {
+                        const numeroNormalizado = String(f.numero).padStart(6, '0');
+                        const key = `${f.jurisdiccion} ${numeroNormalizado}/${f.anio}`;
+                        
+                        if (movimientosMap.has(key)) {
+                          return { ...f, movimientos: movimientosMap.get(key) };
+                        }
+                      }
+                      return f;
+                    });
+                    return actualizados;
+                  });
+                  
+                  console.log(`[Dashboard] ✅ Movimientos cargados desde cases: ${movimientosMap.size} movimientos encontrados`);
+                }
+              }
+            }
+          } catch (err: any) {
+            console.warn(`[Dashboard] ⚠️  Error al cargar movimientos desde cases:`, err);
+          }
+        })();
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [juzgadoFilter]);
+
   // Filtrar expedientes según los filtros seleccionados
   useEffect(() => {
     // Combinar expedientes locales con favoritos convertidos
@@ -1129,7 +1271,38 @@ export default function SuperAdminPage() {
         juzgadoFilter,
         selectedUserJuzgadosCount: selectedUserJuzgados.length
       });
-    } else if (juzgadoFilter && juzgadoFilter !== "mis_juzgados" && juzgadoFilter !== "todos" && juzgadoFilter !== "beneficio") {
+    } else if (juzgadoFilter === "prueba_pericia") {
+      // Filtro por Prueba/Pericia en movimientos
+      // Solo aplica a favoritos de PJN que tienen movimientos
+      const beforePruebaPericiaFilter = filtered.length;
+      
+      console.log(`[Dashboard] Filtrando por PRUEBA/PERICIA. Total favoritos: ${pjnFavoritos.length}`);
+      const favoritosConMovimientos = pjnFavoritos.filter(f => f.movimientos).length;
+      console.log(`[Dashboard] Favoritos con movimientos: ${favoritosConMovimientos} de ${pjnFavoritos.length}`);
+      
+      filtered = filtered.filter(e => {
+        // Solo los favoritos de PJN tienen movimientos
+        if (!e.is_pjn_favorito) return false;
+        
+        // Buscar el favorito correspondiente usando el ID (que tiene formato pjn_${favorito.id})
+        const favoritoId = e.id.replace(/^pjn_/, '');
+        const favorito = pjnFavoritos.find(f => f.id === favoritoId);
+        
+        if (!favorito || !favorito.movimientos) {
+          return false;
+        }
+        
+        const tienePericia = tienePruebaPericia(favorito.movimientos);
+        return tienePericia;
+      });
+      
+      console.log(`[Dashboard] Filtro expedientes por PRUEBA/PERICIA: ${beforePruebaPericiaFilter} -> ${filtered.length}`, {
+        juzgadoFilter,
+        pjnFavoritosCount: pjnFavoritos.length,
+        favoritosConMovimientos,
+        expedientesFiltrados: filtered.length
+      });
+    } else if (juzgadoFilter && juzgadoFilter !== "mis_juzgados" && juzgadoFilter !== "todos" && juzgadoFilter !== "beneficio" && juzgadoFilter !== "prueba_pericia") {
       // Filtro por juzgado específico
       const beforeJuzgadoFilter = filtered.length;
       const juzgadoFiltroNormalizado = normalizarJuzgado(juzgadoFilter);
@@ -2304,6 +2477,7 @@ export default function SuperAdminPage() {
                   Mis Juzgados {selectedUserJuzgados.length === 0 ? "(sin asignar)" : `(${selectedUserJuzgados.length})`}
                 </option>
                 <option value="beneficio">Beneficio</option>
+                <option value="prueba_pericia">Prueba/Pericia</option>
                 {juzgadosAsignados.length > 0 && (
                   <optgroup label="Juzgados individuales">
                     {juzgadosAsignados.map((juzgado) => (

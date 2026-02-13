@@ -4,10 +4,19 @@ import { createClient } from "@supabase/supabase-js";
 export const runtime = "nodejs";
 
 // Función para parsear expediente (ej: "CIV 106590/2024" -> {jurisdiccion: "CIV", numero: "106590", anio: 2024})
+// Ahora busca el patrón en cualquier parte del texto, no solo al inicio
 function parseExpediente(expText: string | null | undefined) {
   if (!expText) return null;
   
-  const match = expText.match(/^([A-Z]+)\s+(\d+)\/(\d+)/);
+  // Primero intentar match al inicio (para compatibilidad con formato estándar)
+  let match = expText.match(/^([A-Z]+)\s+(\d+)\/(\d+)/);
+  
+  // Si no hay match al inicio, buscar en cualquier parte del texto
+  // Esto permite parsear casos como "INCIDENTE N° 1 - ... CIV 123456/2024"
+  if (!match) {
+    match = expText.match(/\b([A-Z]+)\s+(\d+)\/(\d+)\b/);
+  }
+  
   if (!match) return null;
   
   const [, jurisdiccion, numero, anioStr] = match;
@@ -203,7 +212,18 @@ async function performSync(req: NextRequest) {
       const expText = c.key || c.expediente;
       const parsed = parseExpediente(expText);
       
+      // Logging para casos con "BENEFICIO DE LITIGAR SIN GASTOS" que no se pueden parsear
+      const hasBeneficio = c.caratula && c.caratula.toUpperCase().includes("BENEFICIO DE LITIGAR SIN GASTOS");
+      
       if (!parsed) {
+        if (hasBeneficio) {
+          console.warn(`[sync-favoritos] ⚠️  Caso con BENEFICIO DE LITIGAR SIN GASTOS no parseado:`, {
+            key: c.key,
+            expediente: c.expediente,
+            caratula: c.caratula?.substring(0, 100),
+            removido: c.removido
+          });
+        }
         continue;
       }
 
@@ -215,9 +235,26 @@ async function performSync(req: NextRequest) {
       
       // Si el caso está marcado como removido, agregarlo a removedKeys y NO sincronizarlo
       if (c.removido === true) {
+        if (hasBeneficio) {
+          console.warn(`[sync-favoritos] ⚠️  Caso con BENEFICIO DE LITIGAR SIN GASTOS marcado como removido:`, {
+            key: c.key,
+            expediente: c.expediente,
+            caratula: c.caratula?.substring(0, 100)
+          });
+        }
         removedKeys.add(key);
         removedKeys.add(keySinCeros); // Agregar ambas variaciones
         continue; // No agregar a favoritosToUpsert ni a casesKeys
+      }
+      
+      // Logging para casos con "BENEFICIO DE LITIGAR SIN GASTOS" que se están sincronizando
+      if (hasBeneficio) {
+        console.log(`[sync-favoritos] ✅ Sincronizando caso con BENEFICIO DE LITIGAR SIN GASTOS:`, {
+          jurisdiccion: parsed.jurisdiccion,
+          numero: parsed.numero,
+          anio: parsed.anio,
+          caratula: c.caratula?.substring(0, 100)
+        });
       }
       
       // Solo agregar a casesKeys si NO está removido (agregar ambas variaciones)
@@ -352,13 +389,25 @@ async function performSync(req: NextRequest) {
         const numeroSinCeros = String(fav.numero).replace(/^0+/, '');
         const keySinCeros = `${fav.jurisdiccion}|${numeroSinCeros}|${fav.anio}`;
         
-        // Eliminar si está marcado como removido O si no está en casesKeys (no existe en cases)
-        // Intentar con todas las variaciones de keys para mayor compatibilidad
-        const shouldDelete = 
+        // Verificar si hay una versión activa (no removida) de este expediente
+        const hasActiveVersion = 
+          casesKeys.has(key) || 
+          casesKeys.has(keyOriginal) || 
+          casesKeys.has(keySinCeros);
+        
+        // Verificar si está marcado como removido
+        const isMarkedRemoved = 
           removedKeys.has(key) || 
           removedKeys.has(keyOriginal) || 
-          removedKeys.has(keySinCeros) ||
-          (!casesKeys.has(key) && !casesKeys.has(keyOriginal) && !casesKeys.has(keySinCeros));
+          removedKeys.has(keySinCeros);
+        
+        // Eliminar solo si:
+        // 1. Está marcado como removido Y NO hay versión activa, O
+        // 2. No existe en cases (no está en casesKeys)
+        // Si hay una versión activa, NO eliminar aunque haya una versión removida
+        const shouldDelete = 
+          (isMarkedRemoved && !hasActiveVersion) ||
+          (!hasActiveVersion && !casesKeys.has(key) && !casesKeys.has(keyOriginal) && !casesKeys.has(keySinCeros));
         
         if (shouldDelete) {
           favoritosToDelete.push(fav.id);

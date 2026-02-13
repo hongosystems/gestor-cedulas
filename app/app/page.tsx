@@ -14,6 +14,8 @@ type Cedula = {
   pdf_path: string | null;
   tipo_documento: "CEDULA" | "OFICIO" | null;
   notas?: string | null;
+  read_by_user_id?: string | null;
+  read_by_name?: string | null;
 };
 
 type User = {
@@ -746,17 +748,17 @@ export default function MisCedulasPage() {
       }
 
       // listar cédulas del usuario
-      // Intentar incluir tipo_documento y notas, pero si no existen las columnas, usar select sin ellas
+      // Intentar incluir tipo_documento, notas, read_by_user_id y read_by_name, pero si no existen las columnas, usar select sin ellas
       let query = supabase
         .from("cedulas")
-        .select("id, owner_user_id, caratula, juzgado, fecha_carga, pdf_path, tipo_documento, notas")
+        .select("id, owner_user_id, caratula, juzgado, fecha_carga, pdf_path, tipo_documento, notas, read_by_user_id, read_by_name")
         .eq("owner_user_id", uid)
         .order("fecha_carga", { ascending: false });
       
       const { data: cs, error: cErr } = await query;
       
       // Si el error es porque alguna columna no existe, intentar sin ellas
-      if (cErr && (cErr.message?.includes("tipo_documento") || cErr.message?.includes("notas"))) {
+      if (cErr && (cErr.message?.includes("tipo_documento") || cErr.message?.includes("notas") || cErr.message?.includes("read_by_user_id") || cErr.message?.includes("read_by_name"))) {
         const { data: cs2, error: cErr2 } = await supabase
           .from("cedulas")
           .select("id, owner_user_id, caratula, juzgado, fecha_carga, pdf_path")
@@ -768,8 +770,14 @@ export default function MisCedulasPage() {
           setLoading(false);
           return;
         }
-        // Agregar tipo_documento y notas como null para cada registro
-        const csWithNull = (cs2 ?? []).map((c: any) => ({ ...c, tipo_documento: null, notas: null }));
+        // Agregar tipo_documento, notas y read_by como null para cada registro
+        const csWithNull = (cs2 ?? []).map((c: any) => ({ 
+          ...c, 
+          tipo_documento: null, 
+          notas: null,
+          read_by_user_id: null,
+          read_by_name: null
+        }));
         setCedulas(csWithNull as Cedula[]);
         setLoading(false);
         return;
@@ -879,7 +887,7 @@ export default function MisCedulasPage() {
     window.location.href = "/login";
   }
 
-  async function abrirArchivo(path: string) {
+  async function abrirArchivo(path: string, cedulaId?: string) {
     setMsg("");
     try {
       // Obtener el token de sesión para autenticación
@@ -887,6 +895,47 @@ export default function MisCedulasPage() {
       if (!sessionData.session) {
         setMsg("No estás autenticado");
         return;
+      }
+
+      const userId = sessionData.session.user.id;
+      const userName = currentUserName || sessionData.session.user.email || "Usuario";
+
+      // Registrar que el usuario leyó la cédula (solo si no está ya registrado)
+      if (cedulaId) {
+        try {
+          // Verificar si ya fue leída por este usuario
+          const { data: cedulaData } = await supabase
+            .from("cedulas")
+            .select("read_by_user_id")
+            .eq("id", cedulaId)
+            .single();
+
+          // Solo actualizar si no fue leída por este usuario o no tiene registro
+          if (!cedulaData?.read_by_user_id || cedulaData.read_by_user_id !== userId) {
+            const { error: updateError } = await supabase
+              .from("cedulas")
+              .update({
+                read_by_user_id: userId,
+                read_by_name: userName
+              })
+              .eq("id", cedulaId);
+
+            if (updateError) {
+              console.error("Error al registrar lectura:", updateError);
+              // No bloquear la apertura del archivo si falla el registro
+            } else {
+              // Actualizar el estado local para reflejar el cambio inmediatamente
+              setCedulas(prev => prev.map(c => 
+                c.id === cedulaId 
+                  ? { ...c, read_by_user_id: userId, read_by_name: userName }
+                  : c
+              ));
+            }
+          }
+        } catch (err) {
+          console.error("Error al registrar lectura de cédula:", err);
+          // No bloquear la apertura del archivo si falla el registro
+        }
       }
 
       // Usar el endpoint API que sirve el archivo con headers para abrirlo en el navegador
@@ -1169,9 +1218,19 @@ export default function MisCedulasPage() {
                               {c.tipo_documento}
                             </span>
                           )}
-                          <button className="btn primary" onClick={() => abrirArchivo(c.pdf_path!)}>
+                          <button className="btn primary" onClick={() => abrirArchivo(c.pdf_path!, c.id)}>
                             Abrir
                           </button>
+                          {c.read_by_name && (
+                            <div style={{ 
+                              fontSize: 10, 
+                              color: "var(--muted)",
+                              textAlign: "right",
+                              fontStyle: "italic"
+                            }}>
+                              Leida por {c.read_by_name}
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <span className="muted">Sin archivo</span>
