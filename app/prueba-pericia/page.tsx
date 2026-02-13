@@ -950,7 +950,12 @@ export default function PruebaPericiaPage() {
         console.error("Error cargando expedientes:", expError);
         setMsg("Error al cargar expedientes");
       } else {
-        setExpedientes(expedientesData || []);
+        // Mapear expedientes para incluir created_by_name
+        const expedientesConNombre = (expedientesData || []).map((e: any) => ({
+          ...e,
+          created_by_name: null, // Se cargará después desde profiles
+        }));
+        setExpedientes(expedientesConNombre);
       }
 
       // Cargar directamente desde cases (no desde pjn_favoritos)
@@ -1104,10 +1109,26 @@ export default function PruebaPericiaPage() {
         .order("full_name", { ascending: true });
 
       if (profilesData) {
-        const options: Array<{ id: string; name: string }> = [];
+        // Actualizar expedientes con los nombres de los usuarios
+        setExpedientes(prev => {
+          return prev.map(e => {
+            if (e.created_by_user_id) {
+              const profile = profilesData.find(p => p.id === e.created_by_user_id);
+              if (profile) {
+                return {
+                  ...e,
+                  created_by_name: profile.full_name || profile.email || "Sin nombre"
+                };
+              }
+            }
+            return e;
+          });
+        });
         
+        // Construir opciones para el filtro "Cargado por"
+        const options: Array<{ id: string; name: string }> = [];
         const userIds = new Set<string>();
-        (expedientesData || []).forEach(e => {
+        (expedientesData || []).forEach((e: any) => {
           if (e.created_by_user_id && !userIds.has(e.created_by_user_id)) {
             userIds.add(e.created_by_user_id);
             const profile = profilesData.find(p => p.id === e.created_by_user_id);
@@ -1116,7 +1137,7 @@ export default function PruebaPericiaPage() {
             }
           }
         });
-
+        
         setCreatedByOptions(options);
       }
 
