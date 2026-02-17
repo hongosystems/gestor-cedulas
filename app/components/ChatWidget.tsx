@@ -51,6 +51,7 @@ export default function ChatWidget() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isScrolledUp, setIsScrolledUp] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
@@ -637,12 +638,11 @@ export default function ChatWidget() {
     const container = messagesContainerRef.current;
     if (!container || !selectedConversation) return;
 
-    let scrollTimeout: NodeJS.Timeout | null = null;
     const handleScroll = () => {
       // Throttle para evitar demasiadas actualizaciones
-      if (scrollTimeout) return;
+      if (scrollTimeoutRef.current) return;
       
-      scrollTimeout = setTimeout(() => {
+      scrollTimeoutRef.current = setTimeout(() => {
         const scrollTop = container.scrollTop;
         const scrollHeight = container.scrollHeight;
         const clientHeight = container.clientHeight;
@@ -653,7 +653,7 @@ export default function ChatWidget() {
         // Solo actualizar si cambió
         setIsScrolledUp((prev) => prev !== newIsScrolledUp ? newIsScrolledUp : prev);
         setShowScrollButton((prev) => prev !== newShowScrollButton ? newShowScrollButton : prev);
-        scrollTimeout = null;
+        scrollTimeoutRef.current = null;
       }, 100); // Throttle de 100ms
     };
 
@@ -663,8 +663,9 @@ export default function ChatWidget() {
     
     return () => {
       container.removeEventListener("scroll", handleScroll);
-      if (scrollTimeout) {
-        clearTimeout(scrollTimeout);
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+        scrollTimeoutRef.current = null;
       }
     };
   }, [selectedConversation, messages]);
