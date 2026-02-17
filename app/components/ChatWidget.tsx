@@ -51,7 +51,7 @@ export default function ChatWidget() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isScrolledUp, setIsScrolledUp] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
