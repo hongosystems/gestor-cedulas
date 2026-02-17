@@ -47,21 +47,44 @@ export async function GET(req: NextRequest) {
 
     const svc = supabaseService();
 
-    // Obtener todas las conversaciones del usuario con información adicional
-    const { data: conversations, error: conversationsError } = await svc
-      .from("conversation_participants")
-      .select(`
-        conversation_id,
-        last_read_at,
-        conversation:conversations!inner(
-          id,
-          type,
-          name,
-          created_at,
-          updated_at
-        )
-      `)
-      .eq("user_id", user.id);
+        // Obtener todas las conversaciones del usuario con información adicional
+        // NOTA: Para habilitar soft delete, ejecutar la migración: migrations/add_soft_delete_to_conversations.sql
+        // Por ahora, si la columna deleted_at no existe, la query funcionará sin el filtro
+        let { data: conversations, error: conversationsError } = await svc
+          .from("conversation_participants")
+          .select(`
+            conversation_id,
+            last_read_at,
+            conversation:conversations!inner(
+              id,
+              type,
+              name,
+              created_at,
+              updated_at
+            )
+          `)
+          .eq("user_id", user.id);
+        
+        // Si hay error por columna inexistente, intentar sin el filtro deleted_at
+        if (conversationsError && conversationsError.message?.includes("deleted_at")) {
+          console.warn("[API Conversations] Columna deleted_at no existe, continuando sin filtro. Ejecutar migración: migrations/add_soft_delete_to_conversations.sql");
+          const retryResult = await svc
+            .from("conversation_participants")
+            .select(`
+              conversation_id,
+              last_read_at,
+              conversation:conversations!inner(
+                id,
+                type,
+                name,
+                created_at,
+                updated_at
+              )
+            `)
+            .eq("user_id", user.id);
+          conversations = retryResult.data;
+          conversationsError = retryResult.error;
+        }
 
     if (conversationsError) {
       console.error("Error al obtener conversaciones:", conversationsError);

@@ -56,12 +56,13 @@ export async function POST(req: NextRequest) {
 
     const svc = supabaseService();
 
-    // Verificar que el usuario participa en la conversación (aunque esté borrada, puede marcarla como leída)
+    // Verificar que el usuario participa en la conversación
     const { data: participant, error: participantError } = await svc
       .from("conversation_participants")
       .select("id")
       .eq("conversation_id", conversation_id)
       .eq("user_id", user.id)
+      .is("deleted_at", null)
       .single();
 
     if (participantError || !participant) {
@@ -71,31 +72,24 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Marcar como leído usando la función RPC
-    const { error: rpcError } = await svc.rpc("mark_conversation_read", {
-      p_conversation_id: conversation_id,
-    });
+    // Soft delete: marcar deleted_at para este usuario
+    const { error: updateError } = await svc
+      .from("conversation_participants")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("conversation_id", conversation_id)
+      .eq("user_id", user.id);
 
-    if (rpcError) {
-      console.error("Error al marcar como leído:", rpcError);
-      // Intentar actualizar directamente si la función RPC no existe
-      const { error: updateError } = await svc
-        .from("conversation_participants")
-        .update({ last_read_at: new Date().toISOString() })
-        .eq("conversation_id", conversation_id)
-        .eq("user_id", user.id);
-
-      if (updateError) {
-        return NextResponse.json(
-          { error: updateError.message || "Error al marcar como leído" },
-          { status: 500 }
-        );
-      }
+    if (updateError) {
+      console.error("Error al borrar conversación:", updateError);
+      return NextResponse.json(
+        { error: updateError.message || "Error al borrar conversación" },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {
-    console.error("Error en mark read:", e);
+    console.error("Error en delete conversation:", e);
     return NextResponse.json(
       { error: e?.message || "Error desconocido" },
       { status: 500 }

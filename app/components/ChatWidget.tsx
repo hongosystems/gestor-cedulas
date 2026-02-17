@@ -53,6 +53,9 @@ export default function ChatWidget() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isScrolledUp, setIsScrolledUp] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
+  const [deletingConversation, setDeletingConversation] = useState(false);
+  const readConversationsRef = useRef<Set<string>>(new Set());
 
   // Función para manejar errores de autenticación
   const handleAuthError = useCallback(async (error: any) => {
@@ -121,7 +124,22 @@ export default function ChatWidget() {
       
       if (convData.ok && convData.data) {
         console.log("[ChatWidget] Estableciendo conversaciones:", convData.data.length, "conversaciones");
-        setConversations(convData.data || []);
+        // Preservar el estado optimista de conversaciones marcadas como leídas
+        setConversations((prevConvs) => {
+          const newConvs = convData.data || [];
+          // Obtener el Set actual de conversaciones leídas desde el ref
+          const readSet = readConversationsRef.current;
+          // Si una conversación fue marcada como leída localmente, preservar unread_count = 0
+          return newConvs.map((newConv: Conversation) => {
+            const prevConv = prevConvs.find(c => c.id === newConv.id);
+            // Si la conversación estaba marcada como leída localmente (unread_count = 0)
+            // y está en el set de leídas, preservar el estado local
+            if (prevConv && prevConv.unread_count === 0 && readSet.has(newConv.id)) {
+              return { ...newConv, unread_count: 0 };
+            }
+            return newConv;
+          });
+        });
       } else {
         console.warn("[ChatWidget] Formato de respuesta inesperado:", convData);
         setConversations(convData.data || []);
@@ -243,7 +261,8 @@ export default function ChatWidget() {
           return;
         }
         if (session?.session) {
-          setCurrentUserId(session.session.user.id);
+          const userId = session.session.user.id;
+          setCurrentUserId((prev) => prev !== userId ? userId : prev);
         }
         if (mounted) {
           loadData().catch(console.error);
@@ -260,14 +279,69 @@ export default function ChatWidget() {
     };
   }, [handleAuthError, loadData]);
 
+  // Marcar conversación como leída (debe estar antes de los useEffect que lo usan)
+  const markAsRead = useCallback(async (conversationId: string) => {
+    if (!conversationId) return;
+    
+    // Optimistic UI: actualizar estado local inmediatamente
+    // Usar useRef para evitar re-renders innecesarios
+    readConversationsRef.current.add(conversationId);
+    setConversations((prevConvs) =>
+      prevConvs.map((conv) =>
+        conv.id === conversationId
+          ? { ...conv, unread_count: 0 }
+          : conv
+      )
+    );
+
+    try {
+      const { data: session, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) {
+        await handleAuthError(sessionError);
+        return;
+      }
+      if (!session?.session) return;
+
+      const res = await fetch("/api/chat/mark-read", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.session.access_token}`,
+        },
+        body: JSON.stringify({ conversation_id: conversationId }),
+      });
+
+      if (res.status === 401) {
+        await handleAuthError({ message: "Unauthorized" });
+        return;
+      }
+
+      if (!res.ok) {
+        // Si falla, revertir el estado optimista recargando datos
+        loadData().catch(console.error);
+        return;
+      }
+
+      // NO recargar datos aquí para evitar sobrescribir el estado optimista
+      // El estado ya fue actualizado localmente (unread_count = 0)
+      // Los cambios se reflejarán cuando se recarguen las conversaciones naturalmente
+      console.log("[ChatWidget] Conversación marcada como leída (optimistic UI aplicado).");
+    } catch (error) {
+      console.error("[ChatWidget] Error marking as read:", error);
+      // Si hay error, revertir el estado optimista recargando datos
+      loadData().catch(console.error);
+      await handleAuthError(error);
+    }
+  }, [handleAuthError, loadData]);
+
   // Cargar mensajes cuando se selecciona una conversación
   useEffect(() => {
     if (selectedConversation && selectedConversation.trim() !== "") {
       console.log("[ChatWidget] Conversación seleccionada:", selectedConversation);
-      loadMessages(selectedConversation);
-      markAsRead(selectedConversation);
+      loadMessages(selectedConversation).catch(console.error);
+      markAsRead(selectedConversation).catch(console.error);
     }
-  }, [selectedConversation, handleAuthError, loadMessages]);
+  }, [selectedConversation, loadMessages, markAsRead]);
 
   // Suscribirse a nuevos mensajes en tiempo real
   useEffect(() => {
@@ -412,37 +486,6 @@ export default function ChatWidget() {
       supabase.removeChannel(conversationsChannel);
     };
   }, [loadData, selectedConversation, loadMessages]);
-
-  const markAsRead = async (conversationId: string) => {
-    try {
-      const { data: session, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError) {
-        await handleAuthError(sessionError);
-        return;
-      }
-      if (!session?.session) return;
-
-      const res = await fetch("/api/chat/mark-read", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.session.access_token}`,
-        },
-        body: JSON.stringify({ conversation_id: conversationId }),
-      });
-
-      if (res.status === 401) {
-        await handleAuthError({ message: "Unauthorized" });
-        return;
-      }
-
-      // Actualizar conversaciones para reflejar que se leyeron
-      loadData();
-    } catch (error) {
-      console.error("Error marking as read:", error);
-      await handleAuthError(error);
-    }
-  };
 
   const sendMessage = async () => {
     if (!selectedConversation || !newMessage.trim() || sending) return;
@@ -594,20 +637,36 @@ export default function ChatWidget() {
     const container = messagesContainerRef.current;
     if (!container || !selectedConversation) return;
 
+    let scrollTimeout: NodeJS.Timeout | null = null;
     const handleScroll = () => {
-      const scrollTop = container.scrollTop;
-      const scrollHeight = container.scrollHeight;
-      const clientHeight = container.clientHeight;
-      const isNearBottom = scrollHeight - scrollTop - clientHeight < 200;
-      setIsScrolledUp(!isNearBottom);
-      setShowScrollButton(!isNearBottom && scrollTop > 200);
+      // Throttle para evitar demasiadas actualizaciones
+      if (scrollTimeout) return;
+      
+      scrollTimeout = setTimeout(() => {
+        const scrollTop = container.scrollTop;
+        const scrollHeight = container.scrollHeight;
+        const clientHeight = container.clientHeight;
+        const isNearBottom = scrollHeight - scrollTop - clientHeight < 200;
+        const newIsScrolledUp = !isNearBottom;
+        const newShowScrollButton = !isNearBottom && scrollTop > 200;
+        
+        // Solo actualizar si cambió
+        setIsScrolledUp((prev) => prev !== newIsScrolledUp ? newIsScrolledUp : prev);
+        setShowScrollButton((prev) => prev !== newShowScrollButton ? newShowScrollButton : prev);
+        scrollTimeout = null;
+      }, 100); // Throttle de 100ms
     };
 
-    container.addEventListener("scroll", handleScroll);
+    container.addEventListener("scroll", handleScroll, { passive: true });
     // Verificar estado inicial
     handleScroll();
     
-    return () => container.removeEventListener("scroll", handleScroll);
+    return () => {
+      container.removeEventListener("scroll", handleScroll);
+      if (scrollTimeout) {
+        clearTimeout(scrollTimeout);
+      }
+    };
   }, [selectedConversation, messages]);
 
   // Función para obtener iniciales del nombre
@@ -645,6 +704,65 @@ export default function ChatWidget() {
       });
     }
   };
+
+  // Función para borrar conversación (soft delete)
+  const deleteConversation = useCallback(async (conversationId: string) => {
+    if (!conversationId || deletingConversation) return;
+
+    setDeletingConversation(true);
+    try {
+      const { data: session, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) {
+        await handleAuthError(sessionError);
+        setDeletingConversation(false);
+        return;
+      }
+      if (!session?.session) {
+        setDeletingConversation(false);
+        return;
+      }
+
+      const res = await fetch("/api/chat/delete", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.session.access_token}`,
+        },
+        body: JSON.stringify({ conversation_id: conversationId }),
+      });
+
+      if (res.status === 401) {
+        await handleAuthError({ message: "Unauthorized" });
+        setDeletingConversation(false);
+        return;
+      }
+
+      if (res.ok) {
+        // Optimistic UI: remover conversación de la lista inmediatamente
+        setConversations((prevConvs) =>
+          prevConvs.filter((conv) => conv.id !== conversationId)
+        );
+        
+        // Si la conversación borrada estaba seleccionada, deseleccionarla
+        if (selectedConversation === conversationId) {
+          setSelectedConversation(null);
+          setMessages([]);
+        }
+        
+        console.log("[ChatWidget] Conversación borrada exitosamente.");
+      } else {
+        const error = await res.json();
+        console.error("[ChatWidget] Error al borrar conversación:", error);
+        alert(error.error || "Error al borrar conversación");
+      }
+    } catch (error) {
+      console.error("[ChatWidget] Error deleting conversation:", error);
+      alert("Error al borrar conversación");
+    } finally {
+      setDeletingConversation(false);
+      setShowDeleteConfirm(null);
+    }
+  }, [handleAuthError, deletingConversation, selectedConversation]);
 
   // Mejorar formatTime para mostrar hora exacta cuando es hoy
   const formatTime = (dateString: string, forList: boolean = false) => {
@@ -1021,15 +1139,35 @@ export default function ChatWidget() {
                     </div>
                   </div>
                 );
-              })() : (
-                <div className={styles.emptyMessagesPanel}>
-                  <div className={styles.emptyMessagesContent}>
-                    <p>Selecciona una conversación para comenzar a chatear</p>
-                  </div>
-                </div>
-              )}
+              })() : null}
             </>
           )}
+        </div>
+      )}
+
+      {/* Modal de confirmación para borrar conversación */}
+      {showDeleteConfirm && (
+        <div className={styles.deleteModalOverlay} onClick={() => setShowDeleteConfirm(null)}>
+          <div className={styles.deleteModal} onClick={(e) => e.stopPropagation()}>
+            <h3>¿Está seguro que desea borrar esta conversación?</h3>
+            <p>Esta acción solo ocultará la conversación para usted. El otro usuario seguirá viéndola.</p>
+            <div className={styles.deleteModalActions}>
+              <button
+                className={styles.deleteModalCancel}
+                onClick={() => setShowDeleteConfirm(null)}
+                disabled={deletingConversation}
+              >
+                Cancelar
+              </button>
+              <button
+                className={styles.deleteModalConfirm}
+                onClick={() => deleteConversation(showDeleteConfirm)}
+                disabled={deletingConversation}
+              >
+                {deletingConversation ? "Borrando..." : "Borrar"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

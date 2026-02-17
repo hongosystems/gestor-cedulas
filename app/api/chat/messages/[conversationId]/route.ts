@@ -62,13 +62,28 @@ export async function GET(
 
     const svc = supabaseService();
 
-    // Verificar que el usuario participa en la conversación
-    const { data: participant, error: participantError } = await svc
-      .from("conversation_participants")
-      .select("id")
-      .eq("conversation_id", conversationId)
-      .eq("user_id", user.id)
-      .single();
+        // Verificar que el usuario participa en la conversación
+        // NOTA: Para habilitar soft delete, ejecutar la migración: migrations/add_soft_delete_to_conversations.sql
+        let { data: participant, error: participantError } = await svc
+          .from("conversation_participants")
+          .select("id")
+          .eq("conversation_id", conversationId)
+          .eq("user_id", user.id)
+          .is("deleted_at", null)
+          .single();
+        
+        // Si hay error por columna inexistente, intentar sin el filtro deleted_at
+        if (participantError && participantError.message?.includes("deleted_at")) {
+          console.warn("[API Messages] Columna deleted_at no existe, continuando sin filtro. Ejecutar migración: migrations/add_soft_delete_to_conversations.sql");
+          const retryResult = await svc
+            .from("conversation_participants")
+            .select("id")
+            .eq("conversation_id", conversationId)
+            .eq("user_id", user.id)
+            .single();
+          participant = retryResult.data;
+          participantError = retryResult.error;
+        }
 
     if (participantError || !participant) {
       return NextResponse.json(

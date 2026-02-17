@@ -75,13 +75,13 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  backdrop-filter: blur(10px);
+  /* Removed backdrop-filter to prevent overlay issues */
 }
 
 /* ===== Header (Sticky) ===== */
 .chatHeader {
   padding: 14px 16px;
-  background: linear-gradient(90deg, rgba(0, 82, 156, 0.25), rgba(0, 82, 156, 0.12));
+  background: var(--chat-bg);
   color: var(--chat-text);
   display: flex;
   justify-content: space-between;
@@ -89,8 +89,8 @@
   border-bottom: 1px solid var(--chat-border);
   position: sticky;
   top: 0;
-  z-index: 10;
-  backdrop-filter: blur(8px);
+  z-index: 1;
+  /* Removed backdrop-filter to prevent overlay issues */
 }
 
 .chatHeader h3 {
@@ -137,7 +137,7 @@
 /* ===== Conversation Header (Sticky) ===== */
 .conversationHeader {
   padding: 12px 16px;
-  background: linear-gradient(90deg, rgba(0, 82, 156, 0.25), rgba(0, 82, 156, 0.12));
+  background: var(--chat-bg);
   color: var(--chat-text);
   display: flex;
   align-items: center;
@@ -146,8 +146,8 @@
   border-bottom: 1px solid var(--chat-border);
   position: sticky;
   top: 0;
-  z-index: 10;
-  backdrop-filter: blur(8px);
+  z-index: 1;
+  /* Removed backdrop-filter to prevent overlay issues */
 }
 
 .conversationHeaderInfo {
@@ -210,14 +210,25 @@
   background: var(--chat-bg);
 }
 
+.conversationItemWrapper {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--chat-border);
+  position: relative;
+}
+
+.conversationItemWrapper.active {
+  background: var(--chat-surface-2);
+}
+
 .conversationItem {
+  flex: 1;
   width: 100%;
   padding: 12px 16px;
   border: none;
   background: transparent;
   text-align: left;
   cursor: pointer;
-  border-bottom: 1px solid var(--chat-border);
   display: flex;
   align-items: center;
   gap: 12px;
@@ -228,8 +239,36 @@
   background: var(--chat-surface);
 }
 
-.conversationItem.active {
-  background: var(--chat-surface-2);
+.conversationItemWrapper:hover .conversationItem {
+  background: var(--chat-surface);
+}
+
+.deleteConversationButton {
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  color: var(--chat-text-muted);
+  cursor: pointer;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s, transform 0.1s;
+  opacity: 0;
+  margin-right: 8px;
+}
+
+.conversationItemWrapper:hover .deleteConversationButton {
+  opacity: 1;
+}
+
+.deleteConversationButton:hover {
+  color: var(--brand-red, #e13940);
+  transform: scale(1.1);
+}
+
+.deleteConversationButton:active {
+  transform: scale(0.95);
 }
 
 .conversationAvatar {
@@ -332,27 +371,7 @@
   font-size: 14px;
 }
 
-.emptyMessagesPanel {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--chat-bg);
-  background-image: 
-    repeating-linear-gradient(
-      45deg,
-      transparent,
-      transparent 10px,
-      var(--chat-bg-pattern) 10px,
-      var(--chat-bg-pattern) 20px
-    );
-}
-
-.emptyMessagesContent {
-  text-align: center;
-  color: var(--chat-text-muted);
-  font-size: 14px;
-}
+/* Removed emptyMessagesPanel - no longer needed */
 
 /* ===== Messages ===== */
 .message {
@@ -511,8 +530,8 @@
   gap: 8px;
   position: sticky;
   bottom: 0;
-  z-index: 10;
-  backdrop-filter: blur(8px);
+  z-index: 1;
+  /* Removed backdrop-filter to prevent overlay issues */
 }
 
 .messageTextarea {
@@ -747,6 +766,90 @@
 
 .messageTextarea::-webkit-scrollbar-thumb:hover {
   opacity: 0.8;
+}
+
+/* ===== Delete Modal ===== */
+.deleteModalOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  backdrop-filter: blur(4px);
+}
+
+.deleteModal {
+  background: var(--chat-bg);
+  border: 1px solid var(--chat-border);
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 400px;
+  width: 90%;
+  box-shadow: var(--chat-shadow);
+}
+
+.deleteModal h3 {
+  margin: 0 0 12px 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--chat-text);
+}
+
+.deleteModal p {
+  margin: 0 0 20px 0;
+  font-size: 14px;
+  color: var(--chat-text-muted);
+  line-height: 1.5;
+}
+
+.deleteModalActions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.deleteModalCancel,
+.deleteModalConfirm {
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+  border: 1px solid var(--chat-border);
+}
+
+.deleteModalCancel {
+  background: var(--chat-surface);
+  color: var(--chat-text);
+}
+
+.deleteModalCancel:hover:not(:disabled) {
+  background: var(--chat-surface-2);
+  transform: scale(1.02);
+}
+
+.deleteModalConfirm {
+  background: var(--brand-red, #e13940);
+  color: white;
+  border-color: var(--brand-red, #e13940);
+}
+
+.deleteModalConfirm:hover:not(:disabled) {
+  background: #c02e34;
+  transform: scale(1.02);
+}
+
+.deleteModalCancel:disabled,
+.deleteModalConfirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
 }
 
 /* ===== Responsive ===== */
