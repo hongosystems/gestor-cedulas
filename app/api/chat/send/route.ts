@@ -56,49 +56,51 @@ export async function POST(req: NextRequest) {
 
     const svc = supabaseService();
 
-        // Verificar que el usuario participa en la conversación
-        // NOTA: Para habilitar soft delete, ejecutar la migración: migrations/add_soft_delete_to_conversations.sql
-        let { data: participant, error: participantError } = await svc
-          .from("conversation_participants")
-          .select("id, deleted_at")
-          .eq("conversation_id", conversation_id)
-          .eq("user_id", user.id)
-          .single();
+    // Verificar que el usuario participa en la conversación
+    // NOTA: Para habilitar soft delete, ejecutar la migración: migrations/add_soft_delete_to_conversations.sql
+    let participant: { id: any; deleted_at?: any } | null = null;
+    let participantError: any = null;
+    
+    try {
+      const result = await svc
+        .from("conversation_participants")
+        .select("id, deleted_at")
+        .eq("conversation_id", conversation_id)
+        .eq("user_id", user.id)
+        .single();
+      participant = result.data as { id: any; deleted_at?: any } | null;
+      participantError = result.error;
+    } catch (e: any) {
+      participantError = e;
+    }
 
-        // Si hay error por columna inexistente, intentar sin deleted_at
-        if (participantError && participantError.message?.includes("deleted_at")) {
-          console.warn("[API Send] Columna deleted_at no existe, continuando sin ella. Ejecutar migración: migrations/add_soft_delete_to_conversations.sql");
-          const retryResult = await svc
-            .from("conversation_participants")
-            .select("id")
-            .eq("conversation_id", conversation_id)
-            .eq("user_id", user.id)
-            .single();
-          participant = retryResult.data;
-          participantError = retryResult.error;
-        }
-
-        if (participantError || !participant) {
-          return NextResponse.json(
-            { error: "No tienes acceso a esta conversación" },
-            { status: 403 }
-          );
-        }
-
-        // Si la columna deleted_at existe y la conversación estaba borrada, restaurarla
-        if (participant && 'deleted_at' in participant && participant.deleted_at) {
-          await svc
-            .from("conversation_participants")
-            .update({ deleted_at: null })
-            .eq("conversation_id", conversation_id)
-            .eq("user_id", user.id);
-        }
+    // Si hay error por columna inexistente, intentar sin deleted_at
+    if (participantError && participantError.message?.includes("deleted_at")) {
+      console.warn("[API Send] Columna deleted_at no existe, continuando sin ella. Ejecutar migración: migrations/add_soft_delete_to_conversations.sql");
+      const retryResult = await svc
+        .from("conversation_participants")
+        .select("id")
+        .eq("conversation_id", conversation_id)
+        .eq("user_id", user.id)
+        .single();
+      participant = retryResult.data as { id: any; deleted_at?: any } | null;
+      participantError = retryResult.error;
+    }
 
     if (participantError || !participant) {
       return NextResponse.json(
         { error: "No tienes acceso a esta conversación" },
         { status: 403 }
       );
+    }
+
+    // Si la columna deleted_at existe y la conversación estaba borrada, restaurarla
+    if (participant && 'deleted_at' in participant && participant.deleted_at) {
+      await svc
+        .from("conversation_participants")
+        .update({ deleted_at: null })
+        .eq("conversation_id", conversation_id)
+        .eq("user_id", user.id);
     }
 
     // Crear el mensaje
