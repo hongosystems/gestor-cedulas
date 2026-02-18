@@ -920,6 +920,19 @@ export default function PruebaPericiaPage() {
   const [createdByOptions, setCreatedByOptions] = useState<Array<{ id: string; name: string }>>([]);
   const [juzgadoFilter, setJuzgadoFilter] = useState<"todos" | string>("todos");
   const [userJuzgados, setUserJuzgados] = useState<string[]>([]);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [currentUserName, setCurrentUserName] = useState<string>("");
+  const [userRoles, setUserRoles] = useState<{
+    isSuperadmin: boolean;
+    isAdminExpedientes: boolean;
+    isAdminCedulas: boolean;
+    isAbogado: boolean;
+  }>({
+    isSuperadmin: false,
+    isAdminExpedientes: false,
+    isAdminCedulas: false,
+    isAbogado: false,
+  });
   
   // Estados para órdenes/seguimiento (solo si el flag está activo)
   const [activeTab, setActiveTab] = useState<"deteccion" | "ordenes">("deteccion");
@@ -955,6 +968,16 @@ export default function PruebaPericiaPage() {
   const [savingTurno, setSavingTurno] = useState(false);
   const [creatingGestion, setCreatingGestion] = useState(false);
 
+  // Cerrar menú al hacer clic fuera
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleClickOutside = () => setMenuOpen(false);
+    setTimeout(() => {
+      document.addEventListener("click", handleClickOutside);
+    }, 100);
+    return () => document.removeEventListener("click", handleClickOutside);
+  }, [menuOpen]);
+
   const loadData = async () => {
     try {
       setMsg("");
@@ -964,6 +987,45 @@ export default function PruebaPericiaPage() {
       if (!session) return;
 
       const uid = session.user.id;
+      
+      // Obtener nombre del usuario desde la sesión o user_metadata
+      const sessionFullName = (session.user.user_metadata as { full_name?: string })?.full_name;
+      const sessionEmail = (session.user.email || "").trim();
+      const baseName = (sessionFullName || "").trim() || sessionEmail;
+      setCurrentUserName(baseName);
+      
+      // Intentar mejorar el nombre desde profiles
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("full_name, email")
+        .eq("id", uid)
+        .maybeSingle();
+      
+      if (profile) {
+        const profileName = profile.full_name?.trim() || profile.email?.trim() || "";
+        if (profileName) {
+          setCurrentUserName(profileName);
+        }
+      }
+
+      // Verificar roles del usuario
+      const { data: roleData, error: roleErr } = await supabase
+        .from("user_roles")
+        .select("is_superadmin, is_admin_expedientes, is_admin_cedulas, is_abogado")
+        .eq("user_id", uid)
+        .maybeSingle();
+      
+      const isAdminExp = !roleErr && roleData?.is_admin_expedientes === true;
+      const isAdminCedulas = !roleErr && roleData?.is_admin_cedulas === true;
+      const isAbogado = !roleErr && roleData?.is_abogado === true;
+      const isSuperadmin = !roleErr && roleData?.is_superadmin === true;
+      
+      setUserRoles({
+        isSuperadmin: isSuperadmin || false,
+        isAdminExpedientes: isAdminExp || false,
+        isAdminCedulas: isAdminCedulas || false,
+        isAbogado: isAbogado || false,
+      });
 
       // Cargar juzgados asignados al usuario
       const { data: juzgadosData, error: juzgadosErr } = await supabase
@@ -1568,10 +1630,320 @@ export default function PruebaPericiaPage() {
 
   return (
     <div style={{ padding: "24px", maxWidth: "100%", overflowX: "auto" }}>
-      <div style={{ marginBottom: 24, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
+      <div style={{ marginBottom: 24, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16, position: "relative" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          {/* Menú Hamburguesa */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen(!menuOpen);
+            }}
+            style={{
+              background: "rgba(255,255,255,.08)",
+              border: "1px solid rgba(255,255,255,.16)",
+              borderRadius: 8,
+              padding: "8px 10px",
+              cursor: "pointer",
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+              alignItems: "center",
+              justifyContent: "center",
+              transition: "all 0.2s ease",
+              minWidth: 40,
+              minHeight: 40
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "rgba(255,255,255,.12)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "rgba(255,255,255,.08)";
+            }}
+          >
+            <div style={{ width: 20, height: 2, background: "var(--text)", borderRadius: 1 }} />
+            <div style={{ width: 20, height: 2, background: "var(--text)", borderRadius: 1 }} />
+            <div style={{ width: 20, height: 2, background: "var(--text)", borderRadius: 1 }} />
+          </button>
+
+          {/* Menú desplegable */}
+          {menuOpen && (
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                position: "absolute",
+                top: "100%",
+                left: 0,
+                marginTop: 8,
+                background: "linear-gradient(180deg, rgba(11,47,85,.98), rgba(7,28,46,.98))",
+                border: "1px solid rgba(255,255,255,.16)",
+                borderRadius: 12,
+                padding: "12px 0",
+                minWidth: 220,
+                boxShadow: "0 8px 24px rgba(0,0,0,.4)",
+                zIndex: 1000,
+                backdropFilter: "blur(10px)"
+              }}
+            >
+              {(userRoles.isSuperadmin || userRoles.isAdminExpedientes) && (
+                <Link
+                  href="/superadmin"
+                  onClick={() => setMenuOpen(false)}
+                  style={{
+                    display: "block",
+                    padding: "12px 20px",
+                    color: "var(--text)",
+                    textDecoration: "none",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    transition: "background 0.2s ease",
+                    borderLeft: "3px solid transparent"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                    e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.borderLeftColor = "transparent";
+                  }}
+                >
+                  📊 Dashboard SuperAdmin
+                </Link>
+              )}
+              {(userRoles.isSuperadmin || userRoles.isAdminExpedientes) && (
+                <Link
+                  href="/superadmin/mis-juzgados"
+                  onClick={() => setMenuOpen(false)}
+                  style={{
+                    display: "block",
+                    padding: "12px 20px",
+                    color: "var(--text)",
+                    textDecoration: "none",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    transition: "background 0.2s ease",
+                    borderLeft: "3px solid transparent"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                    e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.borderLeftColor = "transparent";
+                  }}
+                >
+                  📋 Mis Juzgados
+                </Link>
+              )}
+              {(userRoles.isSuperadmin || userRoles.isAdminExpedientes || userRoles.isAbogado) && (
+                <Link
+                  href="/app/expedientes/nueva"
+                  onClick={() => setMenuOpen(false)}
+                  style={{
+                    display: "block",
+                    padding: "12px 20px",
+                    color: "var(--text)",
+                    textDecoration: "none",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    transition: "background 0.2s ease",
+                    borderLeft: "3px solid transparent"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                    e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.borderLeftColor = "transparent";
+                  }}
+                >
+                  ➕ Carga Expedientes
+                </Link>
+              )}
+              {(userRoles.isSuperadmin || userRoles.isAdminExpedientes || userRoles.isAdminCedulas || userRoles.isAbogado) && (
+                <Link
+                  href="/app"
+                  onClick={() => setMenuOpen(false)}
+                  style={{
+                    display: "block",
+                    padding: "12px 20px",
+                    color: "var(--text)",
+                    textDecoration: "none",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    transition: "background 0.2s ease",
+                    borderLeft: "3px solid transparent"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                    e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.borderLeftColor = "transparent";
+                  }}
+                >
+                  📋 Mis Cédulas/Oficios
+                </Link>
+              )}
+              {(userRoles.isSuperadmin || userRoles.isAdminExpedientes || userRoles.isAdminCedulas || userRoles.isAbogado) && (
+                <Link
+                  href="/app/nueva"
+                  onClick={() => setMenuOpen(false)}
+                  style={{
+                    display: "block",
+                    padding: "12px 20px",
+                    color: "var(--text)",
+                    textDecoration: "none",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    transition: "background 0.2s ease",
+                    borderLeft: "3px solid transparent"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                    e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.borderLeftColor = "transparent";
+                  }}
+                >
+                  ➕ Nueva Cédula/Oficio
+                </Link>
+              )}
+              {(userRoles.isSuperadmin || userRoles.isAdminExpedientes || userRoles.isAdminCedulas || userRoles.isAbogado) && (
+                <Link
+                  href="/app/enviar"
+                  onClick={() => setMenuOpen(false)}
+                  style={{
+                    display: "block",
+                    padding: "12px 20px",
+                    color: "var(--text)",
+                    textDecoration: "none",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    transition: "background 0.2s ease",
+                    borderLeft: "3px solid transparent"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                    e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.borderLeftColor = "transparent";
+                  }}
+                >
+                  📤 Enviar Cédula/Oficio
+                </Link>
+              )}
+              {(userRoles.isSuperadmin || userRoles.isAdminExpedientes || userRoles.isAdminCedulas || userRoles.isAbogado) && (
+                <Link
+                  href="/app/recibidos"
+                  onClick={() => setMenuOpen(false)}
+                  style={{
+                    display: "block",
+                    padding: "12px 20px",
+                    color: "var(--text)",
+                    textDecoration: "none",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    transition: "background 0.2s ease",
+                    borderLeft: "3px solid transparent"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                    e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.borderLeftColor = "transparent";
+                  }}
+                >
+                  📥 Recibidos / Enviados
+                </Link>
+              )}
+              {(userRoles.isSuperadmin || userRoles.isAdminExpedientes || userRoles.isAdminCedulas || userRoles.isAbogado) && (
+                <Link
+                  href="/app/notificaciones"
+                  onClick={() => setMenuOpen(false)}
+                  style={{
+                    display: "block",
+                    padding: "12px 20px",
+                    color: "var(--text)",
+                    textDecoration: "none",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    transition: "background 0.2s ease",
+                    borderLeft: "3px solid transparent"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                    e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.borderLeftColor = "transparent";
+                  }}
+                >
+                  🔔 Notificaciones
+                </Link>
+              )}
+              {userRoles.isAbogado && (
+                <Link
+                  href="/prueba-pericia"
+                  onClick={() => setMenuOpen(false)}
+                  style={{
+                    display: "block",
+                    padding: "12px 20px",
+                    color: "var(--text)",
+                    textDecoration: "none",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    transition: "background 0.2s ease",
+                    borderLeft: "3px solid rgba(96,141,186,1)",
+                    background: "rgba(255,255,255,.05)"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "rgba(255,255,255,.05)";
+                  }}
+                >
+                  📅 Turnos Pericias
+                </Link>
+              )}
+            </div>
+          )}
+
+          <img className="logoMini" src="/logo.png" alt="Logo" style={{ width: 32, height: 32 }} />
         <h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, color: "var(--text)" }}>
           Prueba/Pericia
         </h1>
+        </div>
+        {currentUserName && (
+          <div
+            title={currentUserName}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "10px 16px",
+              background: "rgba(96,141,186,.15)",
+              border: "1px solid rgba(96,141,186,.35)",
+              borderRadius: 8,
+              fontSize: 13,
+              fontWeight: 600,
+              color: "var(--text)"
+            }}
+          >
+            {currentUserName}
+          </div>
+        )}
       </div>
 
       {/* Tabs (solo si el flag está activo) */}
