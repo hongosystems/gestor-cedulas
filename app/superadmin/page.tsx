@@ -2217,6 +2217,32 @@ export default function SuperAdminPage() {
               >
                 📥 Recibidos / Enviados
               </Link>
+              {roleFlags.isAbogado && (
+                <Link
+                  href="/prueba-pericia"
+                  onClick={() => setMenuOpen(false)}
+                  style={{
+                    display: "block",
+                    padding: "12px 20px",
+                    color: "var(--text)",
+                    textDecoration: "none",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    transition: "background 0.2s ease",
+                    borderLeft: "3px solid transparent"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                    e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.borderLeftColor = "transparent";
+                  }}
+                >
+                  📅 Turnos Pericias
+                </Link>
+              )}
             </div>
           )}
 

@@ -687,6 +687,7 @@ export default function MisCedulasPage() {
   const [currentUserName, setCurrentUserName] = useState<string>("");
   const [notasEditables, setNotasEditables] = useState<Record<string, string>>({});
   const [notasGuardando, setNotasGuardando] = useState<Record<string, boolean>>({});
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -805,6 +806,19 @@ export default function MisCedulasPage() {
       setLoading(false);
     })();
   }, []);
+
+  // Cerrar menú al hacer clic fuera
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleClickOutside = () => setMenuOpen(false);
+    // Usar setTimeout para que el click del botón no cierre inmediatamente el menú
+    setTimeout(() => {
+      document.addEventListener("click", handleClickOutside);
+    }, 0);
+    return () => {
+      document.removeEventListener("click", handleClickOutside);
+    };
+  }, [menuOpen]);
 
   const rows = useMemo(() => {
     let mapped = cedulas.map((c) => {
@@ -986,8 +1000,185 @@ export default function MisCedulasPage() {
     <main className="container">
       <section className="card">
         <header className="nav">
-          <img className="logoMini" src="/logo.png" alt="Logo" />
-          <h1>Mis Cédulas/Oficios</h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 16, position: "relative" }}>
+            {/* Menú Hamburguesa */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenuOpen(!menuOpen);
+              }}
+              style={{
+                background: "rgba(255,255,255,.08)",
+                border: "1px solid rgba(255,255,255,.16)",
+                borderRadius: 8,
+                padding: "8px 10px",
+                cursor: "pointer",
+                display: "flex",
+                flexDirection: "column",
+                gap: 4,
+                alignItems: "center",
+                justifyContent: "center",
+                transition: "all 0.2s ease",
+                minWidth: 40,
+                minHeight: 40
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "rgba(255,255,255,.12)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "rgba(255,255,255,.08)";
+              }}
+            >
+              <div style={{
+                width: 20,
+                height: 2,
+                background: "var(--text)",
+                borderRadius: 1,
+                transition: "all 0.3s ease"
+              }} />
+              <div style={{
+                width: 20,
+                height: 2,
+                background: "var(--text)",
+                borderRadius: 1,
+                transition: "all 0.3s ease"
+              }} />
+              <div style={{
+                width: 20,
+                height: 2,
+                background: "var(--text)",
+                borderRadius: 1,
+                transition: "all 0.3s ease"
+              }} />
+            </button>
+
+            {/* Menú desplegable */}
+            {menuOpen && (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  position: "absolute",
+                  top: "100%",
+                  left: 0,
+                  marginTop: 8,
+                  background: "linear-gradient(180deg, rgba(11,47,85,.98), rgba(7,28,46,.98))",
+                  border: "1px solid rgba(255,255,255,.16)",
+                  borderRadius: 12,
+                  padding: "12px 0",
+                  minWidth: 220,
+                  boxShadow: "0 8px 24px rgba(0,0,0,.4)",
+                  zIndex: 1000,
+                  backdropFilter: "blur(10px)"
+                }}
+              >
+                <Link
+                  href="/app/nueva"
+                  onClick={() => setMenuOpen(false)}
+                  style={{
+                    display: "block",
+                    padding: "12px 20px",
+                    color: "var(--text)",
+                    textDecoration: "none",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    transition: "background 0.2s ease",
+                    borderLeft: "3px solid transparent"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                    e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.borderLeftColor = "transparent";
+                  }}
+                >
+                  ➕ Nueva
+                </Link>
+                <Link
+                  href="/app/notificaciones"
+                  onClick={() => setMenuOpen(false)}
+                  style={{
+                    display: "block",
+                    padding: "12px 20px",
+                    color: "var(--text)",
+                    textDecoration: "none",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    transition: "background 0.2s ease",
+                    borderLeft: "3px solid transparent"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                    e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.borderLeftColor = "transparent";
+                  }}
+                >
+                  📬 Bandeja
+                </Link>
+                <Link
+                  href="/prueba-pericia"
+                  onClick={() => setMenuOpen(false)}
+                  style={{
+                    display: "block",
+                    padding: "12px 20px",
+                    color: "var(--text)",
+                    textDecoration: "none",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    transition: "background 0.2s ease",
+                    borderLeft: "3px solid transparent"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                    e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.borderLeftColor = "transparent";
+                  }}
+                >
+                  📅 Turnos Pericias
+                </Link>
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    logout();
+                  }}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "12px 20px",
+                    color: "var(--brand-red)",
+                    background: "transparent",
+                    border: "none",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    transition: "background 0.2s ease",
+                    borderLeft: "3px solid transparent"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(225, 57, 64, .15)";
+                    e.currentTarget.style.borderLeftColor = "var(--brand-red)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.borderLeftColor = "transparent";
+                  }}
+                >
+                  🚪 Salir
+                </button>
+              </div>
+            )}
+
+            <img className="logoMini" src="/logo.png" alt="Logo" />
+            <h1>Mis Cédulas/Oficios</h1>
+          </div>
           <div className="spacer" />
           {currentUserName && (
             <div
@@ -1026,15 +1217,6 @@ export default function MisCedulasPage() {
               </span>
             </div>
           )}
-          <Link className="btn" href="/app/notificaciones" style={{ marginRight: 8 }}>
-            📬 Bandeja
-          </Link>
-          <Link className="btn primary" href="/app/nueva">
-            Nueva
-          </Link>
-          <button className="btn danger" onClick={logout}>
-            Salir
-          </button>
         </header>
 
         <div className="page">

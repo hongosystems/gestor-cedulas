@@ -529,6 +529,32 @@ export default function NuevaExpedientePage() {
                       >
                         📋 Mis Juzgados
                       </Link>
+                      {userRoles.isAbogado && (
+                        <Link
+                          href="/prueba-pericia"
+                          onClick={() => setMenuOpen(false)}
+                          style={{
+                            display: "block",
+                            padding: "12px 20px",
+                            color: "#1a1a1a",
+                            textDecoration: "none",
+                            fontSize: 14,
+                            fontWeight: 600,
+                            transition: "background 0.2s ease",
+                            borderLeft: "3px solid transparent"
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = "rgba(96,141,186,.08)";
+                            e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = "transparent";
+                            e.currentTarget.style.borderLeftColor = "transparent";
+                          }}
+                        >
+                          📅 Turnos Pericias
+                        </Link>
+                      )}
                     </div>
                   )}
                 </>

@@ -898,6 +898,11 @@ async function requireSessionOrRedirect() {
 type SortField = "semaforo" | "fecha" | "dias" | "juzgado" | null;
 type SortDirection = "asc" | "desc";
 
+// Feature flag para órdenes y seguimiento
+// IMPORTANTE: Para activar, crear .env.local con: NEXT_PUBLIC_FEATURE_ORDENES_SEGUIMIENTO=true
+// y reiniciar el servidor de desarrollo
+const FEATURE_ORDENES_SEGUIMIENTO = process.env.NEXT_PUBLIC_FEATURE_ORDENES_SEGUIMIENTO === "true";
+
 export default function PruebaPericiaPage() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
@@ -915,6 +920,40 @@ export default function PruebaPericiaPage() {
   const [createdByOptions, setCreatedByOptions] = useState<Array<{ id: string; name: string }>>([]);
   const [juzgadoFilter, setJuzgadoFilter] = useState<"todos" | string>("todos");
   const [userJuzgados, setUserJuzgados] = useState<string[]>([]);
+  
+  // Estados para órdenes/seguimiento (solo si el flag está activo)
+  const [activeTab, setActiveTab] = useState<"deteccion" | "ordenes">("deteccion");
+  const [ordenesData, setOrdenesData] = useState<any[]>([]);
+  const [loadingOrdenes, setLoadingOrdenes] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [selectedOrden, setSelectedOrden] = useState<any | null>(null);
+  const [uploadingOrden, setUploadingOrden] = useState<Record<string, boolean>>({});
+  const [ordenesExistentes, setOrdenesExistentes] = useState<Record<string, boolean>>({}); // case_ref -> tiene orden
+  
+  // Filtros para órdenes/seguimiento
+  const [semaforoFilterOrdenes, setSemaforoFilterOrdenes] = useState<Semaforo | null>(null);
+  const [searchTermOrdenes, setSearchTermOrdenes] = useState<string>("");
+  const [createdByFilterOrdenes, setCreatedByFilterOrdenes] = useState<string>("all");
+  const [createdByOptionsOrdenes, setCreatedByOptionsOrdenes] = useState<Array<{ id: string; name: string }>>([]);
+  
+  // Estados para formularios en el Drawer
+  const [showComunicacionForm, setShowComunicacionForm] = useState(false);
+  const [showTurnoForm, setShowTurnoForm] = useState(false);
+  const [comunicacionForm, setComunicacionForm] = useState({
+    canal: "TELEFONO",
+    resultado: "SATISFACTORIO",
+    motivo_falla: "",
+    detalle: "",
+    tipo: "GESTION" as "ORDEN" | "GESTION"
+  });
+  const [turnoForm, setTurnoForm] = useState({
+    centro_medico: "",
+    fecha: "",
+    hora: "",
+  });
+  const [savingComunicacion, setSavingComunicacion] = useState(false);
+  const [savingTurno, setSavingTurno] = useState(false);
+  const [creatingGestion, setCreatingGestion] = useState(false);
 
   const loadData = async () => {
     try {
@@ -1102,6 +1141,37 @@ export default function PruebaPericiaPage() {
       
       setPjnFavoritos(favoritosData || []);
 
+      // Si el flag está activo, cargar órdenes existentes para verificar cuáles expedientes ya tienen órdenes
+      if (FEATURE_ORDENES_SEGUIMIENTO) {
+        try {
+          const ordenesRes = await fetch("/api/ordenes-medicas/list", {
+            headers: {
+              "Authorization": `Bearer ${session.access_token}`,
+            },
+          });
+          
+          if (ordenesRes.ok) {
+            const { data: ordenes } = await ordenesRes.json();
+            if (ordenes && Array.isArray(ordenes)) {
+              // Crear un mapa de case_ref -> tiene orden
+              const ordenesMap: Record<string, boolean> = {};
+              ordenes.forEach((orden: any) => {
+                if (orden.case_ref) {
+                  ordenesMap[orden.case_ref] = true;
+                }
+                // También mapear por expediente_id si existe
+                if (orden.expediente_id) {
+                  ordenesMap[orden.expediente_id] = true;
+                }
+              });
+              setOrdenesExistentes(ordenesMap);
+            }
+          }
+        } catch (err) {
+          console.warn("Error cargando órdenes existentes:", err);
+        }
+      }
+
       // Cargar nombres de usuarios para "Cargado por"
       const { data: profilesData } = await supabase
         .from("profiles")
@@ -1149,6 +1219,119 @@ export default function PruebaPericiaPage() {
     }
   };
 
+  // Función para cargar órdenes médicas (solo si el flag está activo)
+  const loadOrdenes = async () => {
+    if (!FEATURE_ORDENES_SEGUIMIENTO) {
+      console.log("[loadOrdenes] Feature flag desactivado");
+      return;
+    }
+    
+    try {
+      setLoadingOrdenes(true);
+      console.log("[loadOrdenes] Iniciando carga de órdenes...");
+      
+      const session = await requireSessionOrRedirect();
+      if (!session) {
+        console.warn("[loadOrdenes] No hay sesión");
+        return;
+      }
+
+      console.log("[loadOrdenes] Sesión obtenida, haciendo fetch...");
+      const res = await fetch("/api/ordenes-medicas/list", {
+        headers: {
+          "Authorization": `Bearer ${session.access_token}`,
+        },
+      });
+      
+      console.log("[loadOrdenes] Response recibida:", {
+        status: res.status,
+        statusText: res.statusText,
+        ok: res.ok,
+        headers: Object.fromEntries(res.headers.entries())
+      });
+
+      if (res.ok) {
+        const result = await res.json();
+        const ordenes = result.data || [];
+        setOrdenesData(ordenes);
+        
+        // Construir opciones para el filtro "Cargado por" basado en los usuarios que crearon órdenes
+        const userIds = new Set<string>();
+        const options: Array<{ id: string; name: string }> = [];
+        
+        ordenes.forEach((orden: any) => {
+          if (orden.emitida_por_user_id && !userIds.has(orden.emitida_por_user_id)) {
+            userIds.add(orden.emitida_por_user_id);
+          }
+        });
+        
+        if (userIds.size > 0) {
+          const { data: profilesData } = await supabase
+            .from("profiles")
+            .select("id, full_name, email")
+            .in("id", Array.from(userIds));
+          
+          if (profilesData) {
+            profilesData.forEach((profile: any) => {
+              options.push({
+                id: profile.id,
+                name: profile.full_name || profile.email || "Sin nombre"
+              });
+            });
+          }
+        }
+        
+        setCreatedByOptionsOrdenes(options);
+        
+        // Mostrar advertencia si hay un warning (ej: tablas no existen)
+        if (result.warning) {
+          console.warn("[Órdenes] Advertencia:", result.warning);
+          setMsg(result.warning);
+        }
+      } else {
+        // Mejorar el manejo de errores para mostrar más información
+        let errorData: any = { error: "Error desconocido" };
+        let errorText = "";
+        
+        try {
+          errorText = await res.text();
+          console.log("[loadOrdenes] Response text:", errorText);
+          console.log("[loadOrdenes] Status:", res.status, res.statusText);
+          
+          if (errorText) {
+            try {
+              errorData = JSON.parse(errorText);
+              console.log("[loadOrdenes] Parsed JSON:", errorData);
+            } catch (parseError) {
+              console.warn("[loadOrdenes] No es JSON válido, usando texto:", errorText);
+              errorData = { error: errorText || `HTTP ${res.status}: ${res.statusText}` };
+            }
+          } else {
+            errorData = { error: `HTTP ${res.status}: ${res.statusText} (sin body)` };
+          }
+        } catch (parseError) {
+          console.error("[loadOrdenes] Error al leer respuesta:", parseError);
+          errorData = { error: `HTTP ${res.status}: ${res.statusText} (error al leer respuesta)` };
+        }
+        
+        console.error("Error cargando órdenes:", {
+          status: res.status,
+          statusText: res.statusText,
+          error: errorData,
+          rawText: errorText
+        });
+        
+        const errorMessage = errorData.error || errorData.message || `HTTP ${res.status}: ${res.statusText}`;
+        setMsg(`Error al cargar órdenes: ${errorMessage}`);
+      }
+    } catch (err) {
+      console.error("Error en loadOrdenes:", err);
+      setMsg(`Error al cargar órdenes: ${err instanceof Error ? err.message : "Error desconocido"}`);
+    } finally {
+      setLoadingOrdenes(false);
+    }
+  };
+
   // Función para normalizar juzgado para comparación
   const normalizarJuzgadoParaComparar = (j: string | null): string => {
     if (!j) return "";
@@ -1174,6 +1357,13 @@ export default function PruebaPericiaPage() {
   useEffect(() => {
     loadData();
   }, []);
+
+  // Cargar órdenes cuando el tab está activo y el flag está habilitado
+  useEffect(() => {
+    if (FEATURE_ORDENES_SEGUIMIENTO && activeTab === "ordenes") {
+      loadOrdenes();
+    }
+  }, [activeTab]);
 
   // Filtrar expedientes por Prueba/Pericia y juzgados
   const expedientesFiltrados = useMemo(() => {
@@ -1383,6 +1573,318 @@ export default function PruebaPericiaPage() {
           Prueba/Pericia
         </h1>
       </div>
+
+      {/* Tabs (solo si el flag está activo) */}
+      {FEATURE_ORDENES_SEGUIMIENTO && (
+        <div style={{ 
+          display: "flex", 
+          gap: 8, 
+          marginBottom: 24,
+          borderBottom: "2px solid rgba(255,255,255,.1)"
+        }}>
+          <button
+            onClick={() => setActiveTab("deteccion")}
+            style={{
+              padding: "12px 24px",
+              background: activeTab === "deteccion" ? "rgba(96,141,186,.2)" : "transparent",
+              border: "none",
+              borderBottom: activeTab === "deteccion" ? "2px solid rgba(96,141,186,.8)" : "2px solid transparent",
+              color: "var(--text)",
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: "pointer",
+              transition: "all 0.2s ease",
+            }}
+          >
+            Detección
+          </button>
+          <button
+            onClick={() => setActiveTab("ordenes")}
+            style={{
+              padding: "12px 24px",
+              background: activeTab === "ordenes" ? "rgba(96,141,186,.2)" : "transparent",
+              border: "none",
+              borderBottom: activeTab === "ordenes" ? "2px solid rgba(96,141,186,.8)" : "2px solid transparent",
+              color: "var(--text)",
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: "pointer",
+              transition: "all 0.2s ease",
+            }}
+          >
+            Órdenes/Seguimiento
+          </button>
+        </div>
+      )}
+
+      {/* Contenido del tab de Órdenes/Seguimiento */}
+      {FEATURE_ORDENES_SEGUIMIENTO && activeTab === "ordenes" && (
+        <div>
+          {loadingOrdenes ? (
+            <div style={{ padding: "40px 20px", textAlign: "center", color: "var(--text)" }}>
+              Cargando órdenes...
+            </div>
+          ) : (
+            <>
+              {/* Filtros para órdenes */}
+              <div style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 16,
+                flexWrap: "wrap",
+                marginBottom: 16,
+                padding: "16px",
+                background: "rgba(255,255,255,.03)",
+                borderRadius: 12,
+                border: "1px solid rgba(255,255,255,.08)"
+              }}>
+                {/* Semáforo automático por horas */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ color: "var(--text)", fontSize: 13, fontWeight: 600 }}>
+                    Semáforo automático por horas:
+                  </span>
+                  <button
+                    onClick={() => setSemaforoFilterOrdenes(semaforoFilterOrdenes === "VERDE" ? null : "VERDE")}
+                    style={{
+                      cursor: "pointer",
+                      border: semaforoFilterOrdenes === "VERDE" ? "2px solid rgba(46, 204, 113, 0.8)" : "1px solid rgba(46, 204, 113, 0.35)",
+                      background: semaforoFilterOrdenes === "VERDE" ? "rgba(46, 204, 113, 0.25)" : "rgba(46, 204, 113, 0.16)",
+                      color: "rgba(210, 255, 226, 0.95)",
+                      padding: "6px 12px",
+                      borderRadius: 999,
+                      fontWeight: 700,
+                      fontSize: 12,
+                      letterSpacing: 0.4,
+                      transition: "all 0.2s ease"
+                    }}
+                  >
+                    VERDE
+                  </button>
+                  <span style={{ color: "var(--muted)", fontSize: 12 }}>0-24hrs</span>
+                  <button
+                    onClick={() => setSemaforoFilterOrdenes(semaforoFilterOrdenes === "AMARILLO" ? null : "AMARILLO")}
+                    style={{
+                      cursor: "pointer",
+                      border: semaforoFilterOrdenes === "AMARILLO" ? "2px solid rgba(241, 196, 15, 0.8)" : "1px solid rgba(241, 196, 15, 0.35)",
+                      background: semaforoFilterOrdenes === "AMARILLO" ? "rgba(241, 196, 15, 0.25)" : "rgba(241, 196, 15, 0.14)",
+                      color: "rgba(255, 246, 205, 0.95)",
+                      padding: "6px 12px",
+                      borderRadius: 999,
+                      fontWeight: 700,
+                      fontSize: 12,
+                      letterSpacing: 0.4,
+                      transition: "all 0.2s ease"
+                    }}
+                  >
+                    AMARILLO
+                  </button>
+                  <span style={{ color: "var(--muted)", fontSize: 12 }}>24-48hrs</span>
+                  <button
+                    onClick={() => setSemaforoFilterOrdenes(semaforoFilterOrdenes === "ROJO" ? null : "ROJO")}
+                    style={{
+                      cursor: "pointer",
+                      border: semaforoFilterOrdenes === "ROJO" ? "2px solid rgba(231, 76, 60, 0.8)" : "1px solid rgba(231, 76, 60, 0.35)",
+                      background: semaforoFilterOrdenes === "ROJO" ? "rgba(231, 76, 60, 0.25)" : "rgba(231, 76, 60, 0.14)",
+                      color: "rgba(255, 220, 216, 0.95)",
+                      padding: "6px 12px",
+                      borderRadius: 999,
+                      fontWeight: 700,
+                      fontSize: 12,
+                      letterSpacing: 0.4,
+                      transition: "all 0.2s ease"
+                    }}
+                  >
+                    ROJO
+                  </button>
+                  <span style={{ color: "var(--muted)", fontSize: 12 }}>48-72hrs+</span>
+                  {semaforoFilterOrdenes && (
+                    <button
+                      onClick={() => setSemaforoFilterOrdenes(null)}
+                      style={{
+                        cursor: "pointer",
+                        padding: "4px 8px",
+                        background: "rgba(255,255,255,.08)",
+                        border: "1px solid rgba(255,255,255,.16)",
+                        borderRadius: 6,
+                        color: "var(--text)",
+                        fontSize: 11,
+                        fontWeight: 600
+                      }}
+                    >
+                      ✕ Limpiar
+                    </button>
+                  )}
+                </div>
+
+                {/* Buscador */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 200 }}>
+                  <span style={{ color: "var(--text)", fontSize: 13, fontWeight: 600 }}>Buscar:</span>
+                  <input
+                    type="text"
+                    value={searchTermOrdenes}
+                    onChange={(e) => setSearchTermOrdenes(e.target.value)}
+                    placeholder="Case Ref, Archivo..."
+                    style={{
+                      flex: 1,
+                      padding: "8px 12px",
+                      background: "rgba(255,255,255,.06)",
+                      border: "1px solid rgba(255,255,255,.14)",
+                      borderRadius: 8,
+                      color: "var(--text)",
+                      fontSize: 13,
+                      minWidth: 200
+                    }}
+                  />
+                </div>
+
+                {/* Cargado por */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ color: "var(--text)", fontSize: 13, fontWeight: 600 }}>Cargado por:</span>
+                  <select
+                    value={createdByFilterOrdenes}
+                    onChange={(e) => setCreatedByFilterOrdenes(e.target.value)}
+                    style={{
+                      padding: "8px 10px",
+                      background: "rgba(255,255,255,.06)",
+                      border: "1px solid rgba(255,255,255,.14)",
+                      borderRadius: 8,
+                      color: "var(--text)",
+                      fontSize: 13,
+                      cursor: "pointer",
+                      minWidth: 150
+                    }}
+                  >
+                    <option value="all">Todos</option>
+                    {createdByOptionsOrdenes.map((opt) => (
+                      <option key={opt.id} value={opt.id}>
+                        {opt.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Tabla de órdenes filtradas */}
+              {(() => {
+                let ordenesFiltradas = [...ordenesData];
+
+                // Filtrar por semáforo
+                if (semaforoFilterOrdenes) {
+                  ordenesFiltradas = ordenesFiltradas.filter((orden: any) => orden.semaforo === semaforoFilterOrdenes);
+                }
+
+                // Filtrar por búsqueda
+                if (searchTermOrdenes.trim()) {
+                  const searchLower = searchTermOrdenes.trim().toLowerCase();
+                  ordenesFiltradas = ordenesFiltradas.filter((orden: any) => {
+                    const caseRef = (orden.case_ref || "").toLowerCase();
+                    const filename = (orden.filename || "").toLowerCase();
+                    return caseRef.includes(searchLower) || filename.includes(searchLower);
+                  });
+                }
+
+                // Filtrar por "Cargado por"
+                if (createdByFilterOrdenes !== "all") {
+                  ordenesFiltradas = ordenesFiltradas.filter((orden: any) => orden.emitida_por_user_id === createdByFilterOrdenes);
+                }
+
+                return (
+                  <div className="tableWrap" style={{ marginTop: 10 }}>
+              <table className="table" style={{ minWidth: '1400px' }}>
+                <thead>
+                  <tr>
+                    <th style={{ width: 130 }}>Semáforo SLA</th>
+                    <th>Case Ref</th>
+                    <th>Archivo</th>
+                    <th>Estado Gestión</th>
+                    <th>Centro Médico</th>
+                    <th>Turno</th>
+                    <th>Responsable</th>
+                    <th style={{ textAlign: "center" }}>Días sin contacto</th>
+                    <th style={{ width: 100 }}>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ordenesFiltradas.map((orden: any) => (
+                    <tr key={orden.id} style={{ verticalAlign: "top" }}>
+                      <td>
+                        <SemaforoChip value={orden.semaforo as Semaforo} />
+                      </td>
+                      <td style={{ fontWeight: 650 }}>
+                        {orden.case_ref || <span className="muted">—</span>}
+                      </td>
+                      <td>
+                        {orden.filename ? (
+                          <span style={{ fontSize: 13 }}>{orden.filename}</span>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </td>
+                      <td>
+                        <span style={{ fontSize: 13 }}>
+                          {orden.gestion?.estado || "Sin gestión"}
+                        </span>
+                      </td>
+                      <td>
+                        {orden.gestion?.centro_medico || <span className="muted">—</span>}
+                      </td>
+                      <td>
+                        {orden.gestion?.turno_fecha_hora ? (
+                          <span style={{ fontSize: 13 }}>
+                            {formatFecha(orden.gestion.turno_fecha_hora)}
+                          </span>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </td>
+                      <td>
+                        {orden.gestion?.responsable?.full_name || orden.gestion?.responsable?.email || <span className="muted">—</span>}
+                      </td>
+                      <td style={{ textAlign: "center", fontVariantNumeric: "tabular-nums" }}>
+                        {orden.dias_sin_contacto !== null ? orden.dias_sin_contacto : <span className="muted">—</span>}
+                      </td>
+                      <td>
+                        <button
+                          onClick={() => {
+                            setSelectedOrden(orden);
+                            setDrawerOpen(true);
+                          }}
+                          style={{
+                            padding: "6px 12px",
+                            background: "rgba(96,141,186,.2)",
+                            border: "1px solid rgba(96,141,186,.4)",
+                            borderRadius: 6,
+                            color: "var(--text)",
+                            fontSize: 12,
+                            fontWeight: 600,
+                            cursor: "pointer",
+                          }}
+                        >
+                          Abrir
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {ordenesFiltradas.length === 0 && (
+                    <tr>
+                      <td colSpan={9} className="muted">
+                        No hay órdenes médicas cargadas.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+                );
+              })()}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Contenido del tab de Detección (o vista completa si el flag está desactivado) */}
+      {(FEATURE_ORDENES_SEGUIMIENTO ? activeTab === "deteccion" : true) && (
+        <>
 
       {/* Filtros */}
       <div style={{ 
@@ -1657,6 +2159,9 @@ export default function PruebaPericiaPage() {
               <th style={{ width: 180 }}>Cargado por</th>
               <th style={{ width: 380, minWidth: 380, textAlign: "center" }}>Observaciones</th>
               <th style={{ width: 380, minWidth: 380, textAlign: "center" }}>Notas</th>
+              {FEATURE_ORDENES_SEGUIMIENTO && (
+                <th style={{ width: 150, textAlign: "center" }}>Acciones</th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -1729,12 +2234,113 @@ export default function PruebaPericiaPage() {
                       juzgado={item.juzgado}
                     />
                   </td>
+                  {FEATURE_ORDENES_SEGUIMIENTO && (() => {
+                    const caseRef = item.numero || item.caratula || "Sin referencia";
+                    const tieneOrden = ordenesExistentes[caseRef] || (!item.is_pjn_favorito && ordenesExistentes[item.id]);
+                    const isUploading = uploadingOrden[item.id] === true;
+                    
+                    return (
+                      <td style={{ textAlign: "center", padding: "11px 12px" }}>
+                        <button
+                          onClick={async () => {
+                            const input = document.createElement("input");
+                            input.type = "file";
+                            input.accept = ".pdf,.doc,.docx";
+                            input.multiple = true; // Permitir múltiples archivos
+                            input.onchange = async (e) => {
+                              const files = Array.from((e.target as HTMLInputElement).files || []);
+                              if (files.length === 0) return;
+                              
+                              if (files.length > 5) {
+                                setMsg("Error: Máximo 5 archivos por orden");
+                                return;
+                              }
+
+                              const itemId = item.id;
+                              setUploadingOrden(prev => ({ ...prev, [itemId]: true }));
+                              try {
+                                const session = await requireSessionOrRedirect();
+                                if (!session) return;
+
+                                const formData = new FormData();
+                                // Agregar todos los archivos
+                                files.forEach((file, index) => {
+                                  formData.append(`file_${index}`, file);
+                                });
+                                formData.append("case_ref", caseRef);
+                                if (!item.is_pjn_favorito) {
+                                  formData.append("expediente_id", item.id);
+                                }
+
+                                const res = await fetch("/api/ordenes-medicas/upload", {
+                                  method: "POST",
+                                  headers: {
+                                    "Authorization": `Bearer ${session.access_token}`,
+                                  },
+                                  body: formData,
+                                });
+
+                                if (res.ok) {
+                                  const result = await res.json();
+                                  if (result.orden_existente) {
+                                    setMsg(`${files.length} archivo(s) agregado(s) a la orden existente`);
+                                  } else {
+                                    setMsg("Orden médica creada exitosamente");
+                                  }
+                                  // Actualizar estado de órdenes existentes
+                                  setOrdenesExistentes(prev => ({
+                                    ...prev,
+                                    [caseRef]: true,
+                                    ...(!item.is_pjn_favorito ? { [item.id]: true } : {}),
+                                  }));
+                                  if (activeTab === "ordenes") {
+                                    loadOrdenes();
+                                  }
+                                } else {
+                                  const error = await res.json().catch(() => ({ error: "Error desconocido" }));
+                                  setMsg("Error: " + (error.error || "Error desconocido"));
+                                }
+                              } catch (err) {
+                                console.error("Error subiendo orden:", err);
+                                setMsg("Error al subir la orden médica");
+                              } finally {
+                                setUploadingOrden(prev => {
+                                  const newState = { ...prev };
+                                  delete newState[itemId];
+                                  return newState;
+                                });
+                              }
+                            };
+                            input.click();
+                          }}
+                          disabled={isUploading}
+                          style={{
+                            padding: "6px 12px",
+                            background: isUploading 
+                              ? "rgba(255,255,255,.1)" 
+                              : tieneOrden 
+                                ? "rgba(255,193,7,.3)" // Amarillo cuando tiene orden
+                                : "rgba(96,141,186,.2)",
+                            border: `1px solid ${tieneOrden ? "rgba(255,193,7,.6)" : "rgba(96,141,186,.4)"}`,
+                            borderRadius: 6,
+                            color: "var(--text)",
+                            fontSize: 12,
+                            fontWeight: 600,
+                            cursor: isUploading ? "not-allowed" : "pointer",
+                            opacity: isUploading ? 0.6 : 1,
+                          }}
+                        >
+                          {isUploading ? "Subiendo..." : tieneOrden ? "Orden Creada" : "Crear Orden"}
+                        </button>
+                      </td>
+                    );
+                  })()}
                 </tr>
               );
             })}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={9} className="muted">
+                <td colSpan={FEATURE_ORDENES_SEGUIMIENTO ? 10 : 9} className="muted">
                   No hay expedientes de Prueba/Pericia cargados.
                 </td>
               </tr>
@@ -1828,6 +2434,1048 @@ export default function PruebaPericiaPage() {
           >
             Última »
           </button>
+        </div>
+      )}
+        </>
+      )}
+
+      {/* Drawer para detalles de orden (solo si el flag está activo) */}
+      {FEATURE_ORDENES_SEGUIMIENTO && drawerOpen && selectedOrden && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            right: 0,
+            width: "600px",
+            height: "100vh",
+            background: "rgba(11,47,85,.98)",
+            borderLeft: "1px solid rgba(255,255,255,.2)",
+            boxShadow: "-4px 0 24px rgba(0,0,0,.5)",
+            zIndex: 1000,
+            overflowY: "auto",
+            padding: "24px",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "var(--text)" }}>
+              Orden Médica
+            </h2>
+            <button
+              onClick={() => {
+                setDrawerOpen(false);
+                setSelectedOrden(null);
+                setShowComunicacionForm(false);
+                setShowTurnoForm(false);
+                setComunicacionForm({
+                  canal: "TELEFONO",
+                  resultado: "SATISFACTORIO",
+                  motivo_falla: "",
+                  detalle: "",
+                  tipo: "GESTION"
+                });
+                setTurnoForm({ centro_medico: "", fecha: "", hora: "" });
+              }}
+              style={{
+                padding: "8px 16px",
+                background: "rgba(255,255,255,.1)",
+                border: "1px solid rgba(255,255,255,.2)",
+                borderRadius: 6,
+                color: "var(--text)",
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              Cerrar
+            </button>
+          </div>
+
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ marginBottom: 12 }}>
+              <strong style={{ color: "var(--muted)", fontSize: 12 }}>Case Ref:</strong>
+              <div style={{ color: "var(--text)", fontSize: 14, marginTop: 4 }}>
+                {selectedOrden.case_ref}
+              </div>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <strong style={{ color: "var(--muted)", fontSize: 12 }}>Archivo:</strong>
+              <div style={{ color: "var(--text)", fontSize: 14, marginTop: 4 }}>
+                {selectedOrden.filename}
+              </div>
+            </div>
+            {selectedOrden.gestion && (
+              <>
+                <div style={{ marginBottom: 12 }}>
+                  <strong style={{ color: "var(--muted)", fontSize: 12 }}>Estado:</strong>
+                  <div style={{ color: "var(--text)", fontSize: 14, marginTop: 4 }}>
+                    {selectedOrden.gestion.estado}
+                  </div>
+                </div>
+                {selectedOrden.gestion.centro_medico && (
+                  <div style={{ marginBottom: 12 }}>
+                    <strong style={{ color: "var(--muted)", fontSize: 12 }}>Centro Médico:</strong>
+                    <div style={{ color: "var(--text)", fontSize: 14, marginTop: 4 }}>
+                      {selectedOrden.gestion.centro_medico}
+                    </div>
+                  </div>
+                )}
+                {selectedOrden.gestion.turno_fecha_hora && (
+                  <div style={{ marginBottom: 12 }}>
+                    <strong style={{ color: "var(--muted)", fontSize: 12 }}>Turno:</strong>
+                    <div style={{ color: "var(--text)", fontSize: 14, marginTop: 4 }}>
+                      {formatFecha(selectedOrden.gestion.turno_fecha_hora)}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Lista de archivos y botón para descargar */}
+          <div style={{ marginBottom: 24 }}>
+            <h3 style={{ margin: "0 0 12px 0", fontSize: 14, fontWeight: 600, color: "var(--text)" }}>
+              Archivos ({selectedOrden.archivos?.length || 0})
+            </h3>
+            
+            {selectedOrden.archivos && selectedOrden.archivos.length > 0 ? (
+              <div style={{ marginBottom: 12 }}>
+                {selectedOrden.archivos.map((archivo: any, index: number) => (
+                  <div
+                    key={archivo.id || index}
+                    style={{
+                      padding: "8px 12px",
+                      marginBottom: 6,
+                      background: "rgba(255,255,255,.03)",
+                      border: "1px solid rgba(255,255,255,.08)",
+                      borderRadius: 6,
+                      fontSize: 12,
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <span style={{ color: "var(--text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {archivo.filename || `Archivo ${archivo.orden_archivo || index + 1}`}
+                    </span>
+                    <button
+                      onClick={async () => {
+                        try {
+                          const session = await requireSessionOrRedirect();
+                          if (!session) return;
+
+                          const res = await fetch(`/api/ordenes-medicas/download?orden_id=${selectedOrden.id}&archivo_id=${archivo.id}`, {
+                            headers: {
+                              "Authorization": `Bearer ${session.access_token}`,
+                            },
+                          });
+
+                          if (res.ok) {
+                            const blob = await res.blob();
+                            const url = window.URL.createObjectURL(blob);
+                            const a = document.createElement("a");
+                            a.href = url;
+                            const contentDisposition = res.headers.get("Content-Disposition");
+                            const filename = contentDisposition
+                              ? contentDisposition.match(/filename="?(.+)"?/)?.[1] || archivo.filename || "archivo.pdf"
+                              : archivo.filename || "archivo.pdf";
+                            a.download = filename;
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            window.URL.revokeObjectURL(url);
+                          } else {
+                            setMsg("Error al descargar el archivo");
+                          }
+                        } catch (err) {
+                          console.error("Error descargando:", err);
+                          setMsg("Error al descargar el archivo");
+                        }
+                      }}
+                      style={{
+                        padding: "4px 8px",
+                        marginLeft: 8,
+                        background: "rgba(96,141,186,.2)",
+                        border: "1px solid rgba(96,141,186,.4)",
+                        borderRadius: 4,
+                        color: "var(--text)",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Descargar
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ color: "var(--muted)", fontSize: 12, marginBottom: 12, fontStyle: "italic" }}>
+                No hay archivos disponibles (orden antigua)
+              </div>
+            )}
+
+            <button
+              onClick={async () => {
+                try {
+                  const session = await requireSessionOrRedirect();
+                  if (!session) return;
+
+                  const res = await fetch(`/api/ordenes-medicas/download?orden_id=${selectedOrden.id}`, {
+                    headers: {
+                      "Authorization": `Bearer ${session.access_token}`,
+                    },
+                  });
+
+                  if (res.ok) {
+                    const blob = await res.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    // Obtener el nombre del archivo del header Content-Disposition
+                    const contentDisposition = res.headers.get("Content-Disposition");
+                    const filename = contentDisposition
+                      ? contentDisposition.match(/filename="?(.+)"?/)?.[1] || "orden-medica.zip"
+                      : (selectedOrden.archivos && selectedOrden.archivos.length > 1)
+                        ? `orden-medica-${selectedOrden.case_ref || selectedOrden.id.substring(0, 8)}.zip`
+                        : selectedOrden.filename || "orden-medica.pdf";
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(url);
+                  } else {
+                    setMsg("Error al descargar el archivo");
+                  }
+                } catch (err) {
+                  console.error("Error descargando:", err);
+                  setMsg("Error al descargar el archivo");
+                }
+              }}
+              style={{
+                padding: "10px 20px",
+                background: "rgba(96,141,186,.2)",
+                border: "1px solid rgba(96,141,186,.4)",
+                borderRadius: 8,
+                color: "var(--text)",
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: "pointer",
+                width: "100%",
+              }}
+            >
+              {selectedOrden.archivos && selectedOrden.archivos.length > 1
+                ? `Descargar Todos los Archivos (${selectedOrden.archivos.length})`
+                : "Descargar Orden Médica"}
+            </button>
+          </div>
+
+          {/* Acciones según estado */}
+          <div style={{ marginBottom: 24 }}>
+            <h3 style={{ margin: "0 0 16px 0", fontSize: 16, fontWeight: 700, color: "var(--text)" }}>
+              Acciones
+            </h3>
+            
+            {!selectedOrden.gestion ? (
+              <div style={{
+                padding: "16px",
+                background: "rgba(241, 196, 15, 0.1)",
+                border: "1px solid rgba(241, 196, 15, 0.3)",
+                borderRadius: 8,
+                color: "rgba(255, 246, 205, 0.95)",
+                fontSize: 13,
+              }}>
+                <div style={{ marginBottom: 12, textAlign: "center" }}>
+                  ⚠️ Esta orden no tiene gestión asociada
+                </div>
+                <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 12 }}>
+                  La gestión se crea automáticamente al subir una orden nueva. 
+                  Si esta orden fue creada antes, puedes crear la gestión manualmente.
+                </div>
+                <button
+                  type="button"
+                  disabled={creatingGestion}
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    
+                    if (creatingGestion) return;
+                    
+                    setCreatingGestion(true);
+                    try {
+                      console.log("[Crear Gestión] Iniciando...");
+                      const session = await requireSessionOrRedirect();
+                      if (!session) {
+                        console.error("[Crear Gestión] No hay sesión");
+                        setCreatingGestion(false);
+                        return;
+                      }
+
+                      console.log("[Crear Gestión] Orden ID:", selectedOrden.id);
+
+                      // Buscar usuario "Andrea" o usar el usuario actual
+                      const { data: andreaProfile } = await supabase
+                        .from("profiles")
+                        .select("id")
+                        .or("full_name.ilike.%andrea%,email.ilike.%andrea%")
+                        .limit(1)
+                        .maybeSingle();
+
+                      const responsableUserId = andreaProfile?.id || session.user.id;
+                      console.log("[Crear Gestión] Responsable ID:", responsableUserId);
+
+                      const requestBody = {
+                        orden_id: selectedOrden.id,
+                        responsable_user_id: responsableUserId,
+                      };
+                      console.log("[Crear Gestión] Request body:", requestBody);
+
+                      const res = await fetch("/api/ordenes-medicas/create-gestion", {
+                        method: "POST",
+                        headers: {
+                          "Content-Type": "application/json",
+                          "Authorization": `Bearer ${session.access_token}`,
+                        },
+                        body: JSON.stringify(requestBody),
+                      });
+
+                      if (res.ok) {
+                        const result = await res.json();
+                        console.log("[Crear Gestión] Resultado:", result);
+                        
+                        if (result.warning) {
+                          setMsg("La gestión ya existía. Recargando...");
+                        } else {
+                          setMsg("Gestión creada exitosamente");
+                        }
+                        
+                        // Recargar la orden seleccionada directamente
+                        const updatedRes = await fetch("/api/ordenes-medicas/list", {
+                          headers: {
+                            "Authorization": `Bearer ${session.access_token}`,
+                          },
+                        });
+                        if (updatedRes.ok) {
+                          const { data } = await updatedRes.json();
+                          const updated = data.find((o: any) => o.id === selectedOrden.id);
+                          if (updated) {
+                            console.log("[Crear Gestión] Orden actualizada:", updated);
+                            setSelectedOrden(updated);
+                            // Actualizar también la lista si estamos en el tab de órdenes
+                            if (activeTab === "ordenes") {
+                              setOrdenesData(data || []);
+                            }
+                          } else {
+                            console.warn("[Crear Gestión] No se encontró la orden actualizada");
+                          }
+                        }
+                      } else {
+                        let errorData: any = { error: "Error desconocido" };
+                        try {
+                          const text = await res.text();
+                          console.error("[Crear Gestión] Error response text:", text);
+                          if (text) {
+                            try {
+                              errorData = JSON.parse(text);
+                            } catch {
+                              errorData = { error: text || `HTTP ${res.status}` };
+                            }
+                          }
+                        } catch (parseError) {
+                          console.error("[Crear Gestión] Error parseando respuesta:", parseError);
+                          errorData = { error: `HTTP ${res.status}` };
+                        }
+                        
+                        console.error("[Crear Gestión] Error completo:", {
+                          status: res.status,
+                          statusText: res.statusText,
+                          error: errorData
+                        });
+                        
+                        setMsg("Error: " + (errorData.error || "Error desconocido"));
+                      }
+                    } catch (err) {
+                      console.error("Error creando gestión:", err);
+                      setMsg("Error al crear la gestión: " + (err instanceof Error ? err.message : String(err)));
+                    } finally {
+                      setCreatingGestion(false);
+                    }
+                  }}
+                  style={{
+                    width: "100%",
+                    padding: "10px 16px",
+                    background: creatingGestion ? "rgba(255,255,255,.1)" : "rgba(96,141,186,.2)",
+                    border: "1px solid rgba(96,141,186,.4)",
+                    borderRadius: 8,
+                    color: "var(--text)",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: creatingGestion ? "not-allowed" : "pointer",
+                    opacity: creatingGestion ? 0.6 : 1,
+                  }}
+                >
+                  {creatingGestion ? "Creando..." : "➕ Crear Gestión"}
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {/* Botón: Registrar Contacto Cliente */}
+              {selectedOrden.gestion && (
+                <button
+                  onClick={() => {
+                    setComunicacionForm({
+                      canal: "TELEFONO",
+                      resultado: "SATISFACTORIO",
+                      motivo_falla: "",
+                      detalle: "",
+                      tipo: "GESTION"
+                    });
+                    setShowComunicacionForm(true);
+                  }}
+                  style={{
+                    padding: "10px 16px",
+                    background: "rgba(96,141,186,.2)",
+                    border: "1px solid rgba(96,141,186,.4)",
+                    borderRadius: 8,
+                    color: "var(--text)",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  📞 Registrar Contacto Cliente
+                </button>
+              )}
+
+              {/* Botón: Registrar Contacto Centro Médico */}
+              {selectedOrden.gestion && (
+                <button
+                  onClick={() => {
+                    setComunicacionForm({
+                      canal: "TELEFONO",
+                      resultado: "SATISFACTORIO",
+                      motivo_falla: "",
+                      detalle: "",
+                      tipo: "GESTION"
+                    });
+                    setShowComunicacionForm(true);
+                  }}
+                  style={{
+                    padding: "10px 16px",
+                    background: "rgba(96,141,186,.2)",
+                    border: "1px solid rgba(96,141,186,.4)",
+                    borderRadius: 8,
+                    color: "var(--text)",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  🏥 Registrar Contacto Centro Médico
+                </button>
+              )}
+
+              {/* Botón: Asignar Turno */}
+              {selectedOrden.gestion && selectedOrden.gestion.estado !== "ESTUDIO_REALIZADO" && (
+                <button
+                  onClick={() => {
+                    setTurnoForm({
+                      centro_medico: selectedOrden.gestion?.centro_medico || "",
+                      fecha: "",
+                      hora: "",
+                    });
+                    setShowTurnoForm(true);
+                  }}
+                  style={{
+                    padding: "10px 16px",
+                    background: "rgba(96,141,186,.2)",
+                    border: "1px solid rgba(96,141,186,.4)",
+                    borderRadius: 8,
+                    color: "var(--text)",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  📅 Asignar Turno
+                </button>
+              )}
+
+              {/* Botón: Marcar Estudio Realizado */}
+              {selectedOrden.gestion && 
+               selectedOrden.gestion.estado !== "ESTUDIO_REALIZADO" && 
+               selectedOrden.gestion.turno_fecha_hora && (
+                <button
+                  onClick={async () => {
+                    if (!confirm("¿Marcar el estudio como realizado?")) return;
+                    
+                    try {
+                      const session = await requireSessionOrRedirect();
+                      if (!session) return;
+
+                      const res = await fetch("/api/ordenes-medicas/update-estado", {
+                        method: "POST",
+                        headers: {
+                          "Content-Type": "application/json",
+                          "Authorization": `Bearer ${session.access_token}`,
+                        },
+                        body: JSON.stringify({
+                          gestion_id: selectedOrden.gestion.id,
+                          estado: "ESTUDIO_REALIZADO",
+                          fecha_estudio_realizado: new Date().toISOString(),
+                          generar_notificacion: true,
+                        }),
+                      });
+
+                      if (res.ok) {
+                        setMsg("Estudio marcado como realizado");
+                        await loadOrdenes();
+                        // Recargar la orden seleccionada
+                        const updatedRes = await fetch("/api/ordenes-medicas/list", {
+                          headers: {
+                            "Authorization": `Bearer ${session.access_token}`,
+                          },
+                        });
+                        if (updatedRes.ok) {
+                          const { data } = await updatedRes.json();
+                          const updated = data.find((o: any) => o.id === selectedOrden.id);
+                          if (updated) setSelectedOrden(updated);
+                        }
+                      } else {
+                        const error = await res.json().catch(() => ({ error: "Error desconocido" }));
+                        setMsg("Error: " + (error.error || "Error desconocido"));
+                      }
+                    } catch (err) {
+                      console.error("Error marcando estudio:", err);
+                      setMsg("Error al marcar estudio como realizado");
+                    }
+                  }}
+                  style={{
+                    padding: "10px 16px",
+                    background: "rgba(46, 204, 113, 0.2)",
+                    border: "1px solid rgba(46, 204, 113, 0.4)",
+                    borderRadius: 8,
+                    color: "rgba(210, 255, 226, 0.95)",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  ✅ Marcar Estudio Realizado
+                </button>
+              )}
+
+              {/* Botón: Reprogramar (si hay turno) */}
+              {selectedOrden.gestion && 
+               selectedOrden.gestion.turno_fecha_hora && 
+               selectedOrden.gestion.estado !== "ESTUDIO_REALIZADO" && (
+                <button
+                  onClick={() => {
+                    setTurnoForm({
+                      centro_medico: selectedOrden.gestion?.centro_medico || "",
+                      fecha: "",
+                      hora: "",
+                    });
+                    setShowTurnoForm(true);
+                  }}
+                  style={{
+                    padding: "10px 16px",
+                    background: "rgba(241, 196, 15, 0.2)",
+                    border: "1px solid rgba(241, 196, 15, 0.4)",
+                    borderRadius: 8,
+                    color: "rgba(255, 246, 205, 0.95)",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  🔄 Reprogramar Turno
+                </button>
+              )}
+              </div>
+            )}
+          </div>
+
+          {/* Formulario: Registrar Comunicación */}
+          {showComunicacionForm && (
+            <div style={{
+              marginBottom: 24,
+              padding: "16px",
+              background: "rgba(255,255,255,.05)",
+              borderRadius: 12,
+              border: "1px solid rgba(255,255,255,.1)",
+            }}>
+              <h4 style={{ margin: "0 0 16px 0", fontSize: 14, fontWeight: 700, color: "var(--text)" }}>
+                Registrar Comunicación
+              </h4>
+              
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div>
+                  <label style={{ display: "block", fontSize: 12, color: "var(--muted)", marginBottom: 4 }}>
+                    Canal
+                  </label>
+                  <select
+                    value={comunicacionForm.canal}
+                    onChange={(e) => setComunicacionForm({ ...comunicacionForm, canal: e.target.value })}
+                    style={{
+                      width: "100%",
+                      padding: "8px",
+                      background: "rgba(11,47,85,.95)",
+                      border: "1px solid rgba(255,255,255,.2)",
+                      borderRadius: 6,
+                      color: "var(--text)",
+                      fontSize: 13,
+                    }}
+                  >
+                    <option value="TELEFONO">Teléfono</option>
+                    <option value="EMAIL">Email</option>
+                    <option value="WHATSAPP">WhatsApp</option>
+                    <option value="PRESENCIAL">Presencial</option>
+                    <option value="OTRO">Otro</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: "block", fontSize: 12, color: "var(--muted)", marginBottom: 4 }}>
+                    Resultado
+                  </label>
+                  <select
+                    value={comunicacionForm.resultado}
+                    onChange={(e) => setComunicacionForm({ ...comunicacionForm, resultado: e.target.value })}
+                    style={{
+                      width: "100%",
+                      padding: "8px",
+                      background: "rgba(11,47,85,.95)",
+                      border: "1px solid rgba(255,255,255,.2)",
+                      borderRadius: 6,
+                      color: "var(--text)",
+                      fontSize: 13,
+                    }}
+                  >
+                    <option value="SATISFACTORIO">Satisfactorio</option>
+                    <option value="INSATISFACTORIO">Insatisfactorio</option>
+                    <option value="SIN_RESPUESTA">Sin Respuesta</option>
+                    <option value="RECHAZO">Rechazo</option>
+                  </select>
+                </div>
+
+                {(comunicacionForm.resultado === "INSATISFACTORIO" || comunicacionForm.resultado === "RECHAZO") && (
+                  <div>
+                    <label style={{ display: "block", fontSize: 12, color: "var(--muted)", marginBottom: 4 }}>
+                      Motivo de Falla
+                    </label>
+                    <input
+                      type="text"
+                      value={comunicacionForm.motivo_falla}
+                      onChange={(e) => setComunicacionForm({ ...comunicacionForm, motivo_falla: e.target.value })}
+                      placeholder="Ej: Cliente no disponible, número incorrecto..."
+                      style={{
+                        width: "100%",
+                        padding: "8px",
+                        background: "rgba(11,47,85,.95)",
+                        border: "1px solid rgba(255,255,255,.2)",
+                        borderRadius: 6,
+                        color: "var(--text)",
+                        fontSize: 13,
+                      }}
+                    />
+                  </div>
+                )}
+
+                <div>
+                  <label style={{ display: "block", fontSize: 12, color: "var(--muted)", marginBottom: 4 }}>
+                    Detalle
+                  </label>
+                  <textarea
+                    value={comunicacionForm.detalle}
+                    onChange={(e) => setComunicacionForm({ ...comunicacionForm, detalle: e.target.value })}
+                    placeholder="Detalle de la comunicación..."
+                    rows={4}
+                    style={{
+                      width: "100%",
+                      padding: "8px",
+                      background: "rgba(11,47,85,.95)",
+                      border: "1px solid rgba(255,255,255,.2)",
+                      borderRadius: 6,
+                      color: "var(--text)",
+                      fontSize: 13,
+                      fontFamily: "inherit",
+                      resize: "vertical",
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    onClick={async () => {
+                      if (!comunicacionForm.detalle.trim()) {
+                        setMsg("El detalle es requerido");
+                        return;
+                      }
+
+                      setSavingComunicacion(true);
+                      try {
+                        const session = await requireSessionOrRedirect();
+                        if (!session) return;
+
+                        const entidadId = comunicacionForm.tipo === "GESTION" 
+                          ? selectedOrden.gestion?.id 
+                          : selectedOrden.id;
+
+                        if (!entidadId) {
+                          setMsg("Error: No se encontró la gestión");
+                          return;
+                        }
+
+                        // Determinar nuevo estado según resultado
+                        let nuevoEstado = null;
+                        if (comunicacionForm.tipo === "GESTION" && selectedOrden.gestion) {
+                          const estadoActual = selectedOrden.gestion.estado;
+                          if (estadoActual === "PENDIENTE_CONTACTO_CLIENTE") {
+                            nuevoEstado = comunicacionForm.resultado === "SATISFACTORIO" 
+                              ? "CONTACTO_CLIENTE_OK" 
+                              : "CONTACTO_CLIENTE_FALLIDO";
+                          } else if (estadoActual === "CONTACTO_CLIENTE_OK" || estadoActual === "TURNO_CONFIRMADO") {
+                            nuevoEstado = "SEGUIMIENTO_PRE_TURNO";
+                          }
+                        }
+
+                        const res = await fetch("/api/ordenes-medicas/comunicacion", {
+                          method: "POST",
+                          headers: {
+                            "Content-Type": "application/json",
+                            "Authorization": `Bearer ${session.access_token}`,
+                          },
+                          body: JSON.stringify({
+                            entidad_tipo: comunicacionForm.tipo,
+                            entidad_id: entidadId,
+                            canal: comunicacionForm.canal,
+                            resultado: comunicacionForm.resultado,
+                            motivo_falla: comunicacionForm.motivo_falla || null,
+                            detalle: comunicacionForm.detalle.trim(),
+                            actualizar_estado: nuevoEstado !== null,
+                            nuevo_estado: nuevoEstado,
+                          }),
+                        });
+
+                        if (res.ok) {
+                          setMsg("Comunicación registrada exitosamente");
+                          setShowComunicacionForm(false);
+                          setComunicacionForm({
+                            canal: "TELEFONO",
+                            resultado: "SATISFACTORIO",
+                            motivo_falla: "",
+                            detalle: "",
+                            tipo: "GESTION"
+                          });
+                          await loadOrdenes();
+                          // Recargar la orden seleccionada
+                          const updatedRes = await fetch("/api/ordenes-medicas/list", {
+                            headers: {
+                              "Authorization": `Bearer ${session.access_token}`,
+                            },
+                          });
+                          if (updatedRes.ok) {
+                            const { data } = await updatedRes.json();
+                            const updated = data.find((o: any) => o.id === selectedOrden.id);
+                            if (updated) setSelectedOrden(updated);
+                          }
+                        } else {
+                          const error = await res.json().catch(() => ({ error: "Error desconocido" }));
+                          setMsg("Error: " + (error.error || "Error desconocido"));
+                        }
+                      } catch (err) {
+                        console.error("Error guardando comunicación:", err);
+                        setMsg("Error al guardar la comunicación");
+                      } finally {
+                        setSavingComunicacion(false);
+                      }
+                    }}
+                    disabled={savingComunicacion}
+                    style={{
+                      flex: 1,
+                      padding: "10px 16px",
+                      background: savingComunicacion ? "rgba(255,255,255,.1)" : "rgba(96,141,186,.2)",
+                      border: "1px solid rgba(96,141,186,.4)",
+                      borderRadius: 8,
+                      color: "var(--text)",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: savingComunicacion ? "not-allowed" : "pointer",
+                      opacity: savingComunicacion ? 0.6 : 1,
+                    }}
+                  >
+                    {savingComunicacion ? "Guardando..." : "Guardar"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowComunicacionForm(false);
+                      setComunicacionForm({
+                        canal: "TELEFONO",
+                        resultado: "SATISFACTORIO",
+                        motivo_falla: "",
+                        detalle: "",
+                        tipo: "GESTION"
+                      });
+                    }}
+                    style={{
+                      padding: "10px 16px",
+                      background: "rgba(255,255,255,.1)",
+                      border: "1px solid rgba(255,255,255,.2)",
+                      borderRadius: 8,
+                      color: "var(--text)",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Formulario: Asignar Turno */}
+          {showTurnoForm && (
+            <div style={{
+              marginBottom: 24,
+              padding: "16px",
+              background: "rgba(255,255,255,.05)",
+              borderRadius: 12,
+              border: "1px solid rgba(255,255,255,.1)",
+            }}>
+              <h4 style={{ margin: "0 0 16px 0", fontSize: 14, fontWeight: 700, color: "var(--text)" }}>
+                {selectedOrden.gestion?.turno_fecha_hora ? "Reprogramar Turno" : "Asignar Turno"}
+              </h4>
+              
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div>
+                  <label style={{ display: "block", fontSize: 12, color: "var(--muted)", marginBottom: 4 }}>
+                    Centro Médico
+                  </label>
+                  <input
+                    type="text"
+                    value={turnoForm.centro_medico}
+                    onChange={(e) => setTurnoForm({ ...turnoForm, centro_medico: e.target.value })}
+                    placeholder="Nombre del centro médico"
+                    style={{
+                      width: "100%",
+                      padding: "8px",
+                      background: "rgba(11,47,85,.95)",
+                      border: "1px solid rgba(255,255,255,.2)",
+                      borderRadius: 6,
+                      color: "var(--text)",
+                      fontSize: 13,
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: "block", fontSize: 12, color: "var(--muted)", marginBottom: 4 }}>
+                    Fecha
+                  </label>
+                  <input
+                    type="date"
+                    value={turnoForm.fecha}
+                    onChange={(e) => setTurnoForm({ ...turnoForm, fecha: e.target.value })}
+                    style={{
+                      width: "100%",
+                      padding: "8px",
+                      background: "rgba(11,47,85,.95)",
+                      border: "1px solid rgba(255,255,255,.2)",
+                      borderRadius: 6,
+                      color: "var(--text)",
+                      fontSize: 13,
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: "block", fontSize: 12, color: "var(--muted)", marginBottom: 4 }}>
+                    Hora
+                  </label>
+                  <input
+                    type="time"
+                    value={turnoForm.hora}
+                    onChange={(e) => setTurnoForm({ ...turnoForm, hora: e.target.value })}
+                    style={{
+                      width: "100%",
+                      padding: "8px",
+                      background: "rgba(11,47,85,.95)",
+                      border: "1px solid rgba(255,255,255,.2)",
+                      borderRadius: 6,
+                      color: "var(--text)",
+                      fontSize: 13,
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    onClick={async () => {
+                      if (!turnoForm.centro_medico.trim() || !turnoForm.fecha || !turnoForm.hora) {
+                        setMsg("Todos los campos son requeridos");
+                        return;
+                      }
+
+                      setSavingTurno(true);
+                      try {
+                        const session = await requireSessionOrRedirect();
+                        if (!session) return;
+
+                        // Combinar fecha y hora en ISO string
+                        const fechaHora = new Date(`${turnoForm.fecha}T${turnoForm.hora}:00`).toISOString();
+
+                        const res = await fetch("/api/ordenes-medicas/update-estado", {
+                          method: "POST",
+                          headers: {
+                            "Content-Type": "application/json",
+                            "Authorization": `Bearer ${session.access_token}`,
+                          },
+                          body: JSON.stringify({
+                            gestion_id: selectedOrden.gestion?.id,
+                            estado: "TURNO_CONFIRMADO",
+                            centro_medico: turnoForm.centro_medico.trim(),
+                            turno_fecha_hora: fechaHora,
+                          }),
+                        });
+
+                        if (res.ok) {
+                          setMsg("Turno asignado exitosamente");
+                          setShowTurnoForm(false);
+                          setTurnoForm({ centro_medico: "", fecha: "", hora: "" });
+                          await loadOrdenes();
+                          // Recargar la orden seleccionada
+                          const updatedRes = await fetch("/api/ordenes-medicas/list", {
+                            headers: {
+                              "Authorization": `Bearer ${session.access_token}`,
+                            },
+                          });
+                          if (updatedRes.ok) {
+                            const { data } = await updatedRes.json();
+                            const updated = data.find((o: any) => o.id === selectedOrden.id);
+                            if (updated) setSelectedOrden(updated);
+                          }
+                        } else {
+                          const error = await res.json().catch(() => ({ error: "Error desconocido" }));
+                          setMsg("Error: " + (error.error || "Error desconocido"));
+                        }
+                      } catch (err) {
+                        console.error("Error asignando turno:", err);
+                        setMsg("Error al asignar el turno");
+                      } finally {
+                        setSavingTurno(false);
+                      }
+                    }}
+                    disabled={savingTurno}
+                    style={{
+                      flex: 1,
+                      padding: "10px 16px",
+                      background: savingTurno ? "rgba(255,255,255,.1)" : "rgba(96,141,186,.2)",
+                      border: "1px solid rgba(96,141,186,.4)",
+                      borderRadius: 8,
+                      color: "var(--text)",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: savingTurno ? "not-allowed" : "pointer",
+                      opacity: savingTurno ? 0.6 : 1,
+                    }}
+                  >
+                    {savingTurno ? "Guardando..." : "Guardar"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowTurnoForm(false);
+                      setTurnoForm({ centro_medico: "", fecha: "", hora: "" });
+                    }}
+                    style={{
+                      padding: "10px 16px",
+                      background: "rgba(255,255,255,.1)",
+                      border: "1px solid rgba(255,255,255,.2)",
+                      borderRadius: 8,
+                      color: "var(--text)",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Timeline de comunicaciones */}
+          <div style={{ marginBottom: 24 }}>
+            <h3 style={{ margin: "0 0 16px 0", fontSize: 16, fontWeight: 700, color: "var(--text)" }}>
+              Comunicaciones
+            </h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {selectedOrden.gestion?.comunicaciones?.length > 0 ? (
+                selectedOrden.gestion.comunicaciones.map((com: any) => (
+                  <div
+                    key={com.id}
+                    style={{
+                      padding: "12px",
+                      background: "rgba(255,255,255,.03)",
+                      borderRadius: 8,
+                      border: "1px solid rgba(255,255,255,.06)",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+                        {com.canal}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 12,
+                          padding: "4px 8px",
+                          borderRadius: 4,
+                          background:
+                            com.resultado === "SATISFACTORIO"
+                              ? "rgba(46, 204, 113, 0.16)"
+                              : com.resultado === "INSATISFACTORIO" || com.resultado === "RECHAZO"
+                              ? "rgba(231, 76, 60, 0.16)"
+                              : "rgba(241, 196, 15, 0.14)",
+                          color:
+                            com.resultado === "SATISFACTORIO"
+                              ? "rgba(210, 255, 226, 0.95)"
+                              : com.resultado === "INSATISFACTORIO" || com.resultado === "RECHAZO"
+                              ? "rgba(255, 220, 216, 0.95)"
+                              : "rgba(255, 246, 205, 0.95)",
+                        }}
+                      >
+                        {com.resultado}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 4 }}>
+                      {formatFecha(com.created_at)} - {com.realizado_por?.full_name || com.realizado_por?.email || "Usuario"}
+                    </div>
+                    {com.detalle && (
+                      <div style={{ fontSize: 13, color: "var(--text)", marginTop: 8, whiteSpace: "pre-wrap" }}>
+                        {com.detalle}
+                      </div>
+                    )}
+                    {com.motivo_falla && (
+                      <div style={{ fontSize: 12, color: "rgba(231, 76, 60, 0.8)", marginTop: 4 }}>
+                        Motivo: {com.motivo_falla}
+                      </div>
+                    )}
+                  </div>
+                ))
+              ) : (
+                <div style={{ color: "var(--muted)", fontSize: 13, textAlign: "center", padding: "20px" }}>
+                  No hay comunicaciones registradas
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>
