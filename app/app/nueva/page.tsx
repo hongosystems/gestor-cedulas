@@ -59,6 +59,9 @@ export default function NuevaCedulaPage() {
   const [msg, setMsg] = useState("");
   const [extracting, setExtracting] = useState(false); // Estado para loader de extracción
 
+  const [expedienteJurisdiccion, setExpedienteJurisdiccion] = useState("CIV"); // Jurisdicción, por defecto CIV
+  const [expedienteNumero, setExpedienteNumero] = useState(""); // Campo Número del expediente
+  const [expedienteAnio, setExpedienteAnio] = useState(""); // Campo Año del expediente
   const [caratula, setCaratula] = useState("");
   const [juzgado, setJuzgado] = useState("");
 
@@ -156,10 +159,10 @@ export default function NuevaCedulaPage() {
     // Autorrelleno para archivos DOCX y PDF
     if (name.endsWith(".docx") || name.endsWith(".pdf")) {
       try {
-        // Si es PDF, usar el microservicio extractor (endpoint que reenvía)
+        setExtracting(true); // Mostrar loader
+
         if (name.endsWith(".pdf")) {
-          setExtracting(true); // Mostrar loader
-          
+          // Si es PDF, usar el microservicio extractor (endpoint que reenvía)
           const formDataPDF = new FormData();
           formDataPDF.append("file", f);
           
@@ -196,8 +199,6 @@ export default function NuevaCedulaPage() {
           } catch (fetchError) {
             console.error("Error en fetch:", fetchError);
             setMsg("Error al procesar el PDF. Completá los campos manualmente.");
-          } finally {
-            setExtracting(false); // Ocultar loader
           }
         } else {
           // Si es DOCX, usar los endpoints actuales (mantener compatibilidad)
@@ -246,8 +247,11 @@ export default function NuevaCedulaPage() {
         }
       } catch (err) {
         // Si falla el parseo, no es crítico - el usuario puede completar manualmente
-        // Error silencioso: el usuario puede completar los campos manualmente
-        setMsg("No pude procesar el archivo automáticamente. Completá los campos manualmente.");
+        if (!msg) {
+          setMsg("No pude procesar el archivo automáticamente. Completá los campos manualmente.");
+        }
+      } finally {
+        setExtracting(false); // Ocultar loader
       }
     } else {
       // Para DOC u otros formatos, intentar detectar por nombre del archivo
@@ -259,6 +263,85 @@ export default function NuevaCedulaPage() {
       } else {
         setTipoDocumento(null);
       }
+    }
+  }
+
+  // Función para buscar expediente en PJN_Favoritos cuando el usuario ingresa número y año
+  async function buscarExpediente(numero: string, anio: string, jurisdiccion: string) {
+    setMsg("");
+    
+    // Si alguno de los campos está vacío, limpiar caratula y juzgado
+    if (!numero.trim() || !anio.trim()) {
+      setCaratula("");
+      setJuzgado("");
+      return;
+    }
+
+    // Validar que el número sea válido (solo dígitos)
+    if (!/^\d+$/.test(numero.trim())) {
+      return;
+    }
+
+    // Validar que el año sea válido (4 dígitos)
+    if (!/^\d{4}$/.test(anio.trim())) {
+      return;
+    }
+
+    const anioNum = parseInt(anio.trim(), 10);
+
+    // Validar que el año sea razonable
+    if (anioNum < 1900 || anioNum > 2100) {
+      return;
+    }
+
+    const jurisdiccionFinal = jurisdiccion || "CIV";
+
+    console.log("[buscarExpediente] Buscando:", { numero: numero.trim(), anio: anioNum, jurisdiccion: jurisdiccionFinal });
+
+    // Buscar en PJN_Favoritos
+    try {
+      const searchRes = await fetch("/api/search-pjn-favoritos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          numero: numero.trim(),
+          anio: anioNum,
+          jurisdiccion: jurisdiccionFinal,
+        }),
+      });
+
+      console.log("[buscarExpediente] Respuesta status:", searchRes.status);
+
+      if (searchRes.ok) {
+        const searchData = await searchRes.json();
+        console.log("[buscarExpediente] Datos recibidos:", searchData);
+        
+        if (searchData.encontrado) {
+          // Si se encuentra en BD, rellenar caratula y juzgado
+          console.log("[buscarExpediente] Expediente encontrado, rellenando campos");
+          if (searchData.caratula) {
+            setCaratula(searchData.caratula);
+          }
+          if (searchData.juzgado) {
+            setJuzgado(searchData.juzgado);
+          }
+          setMsg(""); // Limpiar mensaje de error si había uno
+        } else {
+          // Si no se encuentra, mostrar aviso
+          console.log("[buscarExpediente] Expediente no encontrado");
+          setMsg("⚠️ El EXPEDIENTE no figura en la base de datos. Completá los campos manualmente.");
+          // Limpiar caratula y juzgado si no se encontró
+          setCaratula("");
+          setJuzgado("");
+        }
+      } else {
+        const errorData = await searchRes.json().catch(() => ({}));
+        console.error("[buscarExpediente] Error en respuesta:", searchRes.status, errorData);
+        setMsg("Error al buscar el expediente. Intenta nuevamente.");
+      }
+    } catch (searchError) {
+      console.error("[buscarExpediente] Error en fetch:", searchError);
+      setMsg("Error de conexión al buscar el expediente.");
     }
   }
 
@@ -502,6 +585,77 @@ export default function NuevaCedulaPage() {
           )}
 
           <div style={{ display: "grid", gap: 20 }}>
+            <div>
+              <label className="label">Número/Año</label>
+              <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 6 }}>
+                <select
+                  className="input"
+                  value={expedienteJurisdiccion}
+                  onChange={(e) => {
+                    setExpedienteJurisdiccion(e.target.value);
+                    buscarExpediente(expedienteNumero, expedienteAnio, e.target.value);
+                  }}
+                  style={{ 
+                    width: 100,
+                    cursor: "pointer"
+                  }}
+                >
+                  <option value="CIV">CIV</option>
+                  <option value="COM">COM</option>
+                  <option value="CNT">CNT</option>
+                  <option value="LAB">LAB</option>
+                  <option value="FAM">FAM</option>
+                  <option value="PEN">PEN</option>
+                </select>
+                <input
+                  className="input"
+                  type="text"
+                  value={expedienteNumero}
+                  onChange={(e) => {
+                    setExpedienteNumero(e.target.value);
+                    buscarExpediente(e.target.value, expedienteAnio, expedienteJurisdiccion);
+                  }}
+                  placeholder="Número"
+                  style={{ width: 150 }}
+                />
+                <span style={{ 
+                  fontSize: 16, 
+                  color: "var(--text)",
+                  fontWeight: 500,
+                  userSelect: "none"
+                }}>/</span>
+                <input
+                  className="input"
+                  type="text"
+                  value={expedienteAnio}
+                  onChange={(e) => {
+                    setExpedienteAnio(e.target.value);
+                    buscarExpediente(expedienteNumero, e.target.value, expedienteJurisdiccion);
+                  }}
+                  placeholder="Año"
+                  style={{ width: 100 }}
+                  maxLength={4}
+                />
+                <select
+                  className="input"
+                  value={tipoDocumento || ""}
+                  onChange={(e) => setTipoDocumento(e.target.value as "CEDULA" | "OFICIO" | null || null)}
+                  style={{ 
+                    minWidth: 150,
+                    cursor: "pointer",
+                    marginLeft: "auto"
+                  }}
+                >
+                  <option value="">Seleccionar...</option>
+                  <option value="CEDULA">Cédula</option>
+                  <option value="OFICIO">Oficio</option>
+                </select>
+              </div>
+              <p className="helper" style={{ marginTop: 6, marginBottom: 0 }}>
+                Ingresá la jurisdicción, número y año del expediente. Si existe en la base de datos, se completarán automáticamente Carátula y Juzgado.
+              </p>
+            </div>
+
             <div>
               <label className="label">Carátula</label>
               <input
