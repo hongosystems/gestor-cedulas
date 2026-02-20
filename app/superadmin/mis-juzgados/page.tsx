@@ -181,14 +181,20 @@ function tienePruebaPericia(movimientos: any): boolean {
           if (mov.Detalle) {
             detalleText = String(mov.Detalle).toUpperCase();
           } else if (mov.cols && Array.isArray(mov.cols)) {
-            // Buscar en cols el campo "Detalle:"
+            // Buscar en cols el campo "Detalle:" (puede estar en cualquier posición del array)
             for (const col of mov.cols) {
               const colStr = String(col).trim();
-              const matchDetalle = colStr.match(/^Detalle:\s*(.+)$/i);
+              // Buscar "Detalle:" al inicio o en cualquier parte
+              const matchDetalle = colStr.match(/Detalle:\s*(.+)$/i);
               if (matchDetalle) {
                 detalleText = matchDetalle[1].toUpperCase();
                 break;
               }
+            }
+            // Si no se encontró "Detalle:", buscar los patrones directamente en todos los cols
+            if (!detalleText) {
+              const allColsText = mov.cols.map(col => String(col)).join(' ').toUpperCase();
+              detalleText = allColsText;
             }
           }
           
@@ -198,13 +204,22 @@ function tienePruebaPericia(movimientos: any): boolean {
             /ORDENA.*PERICI/i,
             /SOLICITA.*PROVEE.*PRUEBA\s+PERICI/i,
             /PRUEBA\s+PERICIAL/i,
-            /PERITO.*ACEPTA\s+CARGO/i,
+            /PERITO.*ACEPTA\s+(?:EL\s+)?CARGO/i,  // Mejorado: acepta "EL CARGO" o "CARGO"
+            /PERITO.*PRESENTA\s+INFORME/i,         // Nuevo
+            /PERITO.*FIJA\s+(?:NUEVA\s+)?FECHA/i, // Nuevo
+            /PERITO.*INFORMA/i,                    // Nuevo
+            /PERITO.*CITA/i,                       // Nuevo
             /LLAMA.*PERICI/i,
             /DISPONE.*PERICI/i,
             /TRASLADO.*PERICI/i,
             /PERICI.*M[EÉ]DIC/i,
             /PERICI.*PSICOL/i,
-            /PERICI.*CONTAB/i
+            /PERICI.*CONTAB/i,
+            /PERICI.*INGENIER/i,                   // Nuevo
+            /PERICI.*LEGIST/i,                      // Nuevo
+            /ACREDITA.*PERITO/i,                    // Nuevo: para "ACREDITA ANTICIPO DE GASTOS PERITO"
+            /ANTICIPO.*PERITO/i,                    // Nuevo
+            /GASTOS.*PERITO/i                       // Nuevo
           ];
           
           for (const patron of patrones) {
