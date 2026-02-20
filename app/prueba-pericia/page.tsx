@@ -2628,6 +2628,25 @@ export default function PruebaPericiaPage() {
                                 return;
                               }
 
+                              // Validar tamaño de archivos (máximo 4MB total para evitar error 413 en Vercel)
+                              const MAX_SIZE_PER_FILE = 4 * 1024 * 1024; // 4MB por archivo
+                              const MAX_TOTAL_SIZE = 4 * 1024 * 1024; // 4MB total
+                              
+                              let totalSize = 0;
+                              for (const file of files) {
+                                if (file.size > MAX_SIZE_PER_FILE) {
+                                  setMsg(`Error: El archivo "${file.name}" excede el límite de 4MB por archivo`);
+                                  return;
+                                }
+                                totalSize += file.size;
+                              }
+                              
+                              if (totalSize > MAX_TOTAL_SIZE) {
+                                const totalMB = (totalSize / (1024 * 1024)).toFixed(2);
+                                setMsg(`Error: El tamaño total de los archivos (${totalMB}MB) excede el límite de 4MB. Por favor, reduce el tamaño de los archivos o sube menos archivos.`);
+                                return;
+                              }
+
                               const itemId = item.id;
                               setUploadingOrden(prev => ({ ...prev, [itemId]: true }));
                               try {
@@ -2670,7 +2689,11 @@ export default function PruebaPericiaPage() {
                                   }
                                 } else {
                                   const error = await res.json().catch(() => ({ error: "Error desconocido" }));
-                                  setMsg("Error: " + (error.error || "Error desconocido"));
+                                  if (res.status === 413) {
+                                    setMsg("Error: El tamaño total de los archivos excede el límite permitido (4MB). Por favor, reduce el tamaño de los archivos o sube menos archivos.");
+                                  } else {
+                                    setMsg("Error: " + (error.error || "Error desconocido"));
+                                  }
                                 }
                               } catch (err) {
                                 console.error("Error subiendo orden:", err);

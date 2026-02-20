@@ -75,6 +75,29 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Máximo 5 archivos por orden" }, { status: 400 });
     }
 
+    // Validar tamaño de archivos (máximo 4MB total para evitar error 413 en Vercel)
+    const MAX_SIZE_PER_FILE = 4 * 1024 * 1024; // 4MB por archivo
+    const MAX_TOTAL_SIZE = 4 * 1024 * 1024; // 4MB total
+    
+    let totalSize = 0;
+    for (const file of files) {
+      if (file.size > MAX_SIZE_PER_FILE) {
+        return NextResponse.json(
+          { error: `El archivo "${file.name}" excede el límite de 4MB por archivo` },
+          { status: 400 }
+        );
+      }
+      totalSize += file.size;
+    }
+    
+    if (totalSize > MAX_TOTAL_SIZE) {
+      const totalMB = (totalSize / (1024 * 1024)).toFixed(2);
+      return NextResponse.json(
+        { error: `El tamaño total de los archivos (${totalMB}MB) excede el límite de 4MB. Por favor, reduce el tamaño de los archivos o sube menos archivos.` },
+        { status: 413 }
+      );
+    }
+
     const svc = supabaseService();
 
     // Validar expediente_id si se proporciona
