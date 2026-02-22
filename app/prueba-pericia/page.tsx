@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { pjnScraperSupabase } from "@/lib/pjn-scraper-supabase";
 import { daysSince } from "@/lib/semaforo";
+import NotificationBell from "@/app/components/NotificationBell";
 
 // Estilos globales para mejorar contraste del dropdown
 if (typeof document !== 'undefined') {
@@ -1947,6 +1948,37 @@ export default function PruebaPericiaPage() {
                   📅 Turnos Pericias
                 </Link>
               )}
+              <button
+                onClick={async () => {
+                  setMenuOpen(false);
+                  await supabase.auth.signOut();
+                  window.location.href = "/login";
+                }}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "12px 20px",
+                  color: "var(--brand-red)",
+                  background: "transparent",
+                  border: "none",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  transition: "background 0.2s ease",
+                  borderLeft: "3px solid transparent"
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "rgba(225, 57, 64, .15)";
+                  e.currentTarget.style.borderLeftColor = "var(--brand-red)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "transparent";
+                  e.currentTarget.style.borderLeftColor = "transparent";
+                }}
+              >
+                🚪 Salir
+              </button>
             </div>
           )}
 
@@ -1974,6 +2006,7 @@ export default function PruebaPericiaPage() {
             {currentUserName}
           </div>
         )}
+        {currentUserName && <NotificationBell />}
       </div>
 
       {/* Tabs (solo si el flag está activo) */}

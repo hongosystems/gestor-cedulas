@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { pjnScraperSupabase } from "@/lib/pjn-scraper-supabase";
 import { daysSince } from "@/lib/semaforo";
+import NotificationBell from "@/app/components/NotificationBell";
 
 // Estilos globales para mejorar contraste del dropdown
 if (typeof document !== 'undefined') {
@@ -2857,6 +2858,36 @@ export default function MisJuzgadosPage() {
                     📅 Turnos Pericias
                   </Link>
                 )}
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    logout();
+                  }}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "12px 20px",
+                    color: "var(--brand-red)",
+                    background: "transparent",
+                    border: "none",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    transition: "background 0.2s ease",
+                    borderLeft: "3px solid transparent"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(225, 57, 64, .15)";
+                    e.currentTarget.style.borderLeftColor = "var(--brand-red)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.borderLeftColor = "transparent";
+                  }}
+                >
+                  🚪 Salir
+                </button>
               </div>
             )}
 
@@ -2959,6 +2990,7 @@ export default function MisJuzgadosPage() {
                 <span>{currentUserName}</span>
               </div>
             )}
+            {currentUserName && <NotificationBell />}
 
             <button
               onClick={refreshData}
@@ -2991,31 +3023,6 @@ export default function MisJuzgadosPage() {
               title="Actualizar datos"
             >
               🔄 Refresh
-            </button>
-            <button
-              onClick={logout}
-              style={{
-                padding: "10px 16px",
-                background: "rgba(225,57,64,.15)",
-                border: "1px solid rgba(225,57,64,.35)",
-                borderRadius: 10,
-                color: "var(--text)",
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: "pointer",
-                transition: "all 0.2s ease",
-                height: 40,
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "rgba(225,57,64,.25)";
-                e.currentTarget.style.borderColor = "rgba(225,57,64,.45)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "rgba(225,57,64,.15)";
-                e.currentTarget.style.borderColor = "rgba(225,57,64,.35)";
-              }}
-            >
-              Salir
             </button>
           </div>
         </header>

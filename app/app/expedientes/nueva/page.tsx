@@ -555,6 +555,37 @@ export default function NuevaExpedientePage() {
                           📅 Turnos Pericias
                         </Link>
                       )}
+                      <button
+                        onClick={async () => {
+                          setMenuOpen(false);
+                          await supabase.auth.signOut();
+                          window.location.href = "/login";
+                        }}
+                        style={{
+                          display: "block",
+                          width: "100%",
+                          textAlign: "left",
+                          padding: "12px 20px",
+                          color: "var(--brand-red)",
+                          background: "transparent",
+                          border: "none",
+                          fontSize: 14,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          transition: "background 0.2s ease",
+                          borderLeft: "3px solid transparent"
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = "rgba(225, 57, 64, .15)";
+                          e.currentTarget.style.borderLeftColor = "var(--brand-red)";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = "transparent";
+                          e.currentTarget.style.borderLeftColor = "transparent";
+                        }}
+                      >
+                        🚪 Salir
+                      </button>
                     </div>
                   )}
                 </>

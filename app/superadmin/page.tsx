@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { pjnScraperSupabase } from "@/lib/pjn-scraper-supabase";
 import jsPDF from "jspdf";
+import NotificationBell from "@/app/components/NotificationBell";
 
 type Cedula = {
   id: string;
@@ -2267,6 +2268,36 @@ export default function SuperAdminPage() {
                   📅 Turnos Pericias
                 </Link>
               )}
+              <button
+                onClick={() => {
+                  setMenuOpen(false);
+                  logout();
+                }}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "12px 20px",
+                  color: "var(--brand-red)",
+                  background: "transparent",
+                  border: "none",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  transition: "background 0.2s ease",
+                  borderLeft: "3px solid transparent"
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "rgba(225, 57, 64, .15)";
+                  e.currentTarget.style.borderLeftColor = "var(--brand-red)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "transparent";
+                  e.currentTarget.style.borderLeftColor = "transparent";
+                }}
+              >
+                🚪 Salir
+              </button>
             </div>
           )}
 
@@ -2328,6 +2359,7 @@ export default function SuperAdminPage() {
               </span>
             </div>
           )}
+          {currentUserName && <NotificationBell />}
           <button
             onClick={imprimirDashboard}
             style={{
@@ -2354,30 +2386,6 @@ export default function SuperAdminPage() {
             }}
           >
             🖨️ Imprimir
-          </button>
-          <button 
-            onClick={logout}
-            style={{
-              padding: "10px 16px",
-              background: "rgba(225,57,64,.15)",
-              border: "1px solid rgba(225,57,64,.35)",
-              borderRadius: 10,
-              color: "#ffcccc",
-              cursor: "pointer",
-              fontSize: 14,
-              fontWeight: 600,
-              transition: "all 0.2s ease",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "rgba(225,57,64,.22)";
-              e.currentTarget.style.borderColor = "rgba(225,57,64,.45)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "rgba(225,57,64,.15)";
-              e.currentTarget.style.borderColor = "rgba(225,57,64,.35)";
-            }}
-          >
-            Salir
           </button>
         </div>
         </header>

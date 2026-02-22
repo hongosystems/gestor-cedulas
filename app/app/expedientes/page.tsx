@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { daysSince } from "@/lib/semaforo";
+import NotificationBell from "@/app/components/NotificationBell";
 
 type Expediente = {
   id: string;
@@ -590,9 +591,7 @@ export default function MisExpedientesPage() {
               Cargar
             </Link>
           )}
-          <button className="btn danger" onClick={logout}>
-            Salir
-          </button>
+          <NotificationBell />
         </header>
 
         <div className="page">

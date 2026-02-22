@@ -28,7 +28,7 @@ Sistema completo de gestión de cédulas, oficios y expedientes con sistema de s
 - **Lenguaje:** TypeScript 5.x
 - **UI Library:** React 19.2.3
 - **Estilos:** CSS Modules + CSS Global
-- **Generación de PDFs:** jsPDF 4.0.0 + html2canvas 1.4.1
+- **Generación de PDFs:** jsPDF 4.0.0
 
 **Backend:**
 - **Runtime:** Node.js 18+ (Serverless Functions en Vercel)
@@ -51,7 +51,6 @@ Sistema completo de gestión de cédulas, oficios y expedientes con sistema de s
 - `mammoth` ^1.11.0 - Extracción de texto desde DOCX
 - `pdf-parse` ^2.4.5 - Análisis de PDFs
 - `jspdf` ^4.0.0 - Generación de PDFs
-- `html2canvas` ^1.4.1 - Captura de elementos HTML
 
 ---
 
@@ -72,11 +71,6 @@ https://vercel.com/dashboard
 **URLs de Preview (despliegues automáticos por branch):**
 ```
 https://[TU-PROYECTO]-[BRANCH].vercel.app
-```
-
-**Dashboard de Vercel:**
-```
-https://vercel.com/dashboard
 ```
 
 ---
@@ -223,7 +217,6 @@ Los usuarios con rol **Abogado** tienen acceso a expedientes, cédulas y oficios
 | `/api/detect-type-upload` | POST | Detectar tipo desde archivo subido | No requerida |
 | `/api/extract-caratula` | POST | Extraer carátula desde DOCX | No requerida |
 | `/api/extract-juzgado` | POST | Extraer juzgado desde DOCX | No requerida |
-| `/api/extract-cedula` | POST | Extraer datos de cédula desde PDF | No requerida |
 | `/api/extract-pdf` | POST | Extraer texto desde PDF | No requerida |
 | `/api/open-file` | GET | Abrir archivo PDF/DOCX | JWT Token requerido |
 | `/api/search-expediente-pjn` | POST | Buscar expediente en pjn-scraper | No requerida |
@@ -331,7 +324,6 @@ gestor-cedulas/
 │   │   ├── detect-type-upload/   # Detección desde upload
 │   │   ├── extract-caratula/     # Extracción de carátula (DOCX)
 │   │   ├── extract-juzgado/      # Extracción de juzgado (DOCX)
-│   │   ├── extract-cedula/       # Extracción de datos de cédula (PDF)
 │   │   ├── extract-pdf/           # Extracción de texto (PDF)
 │   │   ├── open-file/             # Servir archivos con autenticación
 │   │   ├── search-expediente-pjn/ # Búsqueda en pjn-scraper

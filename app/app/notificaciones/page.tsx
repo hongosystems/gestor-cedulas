@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
+import NotificationBell from "@/app/components/NotificationBell";
 
 type Notif = {
   id: string;
@@ -774,9 +775,7 @@ export default function NotificacionesPage() {
           <Link className="btn" href={backUrl}>
             Volver
           </Link>
-          <button className="btn danger" onClick={logout}>
-            Salir
-          </button>
+          <NotificationBell />
         </header>
 
         <div className="page">

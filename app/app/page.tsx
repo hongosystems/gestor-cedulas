@@ -4,6 +4,7 @@ import Link from "next/link";
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { daysSince } from "@/lib/semaforo";
+import NotificationBell from "@/app/components/NotificationBell";
 
 type Cedula = {
   id: string;
@@ -1217,6 +1218,7 @@ export default function MisCedulasPage() {
               </span>
             </div>
           )}
+          {currentUserName && <NotificationBell />}
         </header>
 
         <div className="page">
