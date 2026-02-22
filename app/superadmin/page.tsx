@@ -193,7 +193,16 @@ function tienePruebaPericia(movimientos: any): boolean {
             /PERICI.*LEGIST/i,                      // Nuevo
             /ACREDITA.*PERITO/i,                    // Nuevo: para "ACREDITA ANTICIPO DE GASTOS PERITO"
             /ANTICIPO.*PERITO/i,                    // Nuevo
-            /GASTOS.*PERITO/i                       // Nuevo
+            /GASTOS.*PERITO/i,                      // Nuevo
+            /HAGASE\s+SABER.*PERITO/i,              // Nuevo: "HAGASE SABER AL PERITO"
+            /TENGASE\s+PRESENTE.*PERITO/i,          // Nuevo: "TENGASE PRESENTE Y HAGASE SABER AL PERITO"
+            /INTIMACION.*PERITO/i,                  // Nuevo: "INTIMACION PERITO"
+            /INTIMA.*PERITO/i,                      // Nuevo: "INTIMA PERITO"
+            /SE\s+INTIME.*PERITO/i,                 // Nuevo: "SE INTIME PERITO"
+            /PERITO.*ACOMPAÑA/i,                    // Nuevo: "PERITO ACOMPAÑA"
+            /PERITO.*ADJUNTA/i,                     // Nuevo: "PERITO ADJUNTA"
+            /NOTIFIQUESE.*PERITO/i,                 // Nuevo: "NOTIFIQUESE...PERITO"
+            /NOTIFICA.*PERITO/i                     // Nuevo: "NOTIFICA...PERITO"
           ];
           
           for (const patron of patrones) {
