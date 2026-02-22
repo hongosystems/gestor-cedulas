@@ -193,7 +193,7 @@ function tienePruebaPericia(movimientos: any): boolean {
             }
             // Si no se encontró "Detalle:", buscar los patrones directamente en todos los cols
             if (!detalleText) {
-              const allColsText = mov.cols.map(col => String(col)).join(' ').toUpperCase();
+              const allColsText = mov.cols.map((col: any) => String(col)).join(' ').toUpperCase();
               detalleText = allColsText;
             }
           }
