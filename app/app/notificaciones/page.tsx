@@ -17,6 +17,7 @@ type Notif = {
   expediente_id?: string | null;
   is_pjn_favorito?: boolean;
   nota_context?: string | null;
+  user_id?: string; // ID del usuario que recibe la notificación
   metadata?: {
     caratula?: string | null;
     juzgado?: string | null;
@@ -72,6 +73,9 @@ export default function NotificacionesPage() {
     numero?: string | null;
   } | null>(null);
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string; suggestion?: string } | null>(null);
+  const [threadMessages, setThreadMessages] = useState<Notif[]>([]);
+  const [threadUserNames, setThreadUserNames] = useState<Record<string, string>>({});
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -84,6 +88,7 @@ export default function NotificacionesPage() {
         window.location.href = "/login";
         return;
       }
+      setCurrentUserId(uid);
 
       // Obtener nombre del usuario
       if (sess.session) {
@@ -306,6 +311,65 @@ export default function NotificacionesPage() {
     setReplyText("");
     setReplyFile(null);
     setExpedienteInfo(null);
+
+    // Cargar todas las notificaciones del hilo (thread_id) para mostrar el historial completo
+    const { data: sess } = await supabase.auth.getSession();
+    const uid = sess.session?.user.id;
+    
+    if (uid && notif.thread_id) {
+      // Cargar todas las notificaciones del mismo thread_id (incluyendo las que el usuario envió)
+      const { data: threadData } = await supabase
+        .from("notifications")
+        .select("id, title, body, link, is_read, created_at, thread_id, parent_id, expediente_id, is_pjn_favorito, nota_context, metadata, user_id")
+        .eq("thread_id", notif.thread_id)
+        .order("created_at", { ascending: true });
+      
+      if (threadData) {
+        // Parsear metadata para cada mensaje del hilo
+        const parsedThreadData = threadData.map((item: any) => {
+          let parsedMetadata = item.metadata;
+          if (typeof item.metadata === 'string') {
+            try {
+              parsedMetadata = JSON.parse(item.metadata);
+            } catch (e) {
+              parsedMetadata = {};
+            }
+          }
+          return {
+            ...item,
+            metadata: parsedMetadata || {},
+            nota_context: item.nota_context || null
+          };
+        });
+        setThreadMessages(parsedThreadData as Notif[]);
+        
+        // Cargar nombres de usuario únicos del hilo
+        const uniqueUserIds = [...new Set(threadData.map((t: any) => t.user_id))];
+        const namesMap: Record<string, string> = {};
+        for (const userId of uniqueUserIds) {
+          if (userId === uid) {
+            namesMap[userId] = currentUserName || "Tú";
+          } else {
+            const { data: profile } = await supabase
+              .from("profiles")
+              .select("full_name, email")
+              .eq("id", userId)
+              .maybeSingle();
+            namesMap[userId] = profile?.full_name || profile?.email || "Usuario";
+          }
+        }
+        setThreadUserNames(namesMap);
+      } else {
+        setThreadMessages([notif]);
+        setThreadUserNames({ [uid || ""]: currentUserName || "Tú" });
+      }
+    } else {
+      // Si no hay thread_id, mostrar solo esta notificación
+      setThreadMessages([notif]);
+      if (uid) {
+        setThreadUserNames({ [uid]: currentUserName || "Tú" });
+      }
+    }
 
     // Intentar obtener información del expediente de varias formas
     let expedienteId = notif.expediente_id;
@@ -541,6 +605,7 @@ export default function NotificacionesPage() {
 
         if (res.ok) {
           const result = await res.json();
+          const messageText = replyText.trim();
           setReplyText("");
           
           // Mostrar mensaje de éxito
@@ -554,6 +619,35 @@ export default function NotificacionesPage() {
             // Auto-ocultar después de 4 segundos
             setTimeout(() => setToast(null), 4000);
             setReplyFile(null); // Limpiar el archivo después de enviar
+          }
+          
+          // Agregar la respuesta del usuario al hilo inmediatamente (antes de recargar)
+          // Esto permite que el usuario vea su respuesta de inmediato
+          if (selectedNotif && selectedNotif.thread_id && currentUserId) {
+            const myReply: Notif = {
+              id: `temp-${Date.now()}`,
+              title: `Re: ${selectedNotif.title}`,
+              body: replyFile 
+                ? `${currentUserName} respondió con archivo adjunto: ${messageText}`
+                : `${currentUserName} respondió: ${messageText}`,
+              link: selectedNotif.link,
+              is_read: true,
+              created_at: new Date().toISOString(),
+              thread_id: selectedNotif.thread_id,
+              parent_id: selectedNotif.id,
+              expediente_id: selectedNotif.expediente_id,
+              is_pjn_favorito: selectedNotif.is_pjn_favorito,
+              nota_context: messageText,
+              metadata: selectedNotif.metadata || {},
+            };
+            setThreadMessages(prev => [...prev, myReply]);
+            // Actualizar nombres si es necesario
+            if (!threadUserNames[currentUserId]) {
+              setThreadUserNames(prev => ({
+                ...prev,
+                [currentUserId]: currentUserName || "Tú"
+              }));
+            }
           }
           
           // Recargar notificaciones
@@ -591,8 +685,58 @@ export default function NotificacionesPage() {
               });
               setItems(parsedData as Notif[]);
             }
+            
+            // Si hay una notificación seleccionada con thread_id, recargar el hilo completo
+            // Esto reemplazará el mensaje temporal con el real de la base de datos
+            if (selectedNotif && selectedNotif.thread_id) {
+              // Esperar un momento para que la base de datos se actualice
+              setTimeout(async () => {
+                const { data: threadData } = await supabase
+                  .from("notifications")
+                  .select("id, title, body, link, is_read, created_at, thread_id, parent_id, expediente_id, is_pjn_favorito, nota_context, metadata, user_id")
+                  .eq("thread_id", selectedNotif.thread_id)
+                  .order("created_at", { ascending: true });
+                
+                if (threadData) {
+                  const parsedThreadData = threadData.map((item: any) => {
+                    let parsedMetadata = item.metadata;
+                    if (typeof item.metadata === 'string') {
+                      try {
+                        parsedMetadata = JSON.parse(item.metadata);
+                      } catch (e) {
+                        parsedMetadata = {};
+                      }
+                    }
+                    return {
+                      ...item,
+                      metadata: parsedMetadata || {},
+                      nota_context: item.nota_context || null
+                    };
+                  });
+                  setThreadMessages(parsedThreadData as Notif[]);
+                  
+                  // Recargar nombres de usuario del hilo
+                  const uniqueUserIds = [...new Set(threadData.map((t: any) => t.user_id))];
+                  const namesMap: Record<string, string> = {};
+                  for (const userId of uniqueUserIds) {
+                    if (userId === uid) {
+                      namesMap[userId] = currentUserName || "Tú";
+                    } else {
+                      const { data: profile } = await supabase
+                        .from("profiles")
+                        .select("full_name, email")
+                        .eq("id", userId)
+                        .maybeSingle();
+                      namesMap[userId] = profile?.full_name || profile?.email || "Usuario";
+                    }
+                  }
+                  setThreadUserNames(namesMap);
+                }
+              }, 1000); // Esperar 1 segundo para que la BD se actualice
+            }
           }
-          setSelectedNotif(null);
+          // No cerrar la vista, mantenerla abierta para ver la respuesta
+          // setSelectedNotif(null);
         } else {
           let errorMsg = "Error desconocido";
           let suggestion = "";
@@ -1006,15 +1150,18 @@ export default function NotificacionesPage() {
                       <div style={{ fontSize: 18, fontWeight: 700, color: "var(--text)", marginBottom: 8 }}>
                         {selectedNotif.title}
                       </div>
-                      <div style={{ fontSize: 12, color: "rgba(234,243,255,.7)", marginBottom: 4 }}>
-                        De: {selectedNotif.body.split(" te mencionó")[0] || "Sistema"}
-                      </div>
-                      <div style={{ fontSize: 12, color: "rgba(234,243,255,.7)" }}>
-                        Fecha: {fmtTime(selectedNotif.created_at)}
-                      </div>
+                      {threadMessages.length > 1 && (
+                        <div style={{ fontSize: 12, color: "rgba(234,243,255,.7)", marginBottom: 4 }}>
+                          {threadMessages.length} mensaje{threadMessages.length > 1 ? 's' : ''} en esta conversación
+                        </div>
+                      )}
                     </div>
                     <button
-                      onClick={() => setSelectedNotif(null)}
+                      onClick={() => {
+                        setSelectedNotif(null);
+                        setThreadMessages([]);
+                        setThreadUserNames({});
+                      }}
                       className="btn"
                       style={{ padding: "6px 12px", fontSize: 12 }}
                     >
@@ -1023,22 +1170,73 @@ export default function NotificacionesPage() {
                   </div>
                 </div>
 
-                {/* Cuerpo del email - Primera parte: Nota completa */}
-                {selectedNotif.nota_context && (
-                  <div style={{
-                    padding: 16,
-                    background: "rgba(255,255,255,.03)",
-                    borderRadius: 8,
-                    border: "1px solid rgba(255,255,255,.1)"
-                  }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: "rgba(234,243,255,.8)", marginBottom: 8 }}>
-                      Nota completa:
-                    </div>
-                    <div style={{ fontSize: 13, color: "rgba(234,243,255,.9)", lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                      {selectedNotif.nota_context}
-                    </div>
-                  </div>
-                )}
+                {/* Hilo de conversación - Mostrar todos los mensajes */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
+                  {threadMessages.map((msg, index) => {
+                    const isMyMsg = msg.user_id === currentUserId;
+                    const userName = (msg.user_id ? threadUserNames[msg.user_id] : null) || (isMyMsg ? "Tú" : "Usuario");
+                    
+                    return (
+                      <div 
+                        key={msg.id} 
+                        style={{
+                          padding: 16,
+                          background: isMyMsg 
+                            ? "rgba(96,141,186,.15)" 
+                            : "rgba(255,255,255,.03)",
+                          borderRadius: 8,
+                          border: `1px solid ${isMyMsg ? "rgba(96,141,186,.3)" : "rgba(255,255,255,.1)"}`,
+                          marginLeft: isMyMsg ? "auto" : 0,
+                          marginRight: isMyMsg ? 0 : "auto",
+                          maxWidth: "85%",
+                          position: "relative"
+                        }}
+                      >
+                        <div style={{ 
+                          display: "flex", 
+                          justifyContent: "space-between", 
+                          alignItems: "center",
+                          marginBottom: 8
+                        }}>
+                          <div style={{ 
+                            fontSize: 12, 
+                            fontWeight: 600, 
+                            color: isMyMsg ? "rgba(96,141,186,.9)" : "rgba(234,243,255,.8)" 
+                          }}>
+                            {isMyMsg ? "Tú" : userName}
+                          </div>
+                          <div style={{ 
+                            fontSize: 11, 
+                            color: "rgba(234,243,255,.6)" 
+                          }}>
+                            {fmtTime(msg.created_at)}
+                          </div>
+                        </div>
+                        {msg.nota_context ? (
+                          <div style={{ 
+                            fontSize: 13, 
+                            color: "rgba(234,243,255,.9)", 
+                            lineHeight: 1.6, 
+                            whiteSpace: "pre-wrap", 
+                            wordBreak: "break-word" 
+                          }}>
+                            {msg.nota_context}
+                          </div>
+                        ) : msg.body ? (
+                          <div style={{ 
+                            fontSize: 13, 
+                            color: "rgba(234,243,255,.9)", 
+                            lineHeight: 1.6, 
+                            whiteSpace: "pre-wrap", 
+                            wordBreak: "break-word" 
+                          }}>
+                            {msg.body}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
 
                 {/* Cuerpo del email - Segunda parte: Metadata (Carátula, Juzgado, etc.) o Información de Transferencia */}
                 {selectedNotif.link === "/app/recibidos" ? (
