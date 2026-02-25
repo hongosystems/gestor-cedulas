@@ -60,6 +60,23 @@ type PjnFavorito = {
   movimientos?: any;
 };
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isUuid(s: string) {
+  return UUID_RE.test((s || "").trim());
+}
+
+function parseCaseKey(raw: string): { jurisdiccion: string; numero: string; anio: number } | null {
+  // Ej: "CIV 059088/2024"
+  const m = (raw || "").trim().match(/^([A-Z]+)\s+(\d+)\/(\d{4})$/);
+  if (!m) return null;
+  const [, jurisdiccion, numero, anioStr] = m;
+  const anio = parseInt(anioStr, 10);
+  if (!jurisdiccion || !numero || !Number.isFinite(anio)) return null;
+  return { jurisdiccion, numero, anio };
+}
+
 // Normalizar juzgado
 function normalizeJuzgado(raw: string | null): string | null {
   if (!raw) return null;
@@ -397,6 +414,7 @@ function NotasTextarea({
       
       const notaCompleta = texto.trim();
       const expedienteIdLimpio = itemId.replace(/^pjn_/, "");
+      const expedienteIdForDb = isUuid(expedienteIdLimpio) ? expedienteIdLimpio : null;
       
       const { data: session } = await supabase.auth.getSession();
       const senderId = session.session?.user.id;
@@ -405,7 +423,7 @@ function NotasTextarea({
         caratula: caratula || null,
         juzgado: juzgado || null,
         numero: numeroExpediente || null,
-        expediente_id: itemId,
+        expediente_ref: itemId, // puede ser "CIV 059088/2024" (NO UUID)
         is_pjn_favorito: isPjnFavorito,
         sender_id: senderId,
       };
@@ -425,7 +443,7 @@ function NotasTextarea({
             title: notaContextParaAsunto || (caratula ? `Mencionado en: ${caratula.substring(0, 50)}${caratula.length > 50 ? '...' : ''}` : "Fuiste mencionado en una nota"),
             body: `${currentUserName} te mencionó en las notas${caratula ? ` del expediente "${caratula}"` : numeroExpediente ? ` del expediente ${numeroExpediente}` : ""}`,
             link,
-            expediente_id: expedienteIdLimpio,
+            expediente_id: expedienteIdForDb,
             is_pjn_favorito: isPjnFavorito,
             nota_context: notaCompleta,
             metadata: metadata,
@@ -456,12 +474,53 @@ function NotasTextarea({
       }
       
       if (isPjnFavorito) {
-        const pjnId = itemId.replace(/^pjn_/, "");
-        
-        let { error } = await supabase
+        const rawId = itemId.replace(/^pjn_/, "");
+
+        // Si viene un UUID real, usarlo como antes
+        if (isUuid(rawId)) {
+          let { error } = await supabase
+            .from("pjn_favoritos")
+            .update({ notas: newValue.trim() || null })
+            .eq("id", rawId);
+          
+          if (error) {
+            const errorMsg = (error as any).message || String(error) || "";
+            setMsg(`Error al guardar notas: ${errorMsg}`);
+            return;
+          }
+          return;
+        }
+
+        // Si viene un key tipo "CIV 059088/2024", actualizar por (jurisdiccion, numero, anio)
+        const parsed = parseCaseKey(rawId);
+        if (!parsed) {
+          setMsg(`Error al guardar notas: ID PJN inválido (${rawId})`);
+          return;
+        }
+
+        const numeroSinCeros = parsed.numero.replace(/^0+/, "") || "0";
+
+        // Intento 1: número tal cual (con ceros)
+        let { data, error } = await supabase
           .from("pjn_favoritos")
           .update({ notas: newValue.trim() || null })
-          .eq("id", pjnId);
+          .eq("jurisdiccion", parsed.jurisdiccion)
+          .eq("anio", parsed.anio)
+          .eq("numero", parsed.numero)
+          .select("id");
+
+        // Intento 2: número sin ceros (por si en BD está normalizado)
+        if (!error && (!data || data.length === 0) && numeroSinCeros !== parsed.numero) {
+          const retry = await supabase
+            .from("pjn_favoritos")
+            .update({ notas: newValue.trim() || null })
+            .eq("jurisdiccion", parsed.jurisdiccion)
+            .eq("anio", parsed.anio)
+            .eq("numero", numeroSinCeros)
+            .select("id");
+          data = retry.data;
+          error = retry.error;
+        }
         
         if (error) {
           const errorMsg = (error as any).message || String(error) || "";
@@ -482,10 +541,43 @@ function NotasTextarea({
             const pjnKey = process.env.NEXT_PUBLIC_PJN_SCRAPER_SUPABASE_ANON_KEY;
             
             if (pjnUrl && pjnKey) {
-              const { error: pjnError } = await pjnScraperSupabase
-                .from("pjn_favoritos")
-                .update({ notas: newValue.trim() || null })
-                .eq("id", pjnId);
+              // Reintentar la misma actualización contra pjn-scraper
+              let pjnError: any = null;
+
+              // Si en algún entorno el id fuera UUID, soportarlo también
+              if (isUuid(rawId)) {
+                const res = await pjnScraperSupabase
+                  .from("pjn_favoritos")
+                  .update({ notas: newValue.trim() || null })
+                  .eq("id", rawId);
+                pjnError = res.error;
+              } else {
+                const parsed2 = parseCaseKey(rawId);
+                if (!parsed2) {
+                  setMsg(`Error al guardar notas: ID PJN inválido (${rawId})`);
+                  return;
+                }
+                const numeroSinCeros2 = parsed2.numero.replace(/^0+/, "") || "0";
+                let res = await pjnScraperSupabase
+                  .from("pjn_favoritos")
+                  .update({ notas: newValue.trim() || null })
+                  .eq("jurisdiccion", parsed2.jurisdiccion)
+                  .eq("anio", parsed2.anio)
+                  .eq("numero", parsed2.numero)
+                  .select("id");
+
+                if (!res.error && (!res.data || res.data.length === 0) && numeroSinCeros2 !== parsed2.numero) {
+                  res = await pjnScraperSupabase
+                    .from("pjn_favoritos")
+                    .update({ notas: newValue.trim() || null })
+                    .eq("jurisdiccion", parsed2.jurisdiccion)
+                    .eq("anio", parsed2.anio)
+                    .eq("numero", numeroSinCeros2)
+                    .select("id");
+                }
+
+                pjnError = res.error;
+              }
               
               if (pjnError) {
                 setMsg(`Error al guardar notas: ${(pjnError as any).message || "Error desconocido"}`);
@@ -499,6 +591,9 @@ function NotasTextarea({
             setMsg(`Error al guardar notas: ${errorMsg}`);
             return;
           }
+        } else if (!data || data.length === 0) {
+          setMsg(`Error al guardar notas: no se encontró el registro en pjn_favoritos para ${rawId}.`);
+          return;
         }
       } else {
         const { error } = await supabase
