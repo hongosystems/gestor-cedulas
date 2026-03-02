@@ -1,0 +1,570 @@
+{
+  "usuario": {
+    "id": "80d3ea0b-73a9-46fc-9f4b-215cba3866bd",
+    "email": "autorizadosestudiohif@gmail.com",
+    "nombre": "Gabriel Crespo"
+  },
+  "fecha_analisis": "2026-02-25T19:43:55.975Z",
+  "chat": {
+    "total_conversaciones": 0,
+    "total_mensajes_enviados": 0,
+    "total_mensajes_recibidos": 0,
+    "conversaciones": [],
+    "mensajes_detalle": []
+  },
+  "notificaciones": {
+    "recibidas": {
+      "total_recibidas": 41,
+      "total_leidas": 41,
+      "total_no_leidas": 0,
+      "notificaciones": [
+        {
+          "id": "a8f6fbca-93a6-4d94-8768-79b54bc5c665",
+          "title": "@autorizadosestudiohif @andreaestudio24  chicos en noviembre de 2025 An",
+          "body_preview": "Magali Flores te mencionó en las notas del expediente \"IÑIGUEZ, LEONARDO DANIEL C/ BERBARA, ALBERTO ",
+          "is_read": true,
+          "fecha": "2026-02-25T11:46:15.636115+00:00",
+          "remitente_email": "mf.magaliflores@gmail.com",
+          "fue_respondida": true,
+          "minutos_hasta_respuesta": 385.4736,
+          "fecha_respuesta": "2026-02-25T18:11:44.052782+00:00"
+        },
+        {
+          "id": "1dd0fc31-0150-4009-88a0-9f0b71802c41",
+          "title": "@autorizadosestudiohif @andreaestudio24  chicos en noviembre de 2025 An",
+          "body_preview": "Magali Flores te mencionó en las notas del expediente \"IÑIGUEZ, LEONARDO DANIEL C/ BERBARA, ALBERTO ",
+          "is_read": true,
+          "fecha": "2026-02-25T11:44:30.956767+00:00",
+          "remitente_email": "mf.magaliflores@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "620501c3-0595-4544-b816-284792064a9b",
+          "title": "@autorizadosestudiohif @andreaestudio24  chicos en noviembre de 2025 An",
+          "body_preview": "Magali Flores te mencionó en las notas del expediente \"IÑIGUEZ, LEONARDO DANIEL C/ BERBARA, ALBERTO ",
+          "is_read": true,
+          "fecha": "2026-02-25T11:43:52.70656+00:00",
+          "remitente_email": "mf.magaliflores@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "beb74ac6-8bd4-4128-9f31-020624aa9e16",
+          "title": "@victoria.estudiohisi ojo aca\n\n@autorizadosestudiohif @micaelaestudio01 chikxs alguna novedad de esta",
+          "body_preview": "Guido Querinuzzi te mencionó en las notas del expediente \"GONZALEZ, JOHANNA SALOME C/ VARELA, GUSTAV",
+          "is_read": true,
+          "fecha": "2026-02-24T18:08:05.093918+00:00",
+          "remitente_email": "victoria.estudiohisi@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "20c9b50d-2046-4175-a130-17ce61fe1217",
+          "title": "@autorizadosestudiohif ESTA TAMBIEN ES DE PILAR , ESTA PENDIENTE D EOCT",
+          "body_preview": "Gustavo Hisi te mencionó en las notas del expediente \"ROMERO, JONATHAN GABRIEL C/ RUIZ, RODRIGO NAHU",
+          "is_read": true,
+          "fecha": "2026-02-23T15:23:49.511568+00:00",
+          "remitente_email": "gfhisi@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "688f5c10-82f6-445c-93dd-5dacc767140c",
+          "title": "@autorizadosestudiohif GABY ACA TENGO UNA CEDULA D EPILAR PENDIENTE DE",
+          "body_preview": "Gustavo Hisi te mencionó en las notas del expediente \"GAUNA, MARIO HUMBERTO C/ CHURRUARIN, RICARDO R",
+          "is_read": true,
+          "fecha": "2026-02-23T15:22:40.829807+00:00",
+          "remitente_email": "gfhisi@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "292e6485-ccd3-46e3-8014-0313cc3a56b4",
+          "title": "@autorizadosestudiohif @andreaestudio24 Gabi en junio de 2025 Andre ret",
+          "body_preview": "Magali Flores te mencionó en las notas del expediente \"SEQUEIRA, JONATHAN EDUARDO C/ EREDIA, CRISTIA",
+          "is_read": true,
+          "fecha": "2026-02-23T13:07:37.376945+00:00",
+          "remitente_email": "mf.magaliflores@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "5112c4e3-0916-4cc4-b52e-f9ea67332d51",
+          "title": "@autorizadosestudiohif  Gabi en este podes reclamar una cédula que se d",
+          "body_preview": "Magali Flores te mencionó en las notas del expediente \"AMARILLA, FERNANDO AGUSTIN C/ MENDIETA, CESAR",
+          "is_read": true,
+          "fecha": "2026-02-22T21:38:31.030201+00:00",
+          "remitente_email": "mf.magaliflores@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "e98b08f3-5632-4f13-a65b-29dd067a8118",
+          "title": "@autorizadosestudiohif  en este hay una cédula pendiente de Pilar que s",
+          "body_preview": "Magali Flores te mencionó en las notas del expediente \"DORADO, JORGE HIGINIO C/ URAN, JESUS DANIEL S",
+          "is_read": true,
+          "fecha": "2026-02-22T19:54:26.555278+00:00",
+          "remitente_email": "mf.magaliflores@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "85b14a61-30c2-47e1-9db1-806be4de147a",
+          "title": "Oficio: Oficio BUSTOS C MORENO",
+          "body_preview": "Francisco Querinuzzi te envió un oficio: \"Oficio BUSTOS C MORENO\". Haz clic en \"Descargar archivo\" p",
+          "is_read": true,
+          "fecha": "2026-02-20T00:13:50.467563+00:00",
+          "remitente_email": "novedadesgh@outlook.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "2cd76002-b8c4-493f-99b4-e4a0ef48441c",
+          "title": "Oficio: CHAREUM M.V C ALVAREZ UFI 5 ESCOBAR IR A RECLAMAR ESTA SEMANA PROXIMA ES UN REITERATORIO",
+          "body_preview": "Gustavo Hisi te envió un oficio: \"CHAREUM M.V C ALVAREZ UFI 5 ESCOBAR IR A RECLAMAR ESTA SEMANA PROX",
+          "is_read": true,
+          "fecha": "2026-02-19T19:39:38.34517+00:00",
+          "remitente_email": "gfhisi@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "af349d47-37cd-4f55-8b81-90e8c48913e6",
+          "title": "Re: Re: Oficio: Oficios para diligenciar HDI D Torcuato - Godoy c Torres",
+          "body_preview": "Magali Flores respondió: Dale Gabi gracias!!",
+          "is_read": true,
+          "fecha": "2026-02-18T18:53:43.056749+00:00",
+          "remitente_email": "mf.magaliflores@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "cf6b6a8a-6081-42c1-84d9-7a0797fa5e53",
+          "title": "Re: Re: Oficio: Este oficio es para diligenciar en persona en UFI 10 La Plata. No necesita sello medalla del juzgado",
+          "body_preview": "Magali Flores respondió: Joya gracias Gabi",
+          "is_read": true,
+          "fecha": "2026-02-18T18:53:07.991915+00:00",
+          "remitente_email": "mf.magaliflores@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "dc579928-6a9b-4fea-856c-86095fdcab8d",
+          "title": "oda la hc que conste que tengan asi mandan todo . @autorizadosestudiohif gaby llevalo a moreno ni bien te lo haga 18/2",
+          "body_preview": "Gustavo Hisi te mencionó en las notas del expediente \"BUSTOS, MACARENA BRENDA Y OTRO C/ MORENO, CARL",
+          "is_read": true,
+          "fecha": "2026-02-18T18:25:03.118955+00:00",
+          "remitente_email": "gfhisi@gmail.com",
+          "fue_respondida": true,
+          "minutos_hasta_respuesta": 28.938216666666666,
+          "fecha_respuesta": "2026-02-18T18:53:59.411425+00:00"
+        },
+        {
+          "id": "2f3a4c4a-5c4d-4b81-93d2-f07cfb7c76c8",
+          "title": "Oficio: Oficio UFI Tigre para diligenciar - Godoy c Torres",
+          "body_preview": "Magali Flores te envió un oficio: \"Oficio UFI Tigre para diligenciar - Godoy c Torres\". Haz clic en ",
+          "is_read": true,
+          "fecha": "2026-02-18T10:15:49.354685+00:00",
+          "remitente_email": "mf.magaliflores@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "d68b2cf1-b822-42ca-b7ce-37afa69c00f9",
+          "title": "Oficio: Oficio Htal Pacheco para diligenciar - Godoy c Torres",
+          "body_preview": "Magali Flores te envió un oficio: \"Oficio Htal Pacheco para diligenciar - Godoy c Torres\". Haz clic ",
+          "is_read": true,
+          "fecha": "2026-02-18T10:14:52.817951+00:00",
+          "remitente_email": "mf.magaliflores@gmail.com",
+          "fue_respondida": true,
+          "minutos_hasta_respuesta": 453.3957,
+          "fecha_respuesta": "2026-02-18T17:48:16.559279+00:00"
+        },
+        {
+          "id": "318f6e03-1a1a-4c2f-830f-c82359a067e7",
+          "title": "Oficio: Oficios para diligenciar HDI D Torcuato - Godoy c Torres",
+          "body_preview": "Magali Flores te envió un oficio: \"Oficios para diligenciar HDI D Torcuato - Godoy c Torres\". Haz cl",
+          "is_read": true,
+          "fecha": "2026-02-18T10:13:59.797094+00:00",
+          "remitente_email": "mf.magaliflores@gmail.com",
+          "fue_respondida": true,
+          "minutos_hasta_respuesta": 453.16771666666665,
+          "fecha_respuesta": "2026-02-18T17:47:09.860124+00:00"
+        },
+        {
+          "id": "eca2ae71-d1ee-4b29-86e2-77e433e6cbda",
+          "title": "Oficio: Este oficio es para diligenciar en persona en UFI 10 La Plata. No necesita sello medalla del juzgado",
+          "body_preview": "Magali Flores te envió un oficio: \"Este oficio es para diligenciar en persona en UFI 10 La Plata. No",
+          "is_read": true,
+          "fecha": "2026-02-18T10:10:07.757652+00:00",
+          "remitente_email": "mf.magaliflores@gmail.com",
+          "fue_respondida": true,
+          "minutos_hasta_respuesta": 450.96223333333336,
+          "fecha_respuesta": "2026-02-18T17:41:05.491857+00:00"
+        },
+        {
+          "id": "1f32a703-0863-4e12-8b84-656c90a8fddc",
+          "title": "@autorizadosestudiohif te deje en tu escritorio un oficio pero tenes qu",
+          "body_preview": "Gustavo Hisi te mencionó en las notas del expediente \"MAZA MATOS, BENITO EDGARDO Y OTROS C/ BELTRAN ",
+          "is_read": true,
+          "fecha": "2026-02-16T16:00:50.472457+00:00",
+          "remitente_email": "gfhisi@gmail.com",
+          "fue_respondida": true,
+          "minutos_hasta_respuesta": 2979.7718333333332,
+          "fecha_respuesta": "2026-02-18T17:40:36.782017+00:00"
+        },
+        {
+          "id": "2eb72f2f-0fb7-479e-9bbd-5b707088776a",
+          "title": "@autorizadosestudiohif Gabi podras averiguar si volvió una cedula de es",
+          "body_preview": "Magali Flores te mencionó en las notas del expediente \"NAVARRO, DARIO GUSTAVO RAMON C/ FIGUEROA MUÑA",
+          "is_read": true,
+          "fecha": "2026-02-15T17:10:51.027269+00:00",
+          "remitente_email": "mf.magaliflores@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "ead2386a-b3b1-4d8b-9bc9-154352c2c7c6",
+          "title": "@autorizadosestudiohif Gabi podras averiguar si volvió una cedula de es",
+          "body_preview": "Magali Flores te mencionó en las notas del expediente \"NAVARRO, MARISA YSABEL C/ TAHUL, JOSUE ABRAHA",
+          "is_read": true,
+          "fecha": "2026-02-15T17:10:25.727753+00:00",
+          "remitente_email": "mf.magaliflores@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "5a576763-5ed7-4668-8808-6d2bdc7d0a56",
+          "title": "@autorizadosestudiohif  en este hay una cédula pendiente de Pilar que s",
+          "body_preview": "Magali Flores te mencionó en las notas del expediente \"DORADO, JORGE HIGINIO C/ URAN, JESUS DANIEL S",
+          "is_read": true,
+          "fecha": "2026-02-15T12:24:44.239932+00:00",
+          "remitente_email": "mf.magaliflores@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "51b02943-d35a-4297-a50d-591211ff0693",
+          "title": "@autorizadosestudiohif @andreaestudio24  chicos en noviembre de 2025 An",
+          "body_preview": "Magali Flores te mencionó en las notas del expediente \"IÑIGUEZ, LEONARDO DANIEL C/ BERBARA, ALBERTO ",
+          "is_read": true,
+          "fecha": "2026-02-13T16:05:58.805206+00:00",
+          "remitente_email": "mf.magaliflores@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "c24b387c-1ca4-456d-9e45-ebf716397af4",
+          "title": "@autorizadosestudiohif @andreaestudio24  chicos en noviembre de 2025 An",
+          "body_preview": "Magali Flores te mencionó en las notas del expediente \"IÑIGUEZ, LEONARDO DANIEL C/ BERBARA, ALBERTO ",
+          "is_read": true,
+          "fecha": "2026-02-13T16:05:06.987275+00:00",
+          "remitente_email": "mf.magaliflores@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "5a03f2cd-c256-4739-92cc-13f5145d9329",
+          "title": "@autorizadosestudiohif @andreaestudio24  chicos en noviembre de 2025 An",
+          "body_preview": "Magali Flores te mencionó en las notas del expediente \"IÑIGUEZ, LEONARDO DANIEL C/ BERBARA, ALBERTO ",
+          "is_read": true,
+          "fecha": "2026-02-13T16:04:50.121641+00:00",
+          "remitente_email": "mf.magaliflores@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "d6c30118-758f-4e55-a002-5789347fb1e1",
+          "title": "@autorizadosestudiohif @andreaestudio24",
+          "body_preview": "Magali Flores te mencionó en las notas del expediente \"IÑIGUEZ, LEONARDO DANIEL C/ BERBARA, ALBERTO ",
+          "is_read": true,
+          "fecha": "2026-02-13T16:04:23.345106+00:00",
+          "remitente_email": "mf.magaliflores@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "8a40821f-3b4b-496b-863f-72d4e7850369",
+          "title": "@autorizadosestudiohif @andreaestudio24 Gabi en junio de 2025 Andre ret",
+          "body_preview": "Magali Flores te mencionó en las notas del expediente \"SEQUEIRA, JONATHAN EDUARDO C/ EREDIA, CRISTIA",
+          "is_read": true,
+          "fecha": "2026-02-13T15:45:42.658284+00:00",
+          "remitente_email": "mf.magaliflores@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "5d5c4418-dc39-47bc-a166-a48a449cf6a6",
+          "title": "@autorizadosestudiohif @andreaestudio24 Gabi en junio de 2025 Andre ret",
+          "body_preview": "Magali Flores te mencionó en las notas del expediente \"SEQUEIRA, JONATHAN EDUARDO C/ EREDIA, CRISTIA",
+          "is_read": true,
+          "fecha": "2026-02-13T15:45:09.655024+00:00",
+          "remitente_email": "mf.magaliflores@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "0989a5b8-1af9-4b3d-9395-69f36f0e6e20",
+          "title": "Re: Re: Oficio: este es el oficio de Diaz c Peñaloza a UDP Garin correcto. El anterior descartarlo",
+          "body_preview": "Magali Flores respondió: Genial Gabi gracias",
+          "is_read": true,
+          "fecha": "2026-02-13T11:41:44.964266+00:00",
+          "remitente_email": "mf.magaliflores@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "02121491-3b47-49ba-acee-cf9bf351e54e",
+          "title": "@autorizadosestudiohif  Gabi podés averiguar si una cedula que dejaste",
+          "body_preview": "Magali Flores te mencionó en las notas del expediente \"DORADO, JORGE HIGINIO C/ URAN, JESUS DANIEL S",
+          "is_read": true,
+          "fecha": "2026-02-11T21:24:17.215179+00:00",
+          "remitente_email": "mf.magaliflores@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "691bae02-28c2-4116-af3b-02b9a9beabd4",
+          "title": "@autorizadosestudiohif @micaelaestudio01  ch",
+          "body_preview": "Magali Flores te mencionó en las notas del expediente \"DORADO, JORGE HIGINIO C/ URAN, JESUS DANIEL S",
+          "is_read": true,
+          "fecha": "2026-02-11T21:23:06.053579+00:00",
+          "remitente_email": "mf.magaliflores@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "582f453d-ea8e-4992-aad3-2eb4f0aeafb8",
+          "title": "Oficio: oficio a Htal de PACHECO - Para imprimir y diligenciar - Diaz c Peñaloza",
+          "body_preview": "Magali Flores te envió un oficio: \"oficio a Htal de PACHECO - Para imprimir y diligenciar - Diaz c P",
+          "is_read": true,
+          "fecha": "2026-02-11T20:12:18.683217+00:00",
+          "remitente_email": "mf.magaliflores@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "e03be1fa-e3c2-44d4-bacc-0e7dbf324d0f",
+          "title": "Oficio: este es el oficio de Diaz c Peñaloza a UDP Garin correcto. El anterior descartarlo",
+          "body_preview": "Magali Flores te envió un oficio: \"este es el oficio de Diaz c Peñaloza a UDP Garin correcto. El ant",
+          "is_read": true,
+          "fecha": "2026-02-11T19:55:29.21969+00:00",
+          "remitente_email": "mf.magaliflores@gmail.com",
+          "fue_respondida": true,
+          "minutos_hasta_respuesta": 1368.22825,
+          "fecha_respuesta": "2026-02-12T18:43:42.914677+00:00"
+        },
+        {
+          "id": "67b0c9b3-f463-4754-9e73-8b1fe3c002a1",
+          "title": "Oficio nueva",
+          "body_preview": "Oficio enviada por Magali Flores.",
+          "is_read": true,
+          "fecha": "2026-02-11T19:42:59.622318+00:00",
+          "remitente_email": null,
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "7970e19e-59b4-4077-818d-f136327dc2d5",
+          "title": "Oficio nueva",
+          "body_preview": "Oficio enviada por Gustavo Hisi.",
+          "is_read": true,
+          "fecha": "2026-02-11T16:08:48.953779+00:00",
+          "remitente_email": null,
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "7e09ff18-529b-432a-885f-b437064d686a",
+          "title": "@autorizadosestudiohif Gaby, todo bien? Mandé un mail por este por el a",
+          "body_preview": "Guido Querinuzzi te mencionó en las notas del expediente \"INCIDENTE Nº 1 - ACTOR: ALMIRON, JONATHAN ",
+          "is_read": true,
+          "fecha": "2026-02-11T12:22:00.660063+00:00",
+          "remitente_email": "victoria.estudiohisi@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "cfd0478f-b9eb-4576-a6ac-501388ed58b4",
+          "title": "HICE TRASLADO Y OFICIOS 5/2 @autorizadosestudiohif  TE HICE DOS OFICIOS PARA TIGRE Y ME DEVOLVISTE",
+          "body_preview": "Gustavo Hisi te mencionó en las notas del expediente \"GIMENEZ NUÑEZ, CRISTINO C/ MACCHIONE, PAMELA S",
+          "is_read": true,
+          "fecha": "2026-02-06T20:48:02.580633+00:00",
+          "remitente_email": "gfhisi@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "94d8875e-53be-4f3b-ba3e-89afde27ee2b",
+          "title": "@ifran_jorge @autorizadosestudiohif acá está la causa penal para retirar hace un tie",
+          "body_preview": "Francisco Querinuzzi te mencionó en las notas del expediente \"REY, JEREMIAS OSCAR C/ ALONSO (REBELDE",
+          "is_read": true,
+          "fecha": "2026-02-06T15:21:32.472357+00:00",
+          "remitente_email": "novedadesgh@outlook.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "f3269220-41ed-481b-a3dc-534180611c00",
+          "title": "@autorizadosestudiohif  ir a buscar cedula a la matanza urgente 5/2/26",
+          "body_preview": "Gustavo Hisi te mencionó en las notas del expediente \"GRAELLS, CAROLINA SOLEDAD C/ RISO, JORGE ALBER",
+          "is_read": true,
+          "fecha": "2026-02-05T18:46:51.235717+00:00",
+          "remitente_email": "gfhisi@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "042f8a08-afcf-4f44-a465-b49fa1cd9267",
+          "title": "@autorizadosestudiohif  ir a buscar cedula a la matanza urgente 5/2/26",
+          "body_preview": "Gustavo Hisi te mencionó en las notas del expediente \"GRAELLS, CAROLINA SOLEDAD C/ RISO, JORGE ALBER",
+          "is_read": true,
+          "fecha": "2026-02-05T18:44:31.16405+00:00",
+          "remitente_email": "gfhisi@gmail.com",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta": null,
+          "fecha_respuesta": null
+        },
+        {
+          "id": "2ed9984d-89a0-49ca-8efc-65837343bb8b",
+          "title": "@autorizadosestudiohif  ir a buscar cedula a",
+          "body_preview": "Gustavo Hisi te mencionó en las notas del expediente \"GRAELLS, CAROLINA SOLEDAD C/ RISO, JORGE ALBER",
+          "is_read": true,
+          "fecha": "2026-02-05T18:44:05.607696+00:00",
+          "remitente_email": "gfhisi@gmail.com",
+          "fue_respondida": true,
+          "minutos_hasta_respuesta": 16.08185,
+          "fecha_respuesta": "2026-02-05T19:00:10.518742+00:00"
+        }
+      ]
+    },
+    "enviadas": {
+      "total": 9,
+      "notificaciones": [
+        {
+          "id": "f7fcef43-e769-4763-97af-12842506e064",
+          "title": "Re: @autorizadosestudiohif @andreaestudio24  chicos en noviembre de 2025 An",
+          "body_preview": "Gabriel Crespo respondió: maga yo lo busque por todos lados y no lo tengo directamente ,si podes hac",
+          "fecha": "2026-02-25T18:11:44.052782+00:00",
+          "destinatario_email": "mf.magaliflores@gmail.com",
+          "destinatario_nombre": "Magali Flores",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta_del_destinatario": null
+        },
+        {
+          "id": "9ab09d54-0116-4fcf-ac70-eed24b7861c8",
+          "title": "Re: @autorizadosestudiohif te deje en tu escritorio un oficio pero tenes qu",
+          "body_preview": "Gabriel Crespo respondió: ya lo tengo en mano mañana te averiguo su ipp correcta ya que esta mal",
+          "fecha": "2026-02-25T18:09:31.65993+00:00",
+          "destinatario_email": "gfhisi@gmail.com",
+          "destinatario_nombre": "Gustavo Hisi",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta_del_destinatario": null
+        },
+        {
+          "id": "d63f57ea-4edd-4680-98bb-0f556e678ea7",
+          "title": "Re: oda la hc que conste que tengan asi mandan todo . @autorizadosestudiohif gaby llevalo a moreno ni bien te lo haga 18/2",
+          "body_preview": "Gabriel Crespo respondió: bueno apenas me lo envia lo hago de super urgencia",
+          "fecha": "2026-02-18T18:53:59.411425+00:00",
+          "destinatario_email": "gfhisi@gmail.com",
+          "destinatario_nombre": "Gustavo Hisi",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta_del_destinatario": null
+        },
+        {
+          "id": "3038d548-764b-4142-9caf-fc2e27c80f79",
+          "title": "Re: Oficio: Oficio Htal Pacheco para diligenciar - Godoy c Torres",
+          "body_preview": "Gabriel Crespo respondió: impreso en estos dias lo completo maga",
+          "fecha": "2026-02-18T17:48:16.559279+00:00",
+          "destinatario_email": "mf.magaliflores@gmail.com",
+          "destinatario_nombre": "Magali Flores",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta_del_destinatario": null
+        },
+        {
+          "id": "7ea9705f-5bc7-4342-9cac-07ee4291f393",
+          "title": "Re: Oficio: Oficios para diligenciar HDI D Torcuato - Godoy c Torres",
+          "body_preview": "Gabriel Crespo respondió: impreso maga apenas termino las cosas urgentes de gus te lo entrego o si e",
+          "fecha": "2026-02-18T17:47:09.860124+00:00",
+          "destinatario_email": "mf.magaliflores@gmail.com",
+          "destinatario_nombre": "Magali Flores",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta_del_destinatario": null
+        },
+        {
+          "id": "81ec3e82-8022-47cb-8379-91d5b40c69a9",
+          "title": "Re: Oficio: Este oficio es para diligenciar en persona en UFI 10 La Plata. No necesita sello medalla del juzgado",
+          "body_preview": "Gabriel Crespo respondió: ya la imprimo y se la dejo a guido que el va a la plata",
+          "fecha": "2026-02-18T17:41:05.491857+00:00",
+          "destinatario_email": "mf.magaliflores@gmail.com",
+          "destinatario_nombre": "Magali Flores",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta_del_destinatario": null
+        },
+        {
+          "id": "728933e8-5d33-4d2e-997e-ddf2de1d9a19",
+          "title": "Re: @autorizadosestudiohif te deje en tu escritorio un oficio pero tenes qu",
+          "body_preview": "Gabriel Crespo respondió: si si ya mismo la agendo , te la envio  por sistema el resultado si es que",
+          "fecha": "2026-02-18T17:40:36.782017+00:00",
+          "destinatario_email": "gfhisi@gmail.com",
+          "destinatario_nombre": "Gustavo Hisi",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta_del_destinatario": null
+        },
+        {
+          "id": "f31c6688-8fa4-4e07-a23b-8b5fc9fd63fa",
+          "title": "Re: Oficio: este es el oficio de Diaz c Peñaloza a UDP Garin correcto. El anterior descartarlo",
+          "body_preview": "Gabriel Crespo respondió: impreso",
+          "fecha": "2026-02-12T18:43:42.914677+00:00",
+          "destinatario_email": "mf.magaliflores@gmail.com",
+          "destinatario_nombre": "Magali Flores",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta_del_destinatario": null
+        },
+        {
+          "id": "afe9ee24-867b-4ced-8040-cc4a49948a82",
+          "title": "Re: @autorizadosestudiohif  ir a buscar cedula a",
+          "body_preview": "Gabriel Crespo respondió: dale gus  ya la agendo",
+          "fecha": "2026-02-05T19:00:10.518742+00:00",
+          "destinatario_email": "gfhisi@gmail.com",
+          "destinatario_nombre": "Gustavo Hisi",
+          "fue_respondida": false,
+          "minutos_hasta_respuesta_del_destinatario": null
+        }
+      ]
+    }
+  }
+}

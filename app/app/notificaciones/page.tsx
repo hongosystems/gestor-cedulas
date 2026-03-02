@@ -324,7 +324,7 @@ export default function NotificacionesPage() {
         .eq("thread_id", notif.thread_id)
         .order("created_at", { ascending: true });
       
-      if (threadData) {
+        if (threadData) {
         // Parsear metadata para cada mensaje del hilo
         const parsedThreadData = threadData.map((item: any) => {
           let parsedMetadata = item.metadata;
@@ -343,19 +343,34 @@ export default function NotificacionesPage() {
         });
         setThreadMessages(parsedThreadData as Notif[]);
         
-        // Cargar nombres de usuario únicos del hilo
-        const uniqueUserIds = [...new Set(threadData.map((t: any) => t.user_id))];
+        // Cargar nombres de usuario únicos del hilo usando sender_id de metadata
+        const uniqueSenderIds = [
+          ...new Set(
+            parsedThreadData
+              .map((t: any) => {
+                const meta = t.metadata || {};
+                const senderId =
+                  typeof meta === "object" && meta
+                    ? (meta as any).sender_id
+                    : null;
+                // Fallback a user_id para notificaciones antiguas sin sender_id
+                return senderId || t.user_id;
+              })
+              .filter(Boolean)
+          ),
+        ];
+
         const namesMap: Record<string, string> = {};
-        for (const userId of uniqueUserIds) {
-          if (userId === uid) {
-            namesMap[userId] = currentUserName || "Tú";
+        for (const senderId of uniqueSenderIds) {
+          if (senderId === uid) {
+            namesMap[senderId] = currentUserName || "Tú";
           } else {
             const { data: profile } = await supabase
               .from("profiles")
               .select("full_name, email")
-              .eq("id", userId)
+              .eq("id", senderId)
               .maybeSingle();
-            namesMap[userId] = profile?.full_name || profile?.email || "Usuario";
+            namesMap[senderId] = profile?.full_name || profile?.email || "Usuario";
           }
         }
         setThreadUserNames(namesMap);
@@ -1173,8 +1188,17 @@ export default function NotificacionesPage() {
                 {/* Hilo de conversación - Mostrar todos los mensajes */}
                 <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
                   {threadMessages.map((msg, index) => {
-                    const isMyMsg = msg.user_id === currentUserId;
-                    const userName = (msg.user_id ? threadUserNames[msg.user_id] : null) || (isMyMsg ? "Tú" : "Usuario");
+                    // Determinar el sender real usando metadata.sender_id (fallback a user_id)
+                    const rawMeta = msg.metadata || {};
+                    const senderId =
+                      (typeof rawMeta === "object" && rawMeta
+                        ? (rawMeta as any).sender_id
+                        : null) || msg.user_id;
+
+                    const isMyMsg = senderId === currentUserId;
+                    const userName =
+                      (senderId ? threadUserNames[senderId] : null) ||
+                      (isMyMsg ? "Tú" : "Usuario");
                     
                     return (
                       <div 

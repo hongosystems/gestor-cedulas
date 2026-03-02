@@ -62,9 +62,26 @@ export async function POST(req: Request) {
     }
 
     const name = (file.name || "").toLowerCase();
-    if (!name.endsWith(".docx")) {
-      return NextResponse.json({ error: "Solo se permite .docx" }, { status: 400 });
+    const allowedExts = [".docx", ".pdf", ".png", ".jpg", ".jpeg", ".zip"];
+    const ext = allowedExts.find((e) => name.endsWith(e));
+
+    if (!ext) {
+      return NextResponse.json(
+        { error: "Solo se permite .docx, .pdf, .png, .jpg, .jpeg o .zip" },
+        { status: 400 }
+      );
     }
+
+    const contentType =
+      ext === ".docx"
+        ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        : ext === ".pdf"
+        ? "application/pdf"
+        : ext === ".png"
+        ? "image/png"
+        : ext === ".jpg" || ext === ".jpeg"
+        ? "image/jpeg"
+        : "application/zip";
 
     const svc = supabaseService();
 
@@ -89,12 +106,12 @@ export async function POST(req: Request) {
 
     // 2) Subir a storage (bucket privado)
     const buf = Buffer.from(await file.arrayBuffer());
-    const storage_path = `transfers/${transferId}/v${version}.docx`;
+    const storage_path = `transfers/${transferId}/v${version}${ext}`;
 
     const { error: upErr } = await svc.storage
       .from("transfers")
       .upload(storage_path, buf, {
-        contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        contentType,
         upsert: true,
       });
 

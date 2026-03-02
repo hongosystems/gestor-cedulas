@@ -54,8 +54,15 @@ export default function EnviarPage() {
     setMsg("");
 
     if (!recipient) return setMsg("Elegí un usuario destinatario.");
-    if (!file) return setMsg("Cargá un archivo .docx.");
-    if (!file.name.toLowerCase().endsWith(".docx")) return setMsg("El archivo debe ser .docx.");
+    if (!file) return setMsg("Cargá un archivo.");
+
+    const allowedExts = [".docx", ".pdf", ".png", ".jpg", ".jpeg", ".zip"];
+    const name = file.name.toLowerCase();
+    const ok = allowedExts.some((ext) => name.endsWith(ext));
+
+    if (!ok) {
+      return setMsg("El archivo debe ser .docx, .pdf, .png, .jpg, .jpeg o .zip.");
+    }
 
     setSending(true);
     try {
@@ -145,15 +152,15 @@ export default function EnviarPage() {
           </div>
 
           <div>
-            <label className="label">Archivo (.docx)</label>
+            <label className="label">Archivo</label>
             <input
               className="input"
               type="file"
-              accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              accept=".docx,.pdf,.png,.jpg,.jpeg,.zip,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf,image/png,image/jpeg,application/zip,application/x-zip-compressed"
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
             <p className="helper" style={{ marginTop: 6 }}>
-              Se envía y se maneja siempre como .docx.
+              Se permite .docx, .pdf, .png, .jpg, .jpeg o .zip.
             </p>
           </div>
 
