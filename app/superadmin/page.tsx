@@ -15,7 +15,7 @@ type Cedula = {
   fecha_carga: string | null;
   fecha_vencimiento: string | null;
   estado: string;
-  tipo_documento: "CEDULA" | "OFICIO" | null;
+  tipo_documento: "CEDULA" | "OFICIO" | "OTROS_ESCRITOS" | null;
   created_by_user_id?: string | null;
 };
 

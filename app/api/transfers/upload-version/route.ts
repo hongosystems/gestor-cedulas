@@ -114,7 +114,7 @@ export async function POST(req: Request) {
       (actorProfile?.email || "").trim() ||
       "Usuario";
 
-    const tipoTxt = t.doc_type === "CEDULA" ? "Cédula" : "Oficio";
+    const tipoTxt = t.doc_type === "CEDULA" ? "Cédula" : t.doc_type === "OFICIO" ? "Oficio" : "Otros Escritos";
 
     await svc.from("notifications").insert({
       user_id: otherUserId,

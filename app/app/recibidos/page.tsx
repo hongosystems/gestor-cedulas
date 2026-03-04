@@ -8,7 +8,7 @@ type Transfer = {
   id: string;
   sender_user_id: string;
   recipient_user_id: string;
-  doc_type: "CEDULA" | "OFICIO";
+  doc_type: "CEDULA" | "OFICIO" | "OTROS_ESCRITOS";
   title: string | null;
   created_at: string;
 };
@@ -166,7 +166,7 @@ export default function RecibidosPage() {
               <tbody>
                 {received.map((t) => (
                   <tr key={t.id}>
-                    <td>{t.doc_type === "CEDULA" ? "Cédula" : "Oficio"}</td>
+                    <td>{t.doc_type === "CEDULA" ? "Cédula" : t.doc_type === "OFICIO" ? "Oficio" : "Otros Escritos"}</td>
                     <td>{displayName(profiles[t.sender_user_id])}</td>
                     <td>{t.title || "-"}</td>
                     <td>{fmtDate(t.created_at)}</td>
@@ -212,7 +212,7 @@ export default function RecibidosPage() {
               <tbody>
                 {sent.map((t) => (
                   <tr key={t.id}>
-                    <td>{t.doc_type === "CEDULA" ? "Cédula" : "Oficio"}</td>
+                    <td>{t.doc_type === "CEDULA" ? "Cédula" : t.doc_type === "OFICIO" ? "Oficio" : "Otros Escritos"}</td>
                     <td>{displayName(profiles[t.recipient_user_id])}</td>
                     <td>{t.title || "-"}</td>
                     <td>{fmtDate(t.created_at)}</td>

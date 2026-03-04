@@ -13,7 +13,7 @@ type Cedula = {
   juzgado: string | null;
   fecha_carga: string | null;
   pdf_path: string | null;
-  tipo_documento: "CEDULA" | "OFICIO" | null;
+  tipo_documento: "CEDULA" | "OFICIO" | "OTROS_ESCRITOS" | null;
   notas?: string | null;
   read_by_user_id?: string | null;
   read_by_name?: string | null;
@@ -26,7 +26,7 @@ type User = {
   username: string; // email sin dominio para @mentions
 };
 
-type DocumentType = "CEDULA" | "OFICIO" | null;
+type DocumentType = "CEDULA" | "OFICIO" | "OTROS_ESCRITOS" | null;
 
 function pad2(n: number) {
   return String(n).padStart(2, "0");

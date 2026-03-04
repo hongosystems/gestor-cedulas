@@ -37,7 +37,7 @@ type Cedula = {
   juzgado: string | null;
   fecha_carga: string | null;
   estado: string;
-  tipo_documento: "CEDULA" | "OFICIO" | null;
+  tipo_documento: "CEDULA" | "OFICIO" | "OTROS_ESCRITOS" | null;
   pdf_path: string | null;
   created_by_user_id?: string | null;
   created_by_name?: string | null;
@@ -3459,7 +3459,7 @@ export default function MisJuzgadosPage() {
                                   whiteSpace: "nowrap"
                                 }}
                               >
-                                {item.tipo_documento === "OFICIO" ? "VER OFICIO" : "VER CÉDULA"}
+                                {item.tipo_documento === "OFICIO" ? "VER OFICIO" : item.tipo_documento === "OTROS_ESCRITOS" ? "VER OTROS ESCRITOS" : "VER CÉDULA"}
                               </button>
                               {item.read_by_name && (
                                 <div style={{ 

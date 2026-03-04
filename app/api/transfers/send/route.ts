@@ -54,7 +54,7 @@ export async function POST(req: Request) {
     if (!recipient_user_id) {
       return NextResponse.json({ error: "Falta recipient_user_id" }, { status: 400 });
     }
-    if (doc_type !== "CEDULA" && doc_type !== "OFICIO") {
+    if (doc_type !== "CEDULA" && doc_type !== "OFICIO" && doc_type !== "OTROS_ESCRITOS") {
       return NextResponse.json({ error: "doc_type inválido" }, { status: 400 });
     }
     if (!(file instanceof File)) {
@@ -145,7 +145,7 @@ export async function POST(req: Request) {
       (senderProfile?.email || "").trim() ||
       "Usuario";
 
-    const tipoTxt = doc_type === "CEDULA" ? "Cédula" : "Oficio";
+    const tipoTxt = doc_type === "CEDULA" ? "Cédula" : doc_type === "OFICIO" ? "Oficio" : "Otros Escritos";
 
     // 5) Crear notificación para el destinatario
     const notificationTitle = title ? `${tipoTxt}: ${title}` : `${tipoTxt} nueva`;

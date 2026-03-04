@@ -221,10 +221,12 @@ export async function POST(req: NextRequest) {
         }
       }
       
-      // Determinar el tipo de documento (CEDULA u OFICIO) basado en el título de la notificación padre
-      let docType: "CEDULA" | "OFICIO" = "CEDULA";
+      // Determinar el tipo de documento (CEDULA, OFICIO u OTROS_ESCRITOS) basado en el título de la notificación padre
+      let docType: "CEDULA" | "OFICIO" | "OTROS_ESCRITOS" = "CEDULA";
       if (parentNotif.title.toLowerCase().includes("oficio")) {
         docType = "OFICIO";
+      } else if (parentNotif.title.toLowerCase().includes("otros escritos")) {
+        docType = "OTROS_ESCRITOS";
       } else if (originalTransferId) {
         // Intentar obtener el tipo del transfer original
         const { data: originalTransfer } = await svc
@@ -233,7 +235,7 @@ export async function POST(req: NextRequest) {
           .eq("id", originalTransferId)
           .single();
         if (originalTransfer) {
-          docType = originalTransfer.doc_type as "CEDULA" | "OFICIO";
+          docType = originalTransfer.doc_type as "CEDULA" | "OFICIO" | "OTROS_ESCRITOS";
         }
       }
       

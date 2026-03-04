@@ -66,7 +66,7 @@ export default function NuevaCedulaPage() {
   const [juzgado, setJuzgado] = useState("");
 
   const [file, setFile] = useState<File | null>(null);
-  const [tipoDocumento, setTipoDocumento] = useState<"CEDULA" | "OFICIO" | null>(null);
+  const [tipoDocumento, setTipoDocumento] = useState<"CEDULA" | "OFICIO" | "OTROS_ESCRITOS" | null>(null);
   const [currentUserName, setCurrentUserName] = useState<string>("");
 
   // Se setea AL SUBIR ARCHIVO, no editable
@@ -567,7 +567,7 @@ export default function NuevaCedulaPage() {
                 <select
                   className="input"
                   value={tipoDocumento || ""}
-                  onChange={(e) => setTipoDocumento(e.target.value as "CEDULA" | "OFICIO" | null || null)}
+                  onChange={(e) => setTipoDocumento(e.target.value as "CEDULA" | "OFICIO" | "OTROS_ESCRITOS" | null || null)}
                   style={{ 
                     minWidth: 150,
                     cursor: "pointer",
@@ -577,6 +577,7 @@ export default function NuevaCedulaPage() {
                   <option value="">Seleccionar...</option>
                   <option value="CEDULA">Cédula</option>
                   <option value="OFICIO">Oficio</option>
+                  <option value="OTROS_ESCRITOS">Otros Escritos</option>
                 </select>
               </div>
               <p className="helper" style={{ marginTop: 6, marginBottom: 0 }}>

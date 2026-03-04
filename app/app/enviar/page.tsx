@@ -19,7 +19,7 @@ export default function EnviarPage() {
   const [msg, setMsg] = useState("");
   const [users, setUsers] = useState<Profile[]>([]);
   const [recipient, setRecipient] = useState("");
-  const [docType, setDocType] = useState<"CEDULA" | "OFICIO">("CEDULA");
+  const [docType, setDocType] = useState<"CEDULA" | "OFICIO" | "OTROS_ESCRITOS">("CEDULA");
   const [title, setTitle] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [sending, setSending] = useState(false);
@@ -131,6 +131,7 @@ export default function EnviarPage() {
             <select className="input" value={docType} onChange={(e) => setDocType(e.target.value as any)}>
               <option value="CEDULA">Cédula</option>
               <option value="OFICIO">Oficio</option>
+              <option value="OTROS_ESCRITOS">Otros Escritos</option>
             </select>
           </div>
 
