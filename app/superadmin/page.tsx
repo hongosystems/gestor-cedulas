@@ -1339,11 +1339,16 @@ export default function SuperAdminPage() {
     } else if (juzgadoFilter === "prueba_pericia") {
       // Filtro por Prueba/Pericia en movimientos
       // Solo aplica a favoritos de PJN que tienen movimientos
+      // Nota: El useEffect ya carga movimientos desde cases como fallback
       const beforePruebaPericiaFilter = filtered.length;
       
       console.log(`[Dashboard] Filtrando por PRUEBA/PERICIA. Total favoritos: ${pjnFavoritos.length}`);
       const favoritosConMovimientos = pjnFavoritos.filter(f => f.movimientos).length;
+      const favoritosSinMovimientos = pjnFavoritos.filter(f => !f.movimientos).length;
       console.log(`[Dashboard] Favoritos con movimientos: ${favoritosConMovimientos} de ${pjnFavoritos.length}`);
+      if (favoritosSinMovimientos > 0) {
+        console.log(`[Dashboard] ⚠️  ${favoritosSinMovimientos} favoritos sin movimientos (el useEffect los cargará desde cases)`);
+      }
       
       filtered = filtered.filter(e => {
         // Solo los favoritos de PJN tienen movimientos
@@ -1353,7 +1358,13 @@ export default function SuperAdminPage() {
         const favoritoId = e.id.replace(/^pjn_/, '');
         const favorito = pjnFavoritos.find(f => f.id === favoritoId);
         
-        if (!favorito || !favorito.movimientos) {
+        if (!favorito) {
+          return false;
+        }
+        
+        // Si no hay movimientos, el useEffect los cargará desde cases
+        // Por ahora, excluir del filtro (se volverá a ejecutar cuando se carguen)
+        if (!favorito.movimientos) {
           return false;
         }
         
@@ -1365,6 +1376,7 @@ export default function SuperAdminPage() {
         juzgadoFilter,
         pjnFavoritosCount: pjnFavoritos.length,
         favoritosConMovimientos,
+        favoritosSinMovimientos,
         expedientesFiltrados: filtered.length
       });
     } else if (juzgadoFilter && juzgadoFilter !== "mis_juzgados" && juzgadoFilter !== "todos" && juzgadoFilter !== "beneficio" && juzgadoFilter !== "prueba_pericia") {

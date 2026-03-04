@@ -191,6 +191,11 @@ async function performSync(req: NextRequest) {
     }
 
     console.log(`[sync-favoritos] Encontrados ${casesData.length} casos en pjn-scraper`);
+    
+    // Estadísticas de casos con movimientos
+    const casosConMovimientos = casesData.filter(c => c.movimientos).length;
+    const casosSinMovimientos = casesData.length - casosConMovimientos;
+    console.log(`[sync-favoritos] Casos con movimientos: ${casosConMovimientos}, sin movimientos: ${casosSinMovimientos}`);
 
     // 2. Convertir casos a formato pjn_favoritos
     const favoritosToUpsert: Array<{
@@ -201,6 +206,7 @@ async function performSync(req: NextRequest) {
       juzgado: string | null;
       fecha_ultima_carga: string | null;
       observaciones: string | null;
+      movimientos: any | null; // Movimientos completos para filtro de Prueba/Pericia
       source_url: string | null;
       updated_at: string;
     }> = [];
@@ -299,6 +305,7 @@ async function performSync(req: NextRequest) {
         juzgado: normalizeJuzgado(c.dependencia),
         fecha_ultima_carga: fechaUltimaCarga,
         observaciones: observaciones,
+        movimientos: c.movimientos || null, // Guardar movimientos completos para filtro de Prueba/Pericia
         source_url: null,
         updated_at: updatedAt,
       });
@@ -347,6 +354,10 @@ async function performSync(req: NextRequest) {
     }
 
     console.log(`[sync-favoritos] ${updated} casos insertados/actualizados`);
+    
+    // Estadísticas de favoritos con movimientos sincronizados
+    const favoritosConMovimientos = favoritosToUpsert.filter(f => f.movimientos).length;
+    console.log(`[sync-favoritos] Favoritos con movimientos sincronizados: ${favoritosConMovimientos} de ${favoritosToUpsert.length}`);
 
     // 4. Eliminar de pjn_favoritos los expedientes removidos o que ya no están en cases
     console.log("[sync-favoritos] Eliminando expedientes removidos de favoritos...");
