@@ -182,11 +182,11 @@ function tienePruebaPericia(movimientos: any): boolean {
           if (mov.Detalle) {
             detalleText = String(mov.Detalle).toUpperCase();
           } else if (mov.cols && Array.isArray(mov.cols)) {
-            // Buscar en cols el campo "Detalle:" (puede estar en cualquier posición del array)
+            // Primero: buscar "Detalle:" en cualquier columna
             for (const col of mov.cols) {
               const colStr = String(col).trim();
-              // Buscar "Detalle:" al inicio o en cualquier parte
-              const matchDetalle = colStr.match(/Detalle:\s*(.+)$/i);
+              // Buscar "Detalle:" al inicio o en cualquier parte (mejorado para capturar todo después de "Detalle:")
+              const matchDetalle = colStr.match(/Detalle:\s*(.+)/i);
               if (matchDetalle) {
                 detalleText = matchDetalle[1].toUpperCase();
                 break;
@@ -199,37 +199,77 @@ function tienePruebaPericia(movimientos: any): boolean {
             }
           }
           
-          // Patrones canónicos para Prueba/Pericia
+          // Si no hay texto para analizar, continuar con el siguiente movimiento
+          if (!detalleText || detalleText.trim().length === 0) {
+            continue;
+          }
+          
+          // Patrones canónicos para Prueba/Pericia (incluyendo EXPERTA/EXPERTO)
           const patrones = [
+            // Patrones con PERITO/PERICIA
             /SE\s+ORDENA.*PERICI/i,
             /ORDENA.*PERICI/i,
             /SOLICITA.*PROVEE.*PRUEBA\s+PERICI/i,
             /PRUEBA\s+PERICIAL/i,
-            /PERITO.*ACEPTA\s+(?:EL\s+)?CARGO/i,  // Mejorado: acepta "EL CARGO" o "CARGO"
-            /PERITO.*PRESENTA\s+INFORME/i,         // Nuevo
-            /PERITO.*FIJA\s+(?:NUEVA\s+)?FECHA/i, // Nuevo
-            /PERITO.*INFORMA/i,                    // Nuevo
-            /PERITO.*CITA/i,                       // Nuevo
+            /PERITO.*ACEPTA\s+(?:EL\s+)?CARGO/i,
+            /PERITO.*PRESENTA\s+INFORME/i,
+            /PERITO.*FIJA\s+(?:NUEVA\s+)?FECHA/i,
+            /PERITO.*INFORMA/i,
+            /PERITO.*CITA/i,
             /LLAMA.*PERICI/i,
             /DISPONE.*PERICI/i,
             /TRASLADO.*PERICI/i,
             /PERICI.*M[EÉ]DIC/i,
             /PERICI.*PSICOL/i,
             /PERICI.*CONTAB/i,
-            /PERICI.*INGENIER/i,                   // Nuevo
-            /PERICI.*LEGIST/i,                      // Nuevo
-            /ACREDITA.*PERITO/i,                    // Nuevo: para "ACREDITA ANTICIPO DE GASTOS PERITO"
-            /ANTICIPO.*PERITO/i,                    // Nuevo
-            /GASTOS.*PERITO/i,                      // Nuevo
-            /HAGASE\s+SABER.*PERITO/i,              // Nuevo: "HAGASE SABER AL PERITO"
-            /TENGASE\s+PRESENTE.*PERITO/i,          // Nuevo: "TENGASE PRESENTE Y HAGASE SABER AL PERITO"
-            /INTIMACION.*PERITO/i,                  // Nuevo: "INTIMACION PERITO"
-            /INTIMA.*PERITO/i,                      // Nuevo: "INTIMA PERITO"
-            /SE\s+INTIME.*PERITO/i,                 // Nuevo: "SE INTIME PERITO"
-            /PERITO.*ACOMPAÑA/i,                    // Nuevo: "PERITO ACOMPAÑA"
-            /PERITO.*ADJUNTA/i,                     // Nuevo: "PERITO ADJUNTA"
-            /NOTIFIQUESE.*PERITO/i,                 // Nuevo: "NOTIFIQUESE...PERITO"
-            /NOTIFICA.*PERITO/i                     // Nuevo: "NOTIFICA...PERITO"
+            /PERICI.*INGENIER/i,
+            /PERICI.*LEGIST/i,
+            /ACREDITA.*PERITO/i,
+            /ANTICIPO.*PERITO/i,
+            /GASTOS.*PERITO/i,
+            /HAGASE\s+SABER.*PERITO/i,
+            /TENGASE\s+PRESENTE.*PERITO/i,
+            /INTIMACION.*PERITO/i,
+            /INTIMA.*PERITO/i,
+            /SE\s+INTIME.*PERITO/i,
+            /PERITO.*ACOMPAÑA/i,
+            /PERITO.*ADJUNTA/i,
+            /NOTIFIQUESE.*PERITO/i,
+            /NOTIFICA.*PERITO/i,
+            // Nuevos patrones para EXPERTA/EXPERTO (género femenino y variantes)
+            /HAGASE\s+SABER.*EXPERTA/i,
+            /HAGASE\s+SABER.*EXPERTO/i,
+            /TENGASE\s+PRESENTE.*EXPERTA/i,
+            /TENGASE\s+PRESENTE.*EXPERTO/i,
+            /INTIMACION.*EXPERTA/i,
+            /INTIMACION.*EXPERTO/i,
+            /INTIMA.*EXPERTA/i,
+            /INTIMA.*EXPERTO/i,
+            /SE\s+INTIME.*EXPERTA/i,
+            /SE\s+INTIME.*EXPERTO/i,
+            /NOTIFIQUESE.*EXPERTA/i,
+            /NOTIFIQUESE.*EXPERTO/i,
+            /NOTIFICA.*EXPERTA/i,
+            /NOTIFICA.*EXPERTO/i,
+            /EXPERTA.*ACEPTA\s+(?:EL\s+)?CARGO/i,
+            /EXPERTO.*ACEPTA\s+(?:EL\s+)?CARGO/i,
+            /EXPERTA.*PRESENTA\s+INFORME/i,
+            /EXPERTO.*PRESENTA\s+INFORME/i,
+            /EXPERTA.*FIJA\s+(?:NUEVA\s+)?FECHA/i,
+            /EXPERTO.*FIJA\s+(?:NUEVA\s+)?FECHA/i,
+            /EXPERTA.*INFORMA/i,
+            /EXPERTO.*INFORMA/i,
+            /EXPERTA.*CITA/i,
+            /EXPERTO.*CITA/i,
+            /EXPERTA.*ACOMPAÑA/i,
+            /EXPERTO.*ACOMPAÑA/i,
+            /EXPERTA.*ADJUNTA/i,
+            /EXPERTO.*ADJUNTA/i,
+            // Patrones adicionales para casos específicos encontrados
+            /AGR[EÉ]GUENSE.*ESTUDIOS.*M[EÉ]DICOS.*EXPERTA/i,
+            /AGR[EÉ]GUENSE.*ESTUDIOS.*M[EÉ]DICOS.*EXPERTO/i,
+            /PRESENTACION\s+DEL\s+INFORME\s+PERICIAL/i,
+            /INFORME\s+PERICIAL/i
           ];
           
           for (const patron of patrones) {
