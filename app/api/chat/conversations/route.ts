@@ -179,7 +179,8 @@ export async function GET(req: NextRequest) {
             .from("messages")
             .select("*", { count: "exact", head: true })
             .eq("conversation_id", conv.id)
-            .gt("created_at", lastReadAt);
+            .gt("created_at", lastReadAt)
+            .neq("sender_id", user.id); // Excluir mensajes propios
           unreadCount = count || 0;
         } else {
           // Si nunca ha leído, contar todos los mensajes excepto los propios

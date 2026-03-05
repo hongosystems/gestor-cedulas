@@ -71,26 +71,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Marcar como leído usando la función RPC
-    const { error: rpcError } = await svc.rpc("mark_conversation_read", {
-      p_conversation_id: conversation_id,
-    });
+    // Marcar como leído directamente (no usar RPC porque auth.uid() es NULL con service role)
+    const { error: updateError } = await svc
+      .from("conversation_participants")
+      .update({ last_read_at: new Date().toISOString() })
+      .eq("conversation_id", conversation_id)
+      .eq("user_id", user.id);
 
-    if (rpcError) {
-      console.error("Error al marcar como leído:", rpcError);
-      // Intentar actualizar directamente si la función RPC no existe
-      const { error: updateError } = await svc
-        .from("conversation_participants")
-        .update({ last_read_at: new Date().toISOString() })
-        .eq("conversation_id", conversation_id)
-        .eq("user_id", user.id);
-
-      if (updateError) {
-        return NextResponse.json(
-          { error: updateError.message || "Error al marcar como leído" },
-          { status: 500 }
-        );
-      }
+    if (updateError) {
+      console.error("Error al marcar como leído:", updateError);
+      return NextResponse.json(
+        { error: updateError.message || "Error al marcar como leído" },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({ ok: true });
