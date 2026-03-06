@@ -64,6 +64,24 @@ export default function NuevaCedulaPage() {
   const [expedienteAnio, setExpedienteAnio] = useState(""); // Campo Año del expediente
   const [caratula, setCaratula] = useState("");
   const [juzgado, setJuzgado] = useState("");
+  
+  const [expedientesRelacionados, setExpedientesRelacionados] = useState<Array<{
+    numero: string;
+    numeroCompleto: string;
+    caratula: string | null;
+    juzgado: string | null;
+    esPrincipal: boolean;
+    esIncidente: boolean;
+  }>>([]);
+  const [mostrarSelectorExpedientes, setMostrarSelectorExpedientes] = useState(false);
+  
+  const [usuariosAsignados, setUsuariosAsignados] = useState<Array<{
+    id: string;
+    nombre: string;
+    email: string;
+    esBeneficio?: boolean;
+  }>>([]);
+  const [cargandoUsuarios, setCargandoUsuarios] = useState(false);
 
   const [file, setFile] = useState<File | null>(null);
   const [tipoDocumento, setTipoDocumento] = useState<"CEDULA" | "OFICIO" | "OTROS_ESCRITOS" | null>(null);
@@ -132,6 +150,13 @@ export default function NuevaCedulaPage() {
     })();
   }, []);
 
+  // Actualizar usuarios cuando cambia la carátula o el juzgado
+  useEffect(() => {
+    if (juzgado.trim() && caratula.trim()) {
+      obtenerUsuariosPorJuzgado(juzgado, caratula);
+    }
+  }, [caratula]);
+
   async function onFileChange(f: File | null) {
     setMsg("");
     setFile(f);
@@ -197,6 +222,8 @@ export default function NuevaCedulaPage() {
   // Función para buscar expediente en PJN_Favoritos cuando el usuario ingresa número y año
   async function buscarExpediente(numero: string, anio: string, jurisdiccion: string) {
     setMsg("");
+    setExpedientesRelacionados([]);
+    setMostrarSelectorExpedientes(false);
     
     // Si alguno de los campos está vacío, limpiar caratula y juzgado
     if (!numero.trim() || !anio.trim()) {
@@ -205,8 +232,8 @@ export default function NuevaCedulaPage() {
       return;
     }
 
-    // Validar que el número sea válido (solo dígitos)
-    if (!/^\d+$/.test(numero.trim())) {
+    // Validar que el número sea válido (dígitos opcionalmente seguidos de / y más dígitos)
+    if (!/^\d+(\/\d+)?$/.test(numero.trim())) {
       return;
     }
 
@@ -244,6 +271,14 @@ export default function NuevaCedulaPage() {
         const searchData = await searchRes.json();
         console.log("[buscarExpediente] Datos recibidos:", searchData);
         
+        // Si requiere selección (múltiples expedientes relacionados)
+        if (searchData.requiereSeleccion && searchData.expedientes) {
+          setExpedientesRelacionados(searchData.expedientes);
+          setMostrarSelectorExpedientes(true);
+          setMsg(searchData.mensaje || "Se encontraron múltiples expedientes relacionados.");
+          return;
+        }
+        
         if (searchData.encontrado) {
           // Si se encuentra en BD, rellenar caratula y juzgado
           console.log("[buscarExpediente] Expediente encontrado, rellenando campos");
@@ -252,6 +287,8 @@ export default function NuevaCedulaPage() {
           }
           if (searchData.juzgado) {
             setJuzgado(searchData.juzgado);
+            // Obtener usuarios asignados a este juzgado (con la carátula encontrada)
+            obtenerUsuariosPorJuzgado(searchData.juzgado, searchData.caratula);
           }
           setMsg(""); // Limpiar mensaje de error si había uno
         } else {
@@ -270,6 +307,51 @@ export default function NuevaCedulaPage() {
     } catch (searchError) {
       console.error("[buscarExpediente] Error en fetch:", searchError);
       setMsg("Error de conexión al buscar el expediente.");
+    }
+  }
+
+  function seleccionarExpediente(exp: typeof expedientesRelacionados[0]) {
+    setCaratula(exp.caratula || "");
+    setJuzgado(exp.juzgado || "");
+    setExpedienteNumero(exp.numero);
+    setMostrarSelectorExpedientes(false);
+    setExpedientesRelacionados([]);
+    setMsg("");
+    // Obtener usuarios asignados a este juzgado (con la carátula)
+    if (exp.juzgado) {
+      obtenerUsuariosPorJuzgado(exp.juzgado, exp.caratula || "");
+    }
+  }
+
+  // Función para obtener usuarios asignados a un juzgado
+  async function obtenerUsuariosPorJuzgado(juzgadoValue: string, caratulaValue?: string) {
+    if (!juzgadoValue || !juzgadoValue.trim()) {
+      setUsuariosAsignados([]);
+      return;
+    }
+
+    setCargandoUsuarios(true);
+    try {
+      const res = await fetch("/api/get-users-by-juzgado", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          juzgado: juzgadoValue,
+          caratula: caratulaValue || caratula // Enviar carátula actual si no se proporciona
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setUsuariosAsignados(data.usuarios || []);
+      } else {
+        setUsuariosAsignados([]);
+      }
+    } catch (error) {
+      console.error("[obtenerUsuariosPorJuzgado] Error:", error);
+      setUsuariosAsignados([]);
+    } finally {
+      setCargandoUsuarios(false);
     }
   }
 
@@ -583,6 +665,122 @@ export default function NuevaCedulaPage() {
               <p className="helper" style={{ marginTop: 6, marginBottom: 0 }}>
                 Ingresá la jurisdicción, número y año del expediente. Si existe en la base de datos, se completarán automáticamente Carátula y Juzgado.
               </p>
+              
+              {/* Selector de expedientes relacionados */}
+              {mostrarSelectorExpedientes && expedientesRelacionados.length > 0 && (
+                <div style={{
+                  marginTop: 12,
+                  padding: "16px 18px",
+                  borderRadius: 12,
+                  background: "rgba(0, 82, 156, 0.12)",
+                  border: "1px solid rgba(0, 82, 156, 0.3)",
+                }}>
+                  <p style={{
+                    margin: "0 0 12px 0",
+                    fontSize: 13,
+                    color: "var(--text)",
+                    fontWeight: 500
+                  }}>
+                    {msg || "Se encontraron múltiples expedientes relacionados:"}
+                  </p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {expedientesRelacionados.map((exp, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => seleccionarExpediente(exp)}
+                        style={{
+                          padding: "12px 16px",
+                          borderRadius: 8,
+                          background: exp.esPrincipal 
+                            ? "rgba(0, 82, 156, 0.2)" 
+                            : "rgba(255, 255, 255, 0.05)",
+                          border: `1px solid ${exp.esPrincipal 
+                            ? "rgba(0, 82, 156, 0.4)" 
+                            : "rgba(255, 255, 255, 0.1)"}`,
+                          color: "var(--text)",
+                          cursor: "pointer",
+                          textAlign: "left",
+                          transition: "all 0.2s",
+                          fontSize: 13,
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = exp.esPrincipal 
+                            ? "rgba(0, 82, 156, 0.3)" 
+                            : "rgba(255, 255, 255, 0.1)";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = exp.esPrincipal 
+                            ? "rgba(0, 82, 156, 0.2)" 
+                            : "rgba(255, 255, 255, 0.05)";
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                          <span style={{
+                            fontWeight: 600,
+                            color: exp.esPrincipal ? "var(--brand-blue-2)" : "var(--text)",
+                          }}>
+                            {exp.numeroCompleto}
+                          </span>
+                          {exp.esPrincipal && (
+                            <span style={{
+                              fontSize: 11,
+                              padding: "2px 6px",
+                              borderRadius: 4,
+                              background: "rgba(0, 82, 156, 0.3)",
+                              color: "var(--brand-blue-2)",
+                            }}>
+                              Principal
+                            </span>
+                          )}
+                          {exp.esIncidente && (
+                            <span style={{
+                              fontSize: 11,
+                              padding: "2px 6px",
+                              borderRadius: 4,
+                              background: "rgba(255, 255, 255, 0.1)",
+                              color: "var(--muted)",
+                            }}>
+                              Incidente
+                            </span>
+                          )}
+                        </div>
+                        {exp.caratula && (
+                          <div style={{
+                            marginTop: 6,
+                            fontSize: 12,
+                            color: "var(--muted)",
+                            lineHeight: 1.4,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}>
+                            {exp.caratula}
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => {
+                      setMostrarSelectorExpedientes(false);
+                      setExpedientesRelacionados([]);
+                      setMsg("");
+                    }}
+                    style={{
+                      marginTop: 12,
+                      padding: "6px 12px",
+                      fontSize: 12,
+                      color: "var(--muted)",
+                      background: "transparent",
+                      border: "none",
+                      cursor: "pointer",
+                      textDecoration: "underline",
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              )}
             </div>
 
             <div>
@@ -601,10 +799,80 @@ export default function NuevaCedulaPage() {
               <input
                 className="input"
                 value={juzgado}
-                onChange={(e) => setJuzgado(e.target.value)}
+                onChange={(e) => {
+                  setJuzgado(e.target.value);
+                  obtenerUsuariosPorJuzgado(e.target.value, caratula);
+                }}
                 placeholder="Opcional"
                 style={{ marginTop: 6 }}
               />
+              
+              {/* Mostrar usuarios asignados */}
+              {juzgado.trim() && (
+                <div style={{
+                  marginTop: 8,
+                  padding: "12px 16px",
+                  borderRadius: 8,
+                  background: "rgba(0, 82, 156, 0.08)",
+                  border: "1px solid rgba(0, 82, 156, 0.2)",
+                }}>
+                  {cargandoUsuarios ? (
+                    <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>
+                      Buscando usuarios asignados...
+                    </p>
+                  ) : usuariosAsignados.length > 0 ? (
+                    <>
+                      <p style={{ 
+                        margin: "0 0 8px 0", 
+                        fontSize: 13, 
+                        color: "var(--text)",
+                        fontWeight: 500
+                      }}>
+                        {usuariosAsignados.length === 1 
+                          ? "Esta cédula será recibida por:" 
+                          : "Esta cédula será recibida por:"}
+                      </p>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        {usuariosAsignados.map((usuario) => (
+                          <div 
+                            key={usuario.id}
+                            style={{
+                              fontSize: 13,
+                              color: "var(--text)",
+                              padding: "4px 0",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 6,
+                            }}
+                          >
+                            • {usuario.nombre}
+                            {usuario.esBeneficio && (
+                              <span style={{
+                                fontSize: 11,
+                                padding: "2px 6px",
+                                borderRadius: 4,
+                                background: "rgba(74, 222, 128, 0.2)",
+                                color: "#4ade80",
+                              }}>
+                                (Beneficio)
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <p style={{ 
+                      margin: 0, 
+                      fontSize: 13, 
+                      color: "var(--muted)",
+                      fontStyle: "italic"
+                    }}>
+                      No hay usuarios asignados a este juzgado.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             <div>

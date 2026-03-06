@@ -22,6 +22,15 @@ function normalizarNumero(numero: string | number): string {
 }
 
 /**
+ * Extrae el número base de un expediente (sin incidente)
+ * Ej: "020267/1" -> "020267", "020267" -> "020267"
+ */
+function extraerNumeroBase(numero: string): string {
+  const match = numero.toString().trim().match(/^(\d+)/);
+  return match ? match[1] : numero.toString().trim();
+}
+
+/**
  * Busca un expediente en pjn_favoritos_v (vista) por jurisdicción, número y año
  * Retorna caratula y juzgado si se encuentra
  */
@@ -40,12 +49,16 @@ export async function POST(req: Request) {
     }
 
     const numeroNormalizado = normalizarNumero(numero);
+    const numeroBase = extraerNumeroBase(numero); // Para buscar expedientes relacionados
+    const numeroBaseNormalizado = normalizarNumero(numeroBase);
     const anioNum = parseInt(anio.toString(), 10);
     const jurisdiccionFinal = jurisdiccion || "CIV"; // Por defecto CIV
 
     console.log("[search-pjn-favoritos] Parámetros normalizados:", { 
       numeroOriginal: numero, 
       numeroNormalizado, 
+      numeroBase,
+      numeroBaseNormalizado,
       anio: anioNum,
       jurisdiccion: jurisdiccionFinal
     });
@@ -70,11 +83,71 @@ export async function POST(req: Request) {
 
     console.log("[search-pjn-favoritos] Registros encontrados por jurisdicción y año:", allData?.length || 0);
 
-    // Buscar coincidencia normalizando números
+    // Determinar si el número ingresado es solo el base (sin incidente)
+    const numeroIngresadoTieneIncidente = numero.toString().trim().includes('/');
+    
+    // Buscar coincidencia exacta normalizando números
     let encontrado = allData?.find(item => {
       const numeroBDNormalizado = normalizarNumero(item.numero || '');
       return numeroBDNormalizado === numeroNormalizado;
     });
+
+    // Si el número ingresado NO tiene incidente (es solo el base), buscar expedientes relacionados
+    // Esto permite detectar cuando hay principal + incidentes
+    if (!numeroIngresadoTieneIncidente && allData) {
+      const expedientesRelacionados = allData.filter(item => {
+        const numeroBD = item.numero || '';
+        const numeroBDBase = extraerNumeroBase(numeroBD);
+        const numeroBDBaseNormalizado = normalizarNumero(numeroBDBase);
+        return numeroBDBaseNormalizado === numeroBaseNormalizado;
+      });
+
+      // Si hay múltiples expedientes relacionados (principal + incidentes)
+      if (expedientesRelacionados.length > 1) {
+        console.log("[search-pjn-favoritos] Múltiples expedientes relacionados encontrados:", expedientesRelacionados.length);
+        
+        // Ordenar: primero el principal (sin /), luego los incidentes
+        expedientesRelacionados.sort((a, b) => {
+          const aTieneIncidente = (a.numero || '').includes('/');
+          const bTieneIncidente = (b.numero || '').includes('/');
+          if (aTieneIncidente === bTieneIncidente) return 0;
+          return aTieneIncidente ? 1 : -1;
+        });
+
+        return NextResponse.json({
+          encontrado: false,
+          requiereSeleccion: true,
+          expedientes: expedientesRelacionados.map(exp => ({
+            numero: exp.numero,
+            numeroCompleto: `${jurisdiccionFinal} ${exp.numero}/${exp.anio}`,
+            caratula: exp.caratula || null,
+            juzgado: exp.juzgado || null,
+            esPrincipal: !(exp.numero || '').includes('/'),
+            esIncidente: (exp.numero || '').includes('/')
+          })),
+          mensaje: `Se encontraron ${expedientesRelacionados.length} expediente(s) relacionados. Seleccioná el que corresponde:`
+        });
+      }
+
+      // Si solo hay uno relacionado, usarlo directamente
+      if (expedientesRelacionados.length === 1) {
+        encontrado = expedientesRelacionados[0];
+      }
+    } else if (!encontrado && allData) {
+      // Si el número ingresado SÍ tiene incidente pero no encontró coincidencia exacta,
+      // buscar expedientes relacionados como fallback
+      const expedientesRelacionados = allData.filter(item => {
+        const numeroBD = item.numero || '';
+        const numeroBDBase = extraerNumeroBase(numeroBD);
+        const numeroBDBaseNormalizado = normalizarNumero(numeroBDBase);
+        return numeroBDBaseNormalizado === numeroBaseNormalizado;
+      });
+
+      // Si solo hay uno relacionado, usarlo directamente
+      if (expedientesRelacionados.length === 1) {
+        encontrado = expedientesRelacionados[0];
+      }
+    }
 
     // ESTRATEGIA 2: Si no encontró con el año exacto, buscar solo por jurisdicción y número
     // (por si el año en la BD es diferente)
