@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseService } from "@/lib/supabase-server";
+import { daysBetween } from "@/lib/semaforo";
 
 export const runtime = "nodejs";
 
@@ -303,46 +304,56 @@ export async function GET(req: NextRequest) {
     });
 
     // Calcular semáforo SLA interno (horas sin contacto / turno vencido)
-    // Rangos: 0-24hrs (VERDE), 24-48hrs (AMARILLO), 48-72hrs+ (ROJO)
+    // Rangos activos: 0-24hrs (VERDE), 24-48hrs (AMARILLO), 48-72hrs+ (ROJO)
+    // Para ESTUDIO_REALIZADO: reloj congelado, días y semáforo fijos (0-20 VERDE, 20-50 AMARILLO, 50+ ROJO)
     const ahora = new Date();
+    const semaforoByDias = (dias: number) => {
+      if (dias >= 50) return "ROJO";
+      if (dias >= 20) return "AMARILLO";
+      return "VERDE";
+    };
+
     const ordenesConSemaforo = ordenesConGestiones.map((item: any) => {
       let semaforo = "VERDE";
       let horasSinContacto = null;
-      let diasSinContacto = null; // Mantener para compatibilidad con frontend
+      let diasSinContacto: number | null = null;
       let turnoVencido = false;
 
       if (item.gestion) {
-        // Calcular horas desde última comunicación
-        const ultimaComunicacion = item.gestion.comunicaciones?.[0];
-        if (ultimaComunicacion) {
-          const fechaComunicacion = new Date(ultimaComunicacion.created_at);
-          const horas = Math.floor((ahora.getTime() - fechaComunicacion.getTime()) / (1000 * 60 * 60));
-          horasSinContacto = horas;
-          diasSinContacto = Math.floor(horas / 24); // Convertir a días para mostrar
-          
-          // Semáforo interno basado en horas: 0-24hrs (VERDE), 24-48hrs (AMARILLO), 48-72hrs+ (ROJO)
-          if (horas >= 48) semaforo = "ROJO";
-          else if (horas >= 24) semaforo = "AMARILLO";
-          else semaforo = "VERDE";
+        // ESTUDIO_REALIZADO: congelar reloj, días y semáforo en el valor del día de cierre
+        if (item.gestion.estado === "ESTUDIO_REALIZADO") {
+          const fechaFin = item.gestion.fecha_estudio_realizado || item.gestion.updated_at;
+          const fechaInicio = item.gestion.created_at || item.created_at;
+          diasSinContacto = daysBetween(fechaInicio, fechaFin);
+          semaforo = semaforoByDias(diasSinContacto);
+          horasSinContacto = null; // No aplica para estudio completado
         } else {
-          // Sin comunicaciones, calcular desde creación de gestión
-          const fechaGestion = new Date(item.gestion.created_at);
-          const horas = Math.floor((ahora.getTime() - fechaGestion.getTime()) / (1000 * 60 * 60));
-          horasSinContacto = horas;
-          diasSinContacto = Math.floor(horas / 24); // Convertir a días para mostrar
-          
-          // Semáforo interno basado en horas: 0-24hrs (VERDE), 24-48hrs (AMARILLO), 48-72hrs+ (ROJO)
-          if (horas >= 48) semaforo = "ROJO";
-          else if (horas >= 24) semaforo = "AMARILLO";
-          else semaforo = "VERDE";
-        }
+          // Calcular horas desde última comunicación (flujo activo)
+          const ultimaComunicacion = item.gestion.comunicaciones?.[0];
+          if (ultimaComunicacion) {
+            const fechaComunicacion = new Date(ultimaComunicacion.created_at);
+            const horas = Math.floor((ahora.getTime() - fechaComunicacion.getTime()) / (1000 * 60 * 60));
+            horasSinContacto = horas;
+            diasSinContacto = Math.floor(horas / 24);
+            if (horas >= 48) semaforo = "ROJO";
+            else if (horas >= 24) semaforo = "AMARILLO";
+            else semaforo = "VERDE";
+          } else {
+            const fechaGestion = new Date(item.gestion.created_at);
+            const horas = Math.floor((ahora.getTime() - fechaGestion.getTime()) / (1000 * 60 * 60));
+            horasSinContacto = horas;
+            diasSinContacto = Math.floor(horas / 24);
+            if (horas >= 48) semaforo = "ROJO";
+            else if (horas >= 24) semaforo = "AMARILLO";
+            else semaforo = "VERDE";
+          }
 
-        // Verificar si turno está vencido
-        if (item.gestion.turno_fecha_hora) {
-          const fechaTurno = new Date(item.gestion.turno_fecha_hora);
-          if (fechaTurno < ahora && item.gestion.estado !== "ESTUDIO_REALIZADO") {
-            turnoVencido = true;
-            semaforo = "ROJO"; // Turno vencido siempre es ROJO
+          if (item.gestion.turno_fecha_hora) {
+            const fechaTurno = new Date(item.gestion.turno_fecha_hora);
+            if (fechaTurno < ahora) {
+              turnoVencido = true;
+              semaforo = "ROJO";
+            }
           }
         }
       }

@@ -138,7 +138,10 @@ export async function POST(req: NextRequest) {
       updateData.turno_fecha_hora = turno_fecha_hora || null;
     }
 
-    if (fecha_estudio_realizado !== undefined) {
+    // Al marcar ESTUDIO_REALIZADO, siempre registrar la fecha de cierre para el conteo de días
+    if (estado === "ESTUDIO_REALIZADO") {
+      updateData.fecha_estudio_realizado = fecha_estudio_realizado || new Date().toISOString();
+    } else if (fecha_estudio_realizado !== undefined) {
       updateData.fecha_estudio_realizado = fecha_estudio_realizado || null;
     }
 

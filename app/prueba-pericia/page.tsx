@@ -322,6 +322,100 @@ function SemaforoChip({ value }: { value: Semaforo }) {
   );
 }
 
+// Mapeo de estados de gestión a colores identificatorios para bubbles
+const ESTADO_GESTION_STYLES: Record<string, React.CSSProperties> = {
+  PENDIENTE_CONTACTO_CLIENTE: {
+    background: "rgba(241, 196, 15, 0.2)",
+    border: "1px solid rgba(241, 196, 15, 0.5)",
+    color: "rgba(255, 246, 205, 0.98)",
+  },
+  CONTACTO_CLIENTE_FALLIDO: {
+    background: "rgba(231, 76, 60, 0.2)",
+    border: "1px solid rgba(231, 76, 60, 0.5)",
+    color: "rgba(255, 220, 216, 0.98)",
+  },
+  CONTACTO_CLIENTE_OK: {
+    background: "rgba(46, 204, 113, 0.18)",
+    border: "1px solid rgba(46, 204, 113, 0.45)",
+    color: "rgba(210, 255, 226, 0.98)",
+  },
+  TURNO_CONFIRMADO: {
+    background: "rgba(52, 152, 219, 0.2)",
+    border: "1px solid rgba(52, 152, 219, 0.5)",
+    color: "rgba(200, 230, 255, 0.98)",
+  },
+  SEGUIMIENTO_PRE_TURNO: {
+    background: "rgba(26, 188, 156, 0.2)",
+    border: "1px solid rgba(26, 188, 156, 0.5)",
+    color: "rgba(200, 250, 240, 0.98)",
+  },
+  ESTUDIO_REALIZADO: {
+    background: "rgba(46, 204, 113, 0.25)",
+    border: "1px solid rgba(46, 204, 113, 0.55)",
+    color: "rgba(210, 255, 226, 1)",
+  },
+  CANCELADA: {
+    background: "rgba(127, 140, 141, 0.25)",
+    border: "1px solid rgba(127, 140, 141, 0.5)",
+    color: "rgba(200, 215, 220, 0.9)",
+  },
+};
+
+// Labels legibles para mostrar en lugar del código
+const ESTADO_GESTION_LABELS: Record<string, string> = {
+  PENDIENTE_CONTACTO_CLIENTE: "Pendiente contacto",
+  CONTACTO_CLIENTE_FALLIDO: "Contacto fallido",
+  CONTACTO_CLIENTE_OK: "Contacto OK",
+  TURNO_CONFIRMADO: "Turno confirmado",
+  SEGUIMIENTO_PRE_TURNO: "Seguimiento pre-turno",
+  ESTUDIO_REALIZADO: "Estudio realizado",
+  CANCELADA: "Cancelada",
+};
+
+function EstadoGestionBubble({ estado }: { estado: string | null | undefined }) {
+  if (!estado || estado === "Sin gestión") {
+    return (
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          padding: "4px 10px",
+          borderRadius: 999,
+          fontSize: 11,
+          fontWeight: 600,
+          background: "rgba(127, 140, 141, 0.15)",
+          border: "1px solid rgba(127, 140, 141, 0.35)",
+          color: "rgba(200, 215, 220, 0.8)",
+        }}
+      >
+        Sin gestión
+      </span>
+    );
+  }
+  const style = ESTADO_GESTION_STYLES[estado] ?? {
+    background: "rgba(96, 141, 186, 0.2)",
+    border: "1px solid rgba(96, 141, 186, 0.4)",
+    color: "rgba(234, 243, 255, 0.95)",
+  };
+  const label = ESTADO_GESTION_LABELS[estado] ?? estado;
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        padding: "4px 10px",
+        borderRadius: 999,
+        fontSize: 11,
+        fontWeight: 600,
+        ...style,
+      }}
+      title={estado}
+    >
+      {label}
+    </span>
+  );
+}
+
 type User = {
   id: string;
   email: string;
@@ -2392,9 +2486,7 @@ export default function PruebaPericiaPage() {
                         )}
                       </td>
                       <td>
-                        <span style={{ fontSize: 13 }}>
-                          {orden.gestion?.estado || "Sin gestión"}
-                        </span>
+                        <EstadoGestionBubble estado={orden.gestion?.estado} />
                       </td>
                       <td>
                         {orden.gestion?.centro_medico || <span className="muted">—</span>}
@@ -3101,8 +3193,8 @@ export default function PruebaPericiaPage() {
               <>
                 <div style={{ marginBottom: 12 }}>
                   <strong style={{ color: "var(--muted)", fontSize: 12 }}>Estado:</strong>
-                  <div style={{ color: "var(--text)", fontSize: 14, marginTop: 4 }}>
-                    {selectedOrden.gestion.estado}
+                  <div style={{ marginTop: 4 }}>
+                    <EstadoGestionBubble estado={selectedOrden.gestion.estado} />
                   </div>
                 </div>
                 {selectedOrden.gestion.centro_medico && (

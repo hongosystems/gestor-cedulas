@@ -43,6 +43,41 @@ export function daysSince(fechaCargaIso: string | null | undefined): number {
   return Math.max(0, totalDays - eneroDays);
 }
 
+/**
+ * Calcula los días entre dos fechas, excluyendo los días de enero (feria judicial)
+ * @param fechaInicioIso Fecha de inicio en formato ISO
+ * @param fechaFinIso Fecha de fin en formato ISO
+ * @returns Número de días efectivos entre las dos fechas (excluyendo enero)
+ */
+export function daysBetween(
+  fechaInicioIso: string | null | undefined,
+  fechaFinIso: string | null | undefined
+): number {
+  if (!fechaInicioIso || !fechaFinIso) return 0;
+  const inicio = new Date(fechaInicioIso);
+  const fin = new Date(fechaFinIso);
+  if (isNaN(inicio.getTime()) || isNaN(fin.getTime())) return 0;
+  if (fin < inicio) return 0;
+
+  const base = startOfDay(inicio);
+  const endDate = startOfDay(fin);
+
+  const diffMs = endDate.getTime() - base.getTime();
+  const totalDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  let eneroDays = 0;
+  const currentDate = new Date(base);
+
+  while (currentDate <= endDate) {
+    if (currentDate.getMonth() === 0) {
+      eneroDays++;
+    }
+    currentDate.setDate(currentDate.getDate() + 1);
+  }
+
+  return Math.max(0, totalDays - eneroDays);
+}
+
 export function colorFromFechaCarga(fechaCargaIso: string | null | undefined): SemaforoColor {
   const d = daysSince(fechaCargaIso);
 
