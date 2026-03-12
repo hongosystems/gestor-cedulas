@@ -333,6 +333,7 @@ function NotasTextarea({
   juzgado?: string | null;
 }) {
   const timeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+  const mencionesNotificadasRef = React.useRef<Set<string>>(new Set());
   const [isEditing, setIsEditing] = React.useState(false);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const dropdownRef = React.useRef<HTMLDivElement>(null);
@@ -417,9 +418,17 @@ function NotasTextarea({
     const mentionRegex = /@([\w.-]+)/g;
     const matches = [...texto.matchAll(mentionRegex)];
     const mentionedUsernames = [...new Set(matches.map(m => m[1].toLowerCase()))];
-    
+
     if (mentionedUsernames.length === 0) return;
-    
+
+    const claveDedup = `${itemId}:${mentionedUsernames.sort().join(",")}:${texto.trim().substring(0, 500)}`;
+    if (mencionesNotificadasRef.current.has(claveDedup)) return;
+    mencionesNotificadasRef.current.add(claveDedup);
+    if (mencionesNotificadasRef.current.size > 50) {
+      const arr = [...mencionesNotificadasRef.current];
+      mencionesNotificadasRef.current = new Set(arr.slice(-25));
+    }
+
     // Obtener información del usuario actual
     const { data: currentUserProfile } = await supabase
       .from("profiles")

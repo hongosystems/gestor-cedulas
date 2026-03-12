@@ -91,6 +91,23 @@ export async function POST(req: NextRequest) {
       sender_id: metadataObj.sender_id,
       metadata_keys: Object.keys(metadataObj)
     });
+
+    // Deduplicación: no crear si ya existe una notificación idéntica reciente (últimos 10 min)
+    const desde = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const { data: existente } = await svc
+      .from("notifications")
+      .select("id")
+      .eq("user_id", user_id)
+      .eq("title", title)
+      .eq("body", body)
+      .gte("created_at", desde)
+      .limit(1)
+      .maybeSingle();
+
+    if (existente) {
+      console.log("[API create-mention] Duplicada ignorada:", { user_id, title: title?.substring(0, 40) });
+      return NextResponse.json({ ok: true, data: existente, skipped: "duplicate" });
+    }
     
     // Verificar que sender_id esté presente
     if (!metadataObj.sender_id) {
