@@ -1,0 +1,3 @@
+-- DEPRECADA: Usar add_admin_ordenes_medicas.sql en su lugar.
+-- Ese script agrega is_admin_ordenes_medicas (sin tocar is_admin_expedientes)
+-- para que Andrea no vea select-role.

@@ -48,15 +48,16 @@ export async function GET(req: NextRequest) {
 
     const svc = supabaseService();
 
-    // Verificar si es superadmin o admin
+    // Verificar si es superadmin, admin expedientes o admin órdenes médicas
     const { data: roleData } = await svc
       .from("user_roles")
-      .select("is_superadmin, is_admin_expedientes")
+      .select("is_superadmin, is_admin_expedientes, is_admin_ordenes_medicas")
       .eq("user_id", user.id)
       .maybeSingle();
 
     const isSuperadmin = roleData?.is_superadmin === true;
     const isAdminExp = roleData?.is_admin_expedientes === true;
+    const isAdminOrdenes = roleData?.is_admin_ordenes_medicas === true;
 
     // Obtener órdenes médicas (con filtros según permisos)
     let ordenesQuery = svc
@@ -85,7 +86,7 @@ export async function GET(req: NextRequest) {
     let ordenes: any[] = [];
     let ordenesError: any = null;
 
-    if (!isSuperadmin && !isAdminExp) {
+    if (!isSuperadmin && !isAdminExp && !isAdminOrdenes) {
       // Obtener todas las órdenes sin filtro de relaciones
       const { data: allOrdenes, error: allError } = await ordenesQuery;
       

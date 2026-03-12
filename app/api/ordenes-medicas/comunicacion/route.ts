@@ -108,11 +108,11 @@ export async function POST(req: NextRequest) {
       if (!tieneAcceso) {
         const { data: roleData } = await svc
           .from("user_roles")
-          .select("is_superadmin, is_admin_expedientes")
+          .select("is_superadmin, is_admin_expedientes, is_admin_ordenes_medicas")
           .eq("user_id", user.id)
           .maybeSingle();
 
-        if (roleData?.is_superadmin || roleData?.is_admin_expedientes) {
+        if (roleData?.is_superadmin || roleData?.is_admin_expedientes || roleData?.is_admin_ordenes_medicas) {
           tieneAcceso = true;
         }
       }
@@ -155,11 +155,11 @@ export async function POST(req: NextRequest) {
       if (!tieneAcceso) {
         const { data: roleData } = await svc
           .from("user_roles")
-          .select("is_superadmin, is_admin_expedientes")
+          .select("is_superadmin, is_admin_expedientes, is_admin_ordenes_medicas")
           .eq("user_id", user.id)
           .maybeSingle();
 
-        if (roleData?.is_superadmin || roleData?.is_admin_expedientes) {
+        if (roleData?.is_superadmin || roleData?.is_admin_expedientes || roleData?.is_admin_ordenes_medicas) {
           tieneAcceso = true;
         }
       }
