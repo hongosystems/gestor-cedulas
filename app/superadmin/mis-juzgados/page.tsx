@@ -43,6 +43,8 @@ type Cedula = {
   created_by_name?: string | null;
   read_by_user_id?: string | null;
   read_by_name?: string | null;
+  admin_cedulas_completada_at?: string | null;
+  admin_cedulas_en_tramite_at?: string | null;
 };
 
 type Expediente = {
@@ -1117,6 +1119,54 @@ function SemaforoChip({ value }: { value: Semaforo }) {
   );
 }
 
+type EstadoCedula = "Completa" | "En Tramite" | "Pendiente";
+
+function getEstadoCedula(c: { admin_cedulas_completada_at?: string | null; admin_cedulas_en_tramite_at?: string | null }): EstadoCedula {
+  if (c.admin_cedulas_completada_at) return "Completa";
+  if (c.admin_cedulas_en_tramite_at) return "En Tramite";
+  return "Pendiente";
+}
+
+function EstadoChip({ value }: { value: EstadoCedula }) {
+  const style: React.CSSProperties =
+    value === "Completa"
+      ? {
+          background: "rgba(46, 204, 113, 0.16)",
+          border: "1px solid rgba(46, 204, 113, 0.35)",
+          color: "rgba(210, 255, 226, 0.95)",
+        }
+      : value === "En Tramite"
+      ? {
+          background: "rgba(96, 141, 186, 0.25)",
+          border: "1px solid rgba(96, 141, 186, 0.5)",
+          color: "rgba(234, 243, 255, 0.95)",
+        }
+      : {
+          background: "rgba(255, 255, 255, 0.06)",
+          border: "1px solid rgba(255, 255, 255, 0.15)",
+          color: "rgba(234, 243, 255, 0.75)",
+        };
+
+  return (
+    <span
+      style={{
+        ...style,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "6px 10px",
+        borderRadius: 999,
+        fontWeight: 600,
+        fontSize: 11,
+        letterSpacing: 0.3,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {value}
+    </span>
+  );
+}
+
 async function requireSessionOrRedirect() {
   const { data } = await supabase.auth.getSession();
   if (!data.session) {
@@ -2088,7 +2138,7 @@ export default function MisJuzgadosPage() {
       // Intentar incluir tipo_documento, pdf_path, created_by_user_id, read_by_user_id y read_by_name, pero si no existen, usar select sin ellas
       let queryCedulas = supabase
         .from("cedulas")
-        .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado, tipo_documento, pdf_path, created_by_user_id, read_by_user_id, read_by_name")
+        .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado, tipo_documento, pdf_path, created_by_user_id, read_by_user_id, read_by_name, admin_cedulas_completada_at, admin_cedulas_en_tramite_at")
         .neq("estado", "CERRADA")
         .order("fecha_carga", { ascending: true }); // Por defecto: más viejo primero
       
@@ -2115,7 +2165,9 @@ export default function MisJuzgadosPage() {
           errorDetails?.includes("created_by_user_id") ||
           errorDetails?.includes("pdf_path") ||
           errorDetails?.includes("read_by_user_id") ||
-          errorDetails?.includes("read_by_name");
+          errorDetails?.includes("read_by_name") ||
+          errorMsg.includes("admin_cedulas_completada_at") ||
+          errorMsg.includes("admin_cedulas_en_tramite_at");
         
         if (isColumnError) {
           // Intentar primero con pdf_path pero sin tipo_documento, created_by_user_id y read_by fields
@@ -2142,7 +2194,9 @@ export default function MisJuzgadosPage() {
                 created_by_user_id: null,
                 pdf_path: null,
                 read_by_user_id: null,
-                read_by_name: null
+                read_by_name: null,
+                admin_cedulas_completada_at: null,
+                admin_cedulas_en_tramite_at: null
               })) ?? [];
             }
           } else if (cErr2) {
@@ -2154,7 +2208,9 @@ export default function MisJuzgadosPage() {
               tipo_documento: null, 
               created_by_user_id: null,
               read_by_user_id: null,
-              read_by_name: null
+              read_by_name: null,
+              admin_cedulas_completada_at: null,
+              admin_cedulas_en_tramite_at: null
             })) ?? [];
           }
         } else {
@@ -2576,6 +2632,7 @@ export default function MisJuzgadosPage() {
           read_by_name: c.read_by_name || null,
           dias: c.fecha_carga ? daysSince(c.fecha_carga) : null,
           semaforo: c.fecha_carga ? semaforoByAge(daysSince(c.fecha_carga)) : "VERDE" as Semaforo,
+          estado: getEstadoCedula(c),
         }))
       : oficiosFiltered.map(o => ({
           type: "oficio" as const,
@@ -2593,6 +2650,7 @@ export default function MisJuzgadosPage() {
           observaciones: null,
           dias: o.fecha_carga ? daysSince(o.fecha_carga) : null,
           semaforo: o.fecha_carga ? semaforoByAge(daysSince(o.fecha_carga)) : "VERDE" as Semaforo,
+          estado: getEstadoCedula(o),
         }));
     
     // Preparar items para mostrar (agregar observaciones y notas si faltan)
@@ -3386,7 +3444,7 @@ export default function MisJuzgadosPage() {
                     </span>
                   </th>
                   <th 
-                    style={{ width: 80, textAlign: "right", cursor: "pointer" }}
+                    style={{ width: 56, minWidth: 56, textAlign: "left", cursor: "pointer" }}
                     onClick={() => handleSort("dias")}
                     title="Haz clic para ordenar"
                   >
@@ -3395,6 +3453,9 @@ export default function MisJuzgadosPage() {
                       {sortField === "dias" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
                     </span>
                   </th>
+                  {(activeTab === "cedulas" || activeTab === "oficios") && (
+                    <th style={{ width: 110 }}>Estado</th>
+                  )}
                   {activeTab === "expedientes" && (
                     <th style={{ width: 200 }}>Expediente</th>
                   )}
@@ -3431,9 +3492,18 @@ export default function MisJuzgadosPage() {
                             ? formatFecha(item.fecha) 
                             : <span className="muted">—</span>}
                       </td>
-                      <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                      <td style={{ textAlign: "left", fontVariantNumeric: "tabular-nums" }}>
                         {typeof dias === "number" && !isNaN(dias) ? dias : <span className="muted">—</span>}
                       </td>
+                      {(activeTab === "cedulas" || activeTab === "oficios") && (
+                        <td>
+                          {item.estado ? (
+                            <EstadoChip value={item.estado as EstadoCedula} />
+                          ) : (
+                            <EstadoChip value="Pendiente" />
+                          )}
+                        </td>
+                      )}
                       {activeTab === "expedientes" && (
                         <td>
                           {item.numero?.trim() ? item.numero : <span className="muted">—</span>}
@@ -3526,8 +3596,8 @@ export default function MisJuzgadosPage() {
                       activeTab === "expedientes" 
                         ? 9 
                         : isAbogado 
-                          ? 7 
-                          : 6
+                          ? 8 
+                          : 7
                     } className="muted">
                       No hay {activeTab === "expedientes" ? "expedientes" : activeTab === "cedulas" ? "cédulas" : "oficios"} cargados para tus juzgados asignados.
                     </td>
