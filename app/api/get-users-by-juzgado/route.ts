@@ -61,14 +61,90 @@ function juzgadosCoinciden(j1: string, j2: string): boolean {
   return false;
 }
 
+function getCacheKey(juzgado: string | null, caratula: string | null): string {
+  return `${juzgado?.trim() || ""}|||${caratula?.trim() || ""}`;
+}
+
+async function getUsuariosPorJuzgado(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  juzgado: string,
+  caratula: string | null
+): Promise<{ id: string; nombre: string; email: string; esBeneficio: boolean }[]> {
+  const tieneBeneficio = caratula && 
+    /S\/BENEFICIO\s+DE\s+LITIGAR\s+SIN\s+GASTOS/i.test(caratula);
+
+  const { data: allJuzgados, error: juzgadosError } = await supabase
+    .from("user_juzgados")
+    .select("user_id, juzgado");
+
+  if (juzgadosError) return [];
+
+  const juzgadosCoincidentes = (allJuzgados || []).filter(uj => 
+    juzgadosCoinciden(uj.juzgado, juzgado)
+  );
+
+  let userIds = [...new Set(juzgadosCoincidentes.map(uj => uj.user_id))];
+
+  if (tieneBeneficio) {
+    const { data: guidoProfile } = await supabase
+      .from("profiles")
+      .select("id")
+      .ilike("email", "victoria.estudiohisi@gmail.com")
+      .maybeSingle();
+
+    if (guidoProfile?.id && !userIds.includes(guidoProfile.id)) {
+      userIds.push(guidoProfile.id);
+    }
+  }
+
+  if (userIds.length === 0) return [];
+
+  const { data: profiles, error: profilesError } = await supabase
+    .from("profiles")
+    .select("id, full_name, email")
+    .in("id", userIds);
+
+  if (profilesError) return [];
+
+  return (profiles || []).map(profile => ({
+    id: profile.id,
+    nombre: profile.full_name || profile.email || "Usuario sin nombre",
+    email: profile.email || "",
+    esBeneficio: Boolean(tieneBeneficio && profile.email?.toLowerCase() === "victoria.estudiohisi@gmail.com")
+  }));
+}
+
 /**
- * Obtiene los usuarios asignados a un juzgado específico
+ * Obtiene los usuarios asignados a un juzgado (o varios en batch)
+ * Body: { juzgado, caratula } para un solo juzgado
+ * Body: { items: [{ juzgado, caratula }] } para batch
  */
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { juzgado, caratula } = body;
+    const { juzgado, caratula, items } = body;
 
+    // Modo batch
+    if (Array.isArray(items) && items.length > 0) {
+      const supabase = getSupabaseAdmin();
+      const keys = [...new Set(items.map((i: { juzgado?: string; caratula?: string }) => 
+        getCacheKey(i.juzgado || "", i.caratula || null)
+      ))];
+      const map: Record<string, { id: string; nombre: string; email: string; esBeneficio: boolean }[]> = {};
+
+      for (const key of keys) {
+        const [j, c] = key.split("|||");
+        if (j?.trim()) {
+          map[key] = await getUsuariosPorJuzgado(supabase, j, c || null);
+        } else {
+          map[key] = [];
+        }
+      }
+
+      return NextResponse.json({ map });
+    }
+
+    // Modo single (retrocompatible)
     if (!juzgado || !juzgado.trim()) {
       return NextResponse.json(
         { error: "Falta el parámetro 'juzgado'." },
@@ -77,82 +153,11 @@ export async function POST(req: Request) {
     }
 
     const supabase = getSupabaseAdmin();
-
-    // Obtener todos los juzgados asignados
-    const { data: allJuzgados, error: juzgadosError } = await supabase
-      .from("user_juzgados")
-      .select("user_id, juzgado");
-
-    if (juzgadosError) {
-      console.error("[get-users-by-juzgado] Error al obtener juzgados:", juzgadosError);
-      return NextResponse.json(
-        { error: "Error al buscar en la base de datos." },
-        { status: 500 }
-      );
-    }
-
-    // Filtrar juzgados que coinciden con el buscado
-    const juzgadosCoincidentes = (allJuzgados || []).filter(uj => 
-      juzgadosCoinciden(uj.juzgado, juzgado)
-    );
-
-    // Obtener IDs únicos de usuarios
-    let userIds = [...new Set(juzgadosCoincidentes.map(uj => uj.user_id))];
-
-    // Verificar si la carátula contiene "S/BENEFICIO DE LITIGAR SIN GASTOS"
-    const tieneBeneficio = caratula && 
-      /S\/BENEFICIO\s+DE\s+LITIGAR\s+SIN\s+GASTOS/i.test(caratula);
-
-    if (tieneBeneficio) {
-      // Buscar a Guido Querinuzzi por email
-      const { data: guidoProfile, error: guidoError } = await supabase
-        .from("profiles")
-        .select("id, full_name, email")
-        .ilike("email", "victoria.estudiohisi@gmail.com")
-        .maybeSingle();
-
-      if (!guidoError && guidoProfile && guidoProfile.id) {
-        // Agregar a Guido si no está ya en la lista
-        if (!userIds.includes(guidoProfile.id)) {
-          userIds.push(guidoProfile.id);
-        }
-      }
-    }
-
-    if (userIds.length === 0) {
-      return NextResponse.json({
-        usuarios: [],
-        mensaje: "No hay usuarios asignados a este juzgado."
-      });
-    }
-
-    // Obtener información de los usuarios desde profiles
-    const { data: profiles, error: profilesError } = await supabase
-      .from("profiles")
-      .select("id, full_name, email")
-      .in("id", userIds);
-
-    if (profilesError) {
-      console.error("[get-users-by-juzgado] Error al obtener perfiles:", profilesError);
-      return NextResponse.json(
-        { error: "Error al obtener información de usuarios." },
-        { status: 500 }
-      );
-    }
-
-    // Mapear usuarios con su información
-    const usuarios = (profiles || []).map(profile => ({
-      id: profile.id,
-      nombre: profile.full_name || profile.email || "Usuario sin nombre",
-      email: profile.email || "",
-      esBeneficio: tieneBeneficio && profile.email?.toLowerCase() === "victoria.estudiohisi@gmail.com"
-    }));
+    const usuarios = await getUsuariosPorJuzgado(supabase, juzgado, caratula || null);
 
     return NextResponse.json({
       usuarios,
-      mensaje: usuarios.length === 1 
-        ? "Esta cédula será recibida por:" 
-        : "Esta cédula será recibida por:"
+      mensaje: usuarios.length >= 1 ? "Esta cédula será recibida por:" : "No hay usuarios asignados."
     });
   } catch (e: any) {
     console.error("[get-users-by-juzgado] Error general:", e);

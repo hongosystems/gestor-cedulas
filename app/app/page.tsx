@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { daysSince } from "@/lib/semaforo";
 import NotificationBell from "@/app/components/NotificationBell";
+import ResponsableAvatars from "@/app/components/ResponsableAvatars";
 
 type Cedula = {
   id: string;
@@ -17,6 +18,8 @@ type Cedula = {
   notas?: string | null;
   read_by_user_id?: string | null;
   read_by_name?: string | null;
+  admin_cedulas_completada_at?: string | null;
+  admin_cedulas_en_tramite_at?: string | null;
 };
 
 type User = {
@@ -678,6 +681,8 @@ function NotasTextareaCedula({
   );
 }
 
+type AbogadoInfo = { id: string; nombre: string; email: string; esBeneficio?: boolean };
+
 export default function MisCedulasPage() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
@@ -689,6 +694,13 @@ export default function MisCedulasPage() {
   const [notasEditables, setNotasEditables] = useState<Record<string, string>>({});
   const [notasGuardando, setNotasGuardando] = useState<Record<string, boolean>>({});
   const [menuOpen, setMenuOpen] = useState(false);
+  const [isAdminCedulas, setIsAdminCedulas] = useState(false);
+  const [popupEnTramite, setPopupEnTramite] = useState<{ cedula: Cedula; abogados: AbogadoInfo[] } | null>(null);
+  const [popupCompleta, setPopupCompleta] = useState<{ cedula: Cedula; abogados: AbogadoInfo[] } | null>(null);
+  const [completandoId, setCompletandoId] = useState<string | null>(null);
+  const [tramitandoId, setTramitandoId] = useState<string | null>(null);
+  const [selectedCedulaId, setSelectedCedulaId] = useState<string | null>(null);
+  const [usuariosByKey, setUsuariosByKey] = useState<Record<string, AbogadoInfo[]>>({});
 
   useEffect(() => {
     (async () => {
@@ -735,14 +747,15 @@ export default function MisCedulasPage() {
         return;
       }
 
-      // Verificar si es admin_expedientes - usar consulta directa para evitar errores 400
+      // Verificar roles (admin_expedientes, admin_cedulas)
       const { data: roleData, error: roleErr } = await supabase
         .from("user_roles")
-        .select("is_admin_expedientes")
+        .select("is_admin_expedientes, is_admin_cedulas")
         .eq("user_id", uid)
         .maybeSingle();
       
       const isAdminExp = !roleErr && roleData?.is_admin_expedientes === true;
+      setIsAdminCedulas(!roleErr && roleData?.is_admin_cedulas === true);
       
       if (isAdminExp) {
         window.location.href = "/app/expedientes";
@@ -750,17 +763,17 @@ export default function MisCedulasPage() {
       }
 
       // listar cédulas del usuario
-      // Intentar incluir tipo_documento, notas, read_by_user_id y read_by_name, pero si no existen las columnas, usar select sin ellas
+      // Intentar incluir admin_cedulas_completada_at, tipo_documento, notas, read_by_user_id, read_by_name
       let query = supabase
         .from("cedulas")
-        .select("id, owner_user_id, caratula, juzgado, fecha_carga, pdf_path, tipo_documento, notas, read_by_user_id, read_by_name")
+        .select("id, owner_user_id, caratula, juzgado, fecha_carga, pdf_path, tipo_documento, notas, read_by_user_id, read_by_name, admin_cedulas_completada_at, admin_cedulas_en_tramite_at")
         .eq("owner_user_id", uid)
         .order("fecha_carga", { ascending: false });
       
       const { data: cs, error: cErr } = await query;
       
       // Si el error es porque alguna columna no existe, intentar sin ellas
-      if (cErr && (cErr.message?.includes("tipo_documento") || cErr.message?.includes("notas") || cErr.message?.includes("read_by_user_id") || cErr.message?.includes("read_by_name"))) {
+      if (cErr && (cErr.message?.includes("tipo_documento") || cErr.message?.includes("notas") || cErr.message?.includes("read_by_user_id") || cErr.message?.includes("read_by_name") || cErr.message?.includes("admin_cedulas_completada_at") || cErr.message?.includes("admin_cedulas_en_tramite_at"))) {
         const { data: cs2, error: cErr2 } = await supabase
           .from("cedulas")
           .select("id, owner_user_id, caratula, juzgado, fecha_carga, pdf_path")
@@ -772,13 +785,15 @@ export default function MisCedulasPage() {
           setLoading(false);
           return;
         }
-        // Agregar tipo_documento, notas y read_by como null para cada registro
+        // Agregar columnas opcionales como null
         const csWithNull = (cs2 ?? []).map((c: any) => ({ 
           ...c, 
           tipo_documento: null, 
           notas: null,
           read_by_user_id: null,
-          read_by_name: null
+          read_by_name: null,
+          admin_cedulas_completada_at: null,
+          admin_cedulas_en_tramite_at: null
         }));
         setCedulas(csWithNull as Cedula[]);
         setLoading(false);
@@ -808,6 +823,47 @@ export default function MisCedulasPage() {
     })();
   }, []);
 
+  // Cargar usuarios por juzgado para Admin Cedulas (avatares responsabilidad)
+  useEffect(() => {
+    if (!isAdminCedulas || cedulas.length === 0) {
+      setUsuariosByKey({});
+      return;
+    }
+    const seen = new Set<string>();
+    const uniqueItems: { juzgado: string; caratula: string | null }[] = [];
+    for (const c of cedulas) {
+      const j = c.juzgado?.trim() || "";
+      if (!j) continue;
+      const car = c.caratula?.trim() || null;
+      const key = `${j}|||${car || ""}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      uniqueItems.push({ juzgado: j, caratula: car });
+    }
+    if (uniqueItems.length === 0) {
+      setUsuariosByKey({});
+      return;
+    }
+    (async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        const res = await fetch("/api/get-users-by-juzgado", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${data?.session?.access_token}`,
+          },
+          body: JSON.stringify({ items: uniqueItems }),
+        });
+        if (!res.ok) return;
+        const json = await res.json();
+        setUsuariosByKey(json.map || {});
+      } catch {
+        setUsuariosByKey({});
+      }
+    })();
+  }, [cedulas, isAdminCedulas]);
+
   // Cerrar menú al hacer clic fuera
   useEffect(() => {
     if (!menuOpen) return;
@@ -824,7 +880,19 @@ export default function MisCedulasPage() {
   const rows = useMemo(() => {
     let mapped = cedulas.map((c) => {
       const cargaISO = c.fecha_carga || "";
-      const dias = cargaISO ? daysSince(cargaISO) : null;
+      // Si Admin Cedulas marcó como completa, congelar días en ese momento (solo para Admin Cedulas)
+      let dias: number | null = null;
+      if (cargaISO) {
+        if (isAdminCedulas && c.admin_cedulas_completada_at) {
+          const finISO = c.admin_cedulas_completada_at.substring(0, 10);
+          const cargaDate = new Date(cargaISO);
+          const finDate = new Date(finISO);
+          const diffMs = finDate.getTime() - cargaDate.getTime();
+          dias = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+        } else {
+          dias = daysSince(cargaISO);
+        }
+      }
       const diasValidos = dias !== null && !isNaN(dias) && dias >= 0 ? dias : null;
       const sem = diasValidos === null ? ("VERDE" as Semaforo) : semaforoByAge(diasValidos);
       return { ...c, cargaISO, dias: diasValidos, sem };
@@ -883,7 +951,7 @@ export default function MisCedulasPage() {
     }
 
     return mapped;
-  }, [cedulas, sortField, sortDirection, semaforoFilter]);
+  }, [cedulas, sortField, sortDirection, semaforoFilter, isAdminCedulas]);
 
   function handleSort(field: SortField) {
     if (sortField === field) {
@@ -900,6 +968,88 @@ export default function MisCedulasPage() {
   async function logout() {
     await supabase.auth.signOut();
     window.location.href = "/login";
+  }
+
+  async function fetchAbogadosPorJuzgado(juzgado: string | null, caratula: string | null): Promise<AbogadoInfo[]> {
+    if (!juzgado?.trim()) return [];
+    try {
+      const { data: session } = await supabase.auth.getSession();
+      const res = await fetch("/api/get-users-by-juzgado", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${session.session?.access_token}`,
+        },
+        body: JSON.stringify({ juzgado: juzgado.trim(), caratula: caratula || null }),
+      });
+      if (!res.ok) return [];
+      const json = await res.json();
+      return json.usuarios || [];
+    } catch {
+      return [];
+    }
+  }
+
+  async function handleEnTramite(c: Cedula) {
+    const abogados = await fetchAbogadosPorJuzgado(c.juzgado, c.caratula);
+    setPopupEnTramite({ cedula: c, abogados });
+  }
+
+  async function handleCompleta(c: Cedula) {
+    if (c.admin_cedulas_completada_at) {
+      setMsg("Esta cédula/oficio ya fue marcada como completa.");
+      return;
+    }
+    const abogados = await fetchAbogadosPorJuzgado(c.juzgado, c.caratula);
+    setPopupCompleta({ cedula: c, abogados });
+  }
+
+  async function confirmarEnTramite() {
+    const p = popupEnTramite;
+    if (!p) return;
+    setTramitandoId(p.cedula.id);
+    try {
+      const { error } = await supabase
+        .from("cedulas")
+        .update({ admin_cedulas_en_tramite_at: new Date().toISOString() })
+        .eq("id", p.cedula.id);
+      if (error) {
+        setMsg(error.message);
+        return;
+      }
+      setCedulas(prev => prev.map(c =>
+        c.id === p.cedula.id ? { ...c, admin_cedulas_en_tramite_at: new Date().toISOString() } : c
+      ));
+      setPopupEnTramite(null);
+    } catch (err: any) {
+      setMsg(err?.message || "Error al marcar como en trámite.");
+    } finally {
+      setTramitandoId(null);
+    }
+  }
+
+  async function confirmarCompleta() {
+    const p = popupCompleta;
+    if (!p) return;
+    setCompletandoId(p.cedula.id);
+    try {
+      const { error } = await supabase
+        .from("cedulas")
+        .update({ admin_cedulas_completada_at: new Date().toISOString() })
+        .eq("id", p.cedula.id);
+      if (error) {
+        setMsg(error.message);
+        return;
+      }
+      setCedulas(prev => prev.map(c => 
+        c.id === p.cedula.id ? { ...c, admin_cedulas_completada_at: new Date().toISOString() } : c
+      ));
+      setPopupCompleta(null);
+    } catch (err: any) {
+      setMsg(err?.message || "Error al marcar como completa.");
+    } finally {
+      setCompletandoId(null);
+    }
   }
 
   async function abrirArchivo(path: string, cedulaId?: string) {
@@ -1310,6 +1460,58 @@ export default function MisCedulasPage() {
                 Limpiar filtro
               </button>
             )}
+            {isAdminCedulas && (
+              <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <button
+                  onClick={() => {
+                    const sel = rows.find(r => r.id === selectedCedulaId);
+                    if (sel) handleEnTramite(sel);
+                    else setMsg("Seleccione una fila de la tabla.");
+                  }}
+                  style={{
+                    cursor: "pointer",
+                    border: "1px solid rgba(96, 141, 186, 0.5)",
+                    background: "rgba(96, 141, 186, 0.2)",
+                    color: "rgba(180, 220, 255, 0.95)",
+                    padding: "6px 14px",
+                    borderRadius: 999,
+                    fontWeight: 700,
+                    fontSize: 12,
+                    letterSpacing: 0.4,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    transition: "all 0.2s ease",
+                  }}
+                >
+                  En Trámite
+                </button>
+                <button
+                  onClick={() => {
+                    const sel = rows.find(r => r.id === selectedCedulaId);
+                    if (sel) handleCompleta(sel);
+                    else setMsg("Seleccione una fila de la tabla.");
+                  }}
+                  style={{
+                    cursor: "pointer",
+                    border: "1px solid rgba(46, 204, 113, 0.5)",
+                    background: "rgba(46, 204, 113, 0.2)",
+                    color: "rgba(210, 255, 226, 0.95)",
+                    padding: "6px 14px",
+                    borderRadius: 999,
+                    fontWeight: 700,
+                    fontSize: 12,
+                    letterSpacing: 0.4,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    transition: "all 0.2s ease",
+                  }}
+                >
+                  Completa
+                </button>
+              </div>
+            )}
           </div>
 
           {msg && <div className="error">{msg}</div>}
@@ -1340,6 +1542,11 @@ export default function MisCedulasPage() {
                       {sortField === "juzgado" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
                     </span>
                   </th>
+                  {isAdminCedulas && (
+                    <th style={{ width: 80, textAlign: "center" }} title="Responsable según juzgado asignado">
+                      <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 500 }}>Responsable</span>
+                    </th>
+                  )}
                   <th 
                     className="sortable"
                     style={{ width: 150 }}
@@ -1369,7 +1576,15 @@ export default function MisCedulasPage() {
 
               <tbody>
                 {rows.map((c) => (
-                  <tr key={c.id} style={{ verticalAlign: "top" }}>
+                  <tr
+                    key={c.id}
+                    style={{
+                      verticalAlign: "top",
+                      background: selectedCedulaId === c.id ? "rgba(96, 141, 186, 0.15)" : undefined,
+                      cursor: isAdminCedulas ? "pointer" : undefined,
+                    }}
+                    onClick={isAdminCedulas ? () => setSelectedCedulaId(prev => prev === c.id ? null : c.id) : undefined}
+                  >
                     <td>
                       <SemaforoChip value={c.sem} />
                     </td>
@@ -1380,13 +1595,25 @@ export default function MisCedulasPage() {
 
                     <td>{c.juzgado?.trim() ? c.juzgado : <span className="muted">—</span>}</td>
 
+                    {isAdminCedulas && (
+                      <td style={{ textAlign: "center", verticalAlign: "middle" }}>
+                        <ResponsableAvatars
+                          usuarios={
+                            c.juzgado?.trim()
+                              ? usuariosByKey[`${c.juzgado.trim()}|||${(c.caratula || "").trim()}`] || []
+                              : []
+                          }
+                        />
+                      </td>
+                    )}
+
                     <td>{c.cargaISO ? isoToDDMMAA(c.cargaISO) : <span className="muted">—</span>}</td>
 
                     <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
                       {typeof c.dias === "number" && !isNaN(c.dias) ? c.dias : <span className="muted">—</span>}
                     </td>
 
-                    <td style={{ textAlign: "right" }}>
+                    <td style={{ textAlign: "right" }} onClick={e => e.stopPropagation()}>
                       {c.pdf_path ? (
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
                           {c.tipo_documento && (
@@ -1421,7 +1648,7 @@ export default function MisCedulasPage() {
                       )}
                     </td>
                     
-                    <td>
+                    <td onClick={e => e.stopPropagation()}>
                       <NotasTextareaCedula
                         itemId={c.id}
                         initialValue={c.notas || ""}
@@ -1439,7 +1666,7 @@ export default function MisCedulasPage() {
 
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="muted">
+                    <td colSpan={isAdminCedulas ? 8 : 7} className="muted">
                       Todavía no cargaste cédulas/oficios.
                     </td>
                   </tr>
@@ -1453,6 +1680,163 @@ export default function MisCedulasPage() {
           </p>
         </div>
       </section>
+
+      {/* Modal En Trámite */}
+      {popupEnTramite && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.6)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 2000,
+          }}
+          onClick={() => !tramitandoId && setPopupEnTramite(null)}
+        >
+          <div
+            style={{
+              background: "linear-gradient(180deg, rgba(11,47,85,.98), rgba(7,28,46,.98))",
+              border: "1px solid rgba(255,255,255,.2)",
+              borderRadius: 16,
+              padding: 24,
+              maxWidth: 420,
+              width: "90%",
+              boxShadow: "0 12px 40px rgba(0,0,0,.5)",
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 style={{ margin: "0 0 12px", fontSize: 16 }}>En trámite</h3>
+            <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 12 }}>
+              Esta cédula/oficio le llegará al siguiente abogado según el juzgado {popupEnTramite.cedula.juzgado || "—"}:
+            </p>
+            {popupEnTramite.abogados.length > 0 ? (
+              <ul style={{ margin: "0 0 16px", paddingLeft: 20 }}>
+                {popupEnTramite.abogados.map(a => (
+                  <li key={a.id} style={{ marginBottom: 4, fontWeight: 600 }}>
+                    {a.nombre} {a.email && <span style={{ color: "var(--muted)", fontWeight: 400 }}>({a.email})</span>}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 16 }}>No hay abogados asignados a este juzgado.</p>
+            )}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                onClick={() => confirmarEnTramite()}
+                disabled={!!tramitandoId}
+                style={{
+                  padding: "8px 20px",
+                  borderRadius: 999,
+                  fontWeight: 600,
+                  background: "rgba(96, 204, 113, 0.3)",
+                  border: "1px solid rgba(46, 204, 113, 0.5)",
+                  color: "rgba(210, 255, 226, 0.95)",
+                  cursor: tramitandoId ? "not-allowed" : "pointer",
+                  opacity: tramitandoId ? 0.7 : 1,
+                }}
+              >
+                {tramitandoId ? "Guardando..." : "Informar"}
+              </button>
+              <button
+                onClick={() => !tramitandoId && setPopupEnTramite(null)}
+                style={{
+                  padding: "8px 20px",
+                  borderRadius: 999,
+                  fontWeight: 600,
+                  background: "rgba(231, 76, 60, 0.2)",
+                  border: "1px solid rgba(231, 76, 60, 0.5)",
+                  color: "rgba(255, 220, 216, 0.95)",
+                  cursor: "pointer",
+                }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Completa */}
+      {popupCompleta && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.6)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 2000,
+          }}
+          onClick={() => !completandoId && setPopupCompleta(null)}
+        >
+          <div
+            style={{
+              background: "linear-gradient(180deg, rgba(11,47,85,.98), rgba(7,28,46,.98))",
+              border: "1px solid rgba(255,255,255,.2)",
+              borderRadius: 16,
+              padding: 24,
+              maxWidth: 420,
+              width: "90%",
+              boxShadow: "0 12px 40px rgba(0,0,0,.5)",
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 style={{ margin: "0 0 12px", fontSize: 16 }}>¿Está seguro que quiere completar este proceso?</h3>
+            <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 12 }}>
+              Solo para usted (Admin Cédulas) se dejará de contabilizar días. Para el resto de usuarios el semáforo sigue.
+            </p>
+            <p style={{ fontSize: 13, marginBottom: 8 }}>
+              Esta cédula/oficio le llegará al siguiente abogado según el juzgado {popupCompleta.cedula.juzgado || "—"}:
+            </p>
+            {popupCompleta.abogados.length > 0 ? (
+              <ul style={{ margin: "0 0 16px", paddingLeft: 20 }}>
+                {popupCompleta.abogados.map(a => (
+                  <li key={a.id} style={{ marginBottom: 4, fontWeight: 600 }}>
+                    {a.nombre} {a.email && <span style={{ color: "var(--muted)", fontWeight: 400 }}>({a.email})</span>}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 16 }}>No hay abogados asignados a este juzgado.</p>
+            )}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                onClick={() => confirmarCompleta()}
+                disabled={!!completandoId}
+                style={{
+                  padding: "8px 20px",
+                  borderRadius: 999,
+                  fontWeight: 600,
+                  background: "rgba(46, 204, 113, 0.3)",
+                  border: "1px solid rgba(46, 204, 113, 0.5)",
+                  color: "rgba(210, 255, 226, 0.95)",
+                  cursor: completandoId ? "not-allowed" : "pointer",
+                }}
+              >
+                {completandoId ? "Guardando…" : "Sí"}
+              </button>
+              <button
+                onClick={() => setPopupCompleta(null)}
+                disabled={!!completandoId}
+                style={{
+                  padding: "8px 20px",
+                  borderRadius: 999,
+                  fontWeight: 600,
+                  background: "rgba(231, 76, 60, 0.2)",
+                  border: "1px solid rgba(231, 76, 60, 0.5)",
+                  color: "rgba(255, 220, 216, 0.95)",
+                  cursor: completandoId ? "not-allowed" : "pointer",
+                }}
+              >
+                No
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
