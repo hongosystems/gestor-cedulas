@@ -182,7 +182,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      data: { documento_id: docRow.id, storage_path: docRow.storage_path, ...docRow },
+      data: { documento_id: docRow.id, ...docRow },
     });
   } catch (e: any) {
     console.error("[mediaciones/generate-pdf]", e);
