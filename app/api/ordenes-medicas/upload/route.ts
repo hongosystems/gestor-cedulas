@@ -177,7 +177,7 @@ export async function POST(req: NextRequest) {
           case_ref: caseRef.trim(),
           expediente_id: expedienteId || null,
           storage_path: "", // Ya no se usa, se guarda en ordenes_medicas_archivos
-          filename: files[0]?.name || "",
+          filename: (files[0]?.name || "").replace(/(\.pdf)_+$/i, "$1").replace(/\.pdf$/i, ".PDF"),
           mime: files[0]?.type || "application/pdf",
           size: files.reduce((sum, f) => sum + f.size, 0),
           emitida_por_user_id: user.id,
@@ -251,7 +251,7 @@ export async function POST(req: NextRequest) {
         .insert({
           orden_id: ordenId,
           storage_path: storagePath,
-          filename: file.name,
+          filename: file.name.replace(/(\.pdf)_+$/i, "$1").replace(/\.pdf$/i, ".PDF"),
           mime: file.type || "application/pdf",
           size: file.size,
           orden_archivo: ordenArchivo,
