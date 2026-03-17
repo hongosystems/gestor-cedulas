@@ -1220,6 +1220,7 @@ export default function MisJuzgadosPage() {
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [lastSyncDate, setLastSyncDate] = useState<string | null>(null);
   const [usuariosByKey, setUsuariosByKey] = useState<Record<string, { id: string; nombre: string; email?: string }[]>>({});
+  const [responsableLoading, setResponsableLoading] = useState(false);
 
   const loadData = async () => {
     try {
@@ -2587,6 +2588,8 @@ export default function MisJuzgadosPage() {
   const getResponsableKey = (juzgado: string | null | undefined, caratula: string | null | undefined): string =>
     `${juzgado?.trim() || ""}|||${caratula?.trim() || ""}`;
 
+  const RESPONSABLE_CACHE_KEY = "gestor-cedulas-mis-juzgados-responsable";
+
   // Cargar usuarios por juzgado para columna Responsable (abogados asignados)
   useEffect(() => {
     const allItems: { juzgado: string | null; caratula: string | null }[] = [
@@ -2606,34 +2609,66 @@ export default function MisJuzgadosPage() {
     }
     if (uniqueItems.length === 0) {
       setUsuariosByKey({});
+      setResponsableLoading(false);
       return;
     }
+    // Mostrar cache inmediatamente si existe (navegación de vuelta)
+    try {
+      const cached = typeof sessionStorage !== "undefined" ? sessionStorage.getItem(RESPONSABLE_CACHE_KEY) : null;
+      if (cached) {
+        const parsed = JSON.parse(cached) as Record<string, { id: string; nombre: string; email?: string }[]>;
+        if (parsed && typeof parsed === "object") {
+          setUsuariosByKey(parsed);
+        }
+      }
+    } catch {
+      // ignorar cache corrupto
+    }
+    setResponsableLoading(true);
     (async () => {
       try {
         const { data } = await supabase.auth.getSession();
         const token = data?.session?.access_token;
         const BATCH_SIZE = 80;
-        const merged: Record<string, { id: string; nombre: string; email?: string }[]> = {};
+        const batches: { juzgado: string; caratula: string | null }[][] = [];
         for (let i = 0; i < uniqueItems.length; i += BATCH_SIZE) {
-          const batch = uniqueItems.slice(i, i + BATCH_SIZE);
-          const res = await fetch("/api/get-users-by-juzgado", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              ...(token ? { "Authorization": `Bearer ${token}` } : {}),
-            },
-            body: JSON.stringify({ items: batch }),
-          });
-          if (!res.ok) continue;
-          const json = await res.json();
-          const map = json.map || {};
+          batches.push(uniqueItems.slice(i, i + BATCH_SIZE));
+        }
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+          ...(token ? { "Authorization": `Bearer ${token}` } : {}),
+        };
+        const results = await Promise.all(
+          batches.map(batch =>
+            fetch("/api/get-users-by-juzgado", {
+              method: "POST",
+              headers,
+              body: JSON.stringify({ items: batch }),
+            }).then(async res => {
+              if (!res.ok) return {} as Record<string, { id: string; nombre: string; email?: string }[]>;
+              const json = await res.json();
+              return json.map || {};
+            })
+          )
+        );
+        const merged: Record<string, { id: string; nombre: string; email?: string }[]> = {};
+        for (const map of results) {
           for (const k of Object.keys(map)) {
             merged[k] = map[k] || [];
           }
         }
         setUsuariosByKey(merged);
+        try {
+          if (typeof sessionStorage !== "undefined") {
+            sessionStorage.setItem(RESPONSABLE_CACHE_KEY, JSON.stringify(merged));
+          }
+        } catch {
+          // ignorar si sessionStorage está lleno
+        }
       } catch {
-        setUsuariosByKey({});
+        // mantener cache si falla la red
+      } finally {
+        setResponsableLoading(false);
       }
     })();
   }, [expedientes, cedulas]);
@@ -3592,13 +3627,15 @@ export default function MisJuzgadosPage() {
                       </td>
                       <td>{item.juzgado ? limpiarJuzgadoParaMostrar(item.juzgado) : <span className="muted">—</span>}</td>
                       <td style={{ textAlign: "center", verticalAlign: "middle" }}>
-                        <ResponsableAvatars
-                          usuarios={
-                            item.juzgado?.trim()
-                              ? usuariosByKey[getResponsableKey(item.juzgado, item.caratula)] || []
-                              : []
-                          }
-                        />
+                        {!item.juzgado?.trim() ? (
+                          <span className="muted" style={{ fontSize: 12 }}>—</span>
+                        ) : responsableLoading && usuariosByKey[getResponsableKey(item.juzgado, item.caratula)] === undefined ? (
+                          <span className="muted" style={{ fontSize: 11 }} title="Cargando responsable…">...</span>
+                        ) : (
+                          <ResponsableAvatars
+                            usuarios={usuariosByKey[getResponsableKey(item.juzgado, item.caratula)] || []}
+                          />
+                        )}
                       </td>
                       <td>
                         {item.fecha_ultima_carga 
