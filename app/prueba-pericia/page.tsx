@@ -1197,11 +1197,13 @@ export default function PruebaPericiaPage() {
     isAdminExpedientes: boolean;
     isAdminCedulas: boolean;
     isAbogado: boolean;
+    isAdminMediaciones: boolean;
   }>({
     isSuperadmin: false,
     isAdminExpedientes: false,
     isAdminCedulas: false,
     isAbogado: false,
+    isAdminMediaciones: false,
   });
   
   // Estados para órdenes/seguimiento (solo si el flag está activo)
@@ -1281,19 +1283,21 @@ export default function PruebaPericiaPage() {
       // Verificar roles del usuario
       const { data: roleData, error: roleErr } = await supabase
         .from("user_roles")
-        .select("is_superadmin, is_admin_expedientes, is_admin_cedulas, is_abogado")
+        .select("is_superadmin, is_admin_expedientes,         is_admin_cedulas, is_abogado, is_admin_mediaciones")
         .eq("user_id", uid)
         .maybeSingle();
-      
+
       const isAdminExp = !roleErr && roleData?.is_admin_expedientes === true;
       const isAdminCedulas = !roleErr && roleData?.is_admin_cedulas === true;
       const isAbogado = !roleErr && roleData?.is_abogado === true;
       const isSuperadmin = !roleErr && roleData?.is_superadmin === true;
-      
+      const isAdminMediaciones = !roleErr && roleData?.is_admin_mediaciones === true;
+
       setUserRoles({
         isSuperadmin: isSuperadmin || false,
         isAdminExpedientes: isAdminExp || false,
         isAdminCedulas: isAdminCedulas || false,
+        isAdminMediaciones: isAdminMediaciones || false,
         isAbogado: isAbogado || false,
       });
 
@@ -2160,6 +2164,32 @@ export default function PruebaPericiaPage() {
                   }}
                 >
                   🔔 Notificaciones
+                </Link>
+              )}
+              {userRoles.isAdminMediaciones && (
+                <Link
+                  href="/app/mediaciones"
+                  onClick={() => setMenuOpen(false)}
+                  style={{
+                    display: "block",
+                    padding: "12px 20px",
+                    color: "var(--text)",
+                    textDecoration: "none",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    transition: "background 0.2s ease",
+                    borderLeft: "3px solid transparent"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                    e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.borderLeftColor = "transparent";
+                  }}
+                >
+                  ⚖️ Mediaciones
                 </Link>
               )}
               {userRoles.isAbogado && (

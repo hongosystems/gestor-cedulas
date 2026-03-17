@@ -704,6 +704,7 @@ export default function MisCedulasPage() {
   const [notasGuardando, setNotasGuardando] = useState<Record<string, boolean>>({});
   const [menuOpen, setMenuOpen] = useState(false);
   const [isAdminCedulas, setIsAdminCedulas] = useState(false);
+  const [isAdminMediaciones, setIsAdminMediaciones] = useState(false);
   const [popupEnTramite, setPopupEnTramite] = useState<{ cedula: Cedula; abogados: AbogadoInfo[] } | null>(null);
   const [popupCompleta, setPopupCompleta] = useState<{ cedula: Cedula; abogados: AbogadoInfo[] } | null>(null);
   const [completandoId, setCompletandoId] = useState<string | null>(null);
@@ -756,15 +757,16 @@ export default function MisCedulasPage() {
         return;
       }
 
-      // Verificar roles (admin_expedientes, admin_cedulas)
+      // Verificar roles (admin_expedientes, admin_cedulas, admin_mediaciones)
       const { data: roleData, error: roleErr } = await supabase
         .from("user_roles")
-        .select("is_admin_expedientes, is_admin_cedulas")
+        .select("is_admin_expedientes, is_admin_cedulas, is_admin_mediaciones")
         .eq("user_id", uid)
         .maybeSingle();
       
       const isAdminExp = !roleErr && roleData?.is_admin_expedientes === true;
       setIsAdminCedulas(!roleErr && roleData?.is_admin_cedulas === true);
+      setIsAdminMediaciones(!roleErr && roleData?.is_admin_mediaciones === true);
       
       if (isAdminExp) {
         window.location.href = "/app/expedientes";
@@ -1279,6 +1281,32 @@ export default function MisCedulasPage() {
                 >
                   📬 Bandeja
                 </Link>
+                {isAdminMediaciones && (
+                  <Link
+                    href="/app/mediaciones"
+                    onClick={() => setMenuOpen(false)}
+                    style={{
+                      display: "block",
+                      padding: "12px 20px",
+                      color: "var(--text)",
+                      textDecoration: "none",
+                      fontSize: 14,
+                      fontWeight: 600,
+                      transition: "background 0.2s ease",
+                      borderLeft: "3px solid transparent"
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                      e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = "transparent";
+                      e.currentTarget.style.borderLeftColor = "transparent";
+                    }}
+                  >
+                    ⚖️ Mediaciones
+                  </Link>
+                )}
                 <Link
                   href="/prueba-pericia"
                   onClick={() => setMenuOpen(false)}

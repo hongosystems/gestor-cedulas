@@ -10,11 +10,13 @@ export default function SelectRolePage() {
     isAdminExpedientes: boolean;
     isAdminCedulas: boolean;
     isAbogado: boolean;
+    isAdminMediaciones: boolean;
   }>({
     isSuperadmin: false,
     isAdminExpedientes: false,
     isAdminCedulas: false,
     isAbogado: false,
+    isAdminMediaciones: false,
   });
   const router = useRouter();
 
@@ -31,7 +33,7 @@ export default function SelectRolePage() {
       // Verificar roles del usuario
       const { data: roleData, error: roleErr } = await supabase
         .from("user_roles")
-        .select("is_superadmin, is_admin_expedientes, is_admin_cedulas, is_abogado")
+        .select("is_superadmin, is_admin_expedientes, is_admin_cedulas, is_abogado, is_admin_mediaciones")
         .eq("user_id", uid)
         .maybeSingle();
 
@@ -44,6 +46,7 @@ export default function SelectRolePage() {
       const isAdminExpedientes = roleData.is_admin_expedientes === true;
       const isAdminCedulas = roleData.is_admin_cedulas === true;
       const isAbogado = roleData.is_abogado === true;
+      const isAdminMediaciones = roleData.is_admin_mediaciones === true;
 
       // Prioridad: si es Abogado o Superadmin, ir directo al Dashboard (sin pantalla intermedia)
       if (isSuperadmin || isAbogado) {
@@ -52,7 +55,7 @@ export default function SelectRolePage() {
       }
 
       // Contar cuántos roles tiene
-      const roleCount = [isSuperadmin, isAdminExpedientes, isAdminCedulas, isAbogado].filter(Boolean).length;
+      const roleCount = [isSuperadmin, isAdminExpedientes, isAdminCedulas, isAbogado, isAdminMediaciones].filter(Boolean).length;
 
       // Si solo tiene un rol, redirigir automáticamente
       if (roleCount === 1) {
@@ -62,6 +65,10 @@ export default function SelectRolePage() {
         }
         if (isAdminCedulas) {
           router.push("/app");
+          return;
+        }
+        if (isAdminMediaciones) {
+          router.push("/app/mediaciones");
           return;
         }
         router.push("/app");
@@ -74,12 +81,13 @@ export default function SelectRolePage() {
         isAdminExpedientes,
         isAdminCedulas,
         isAbogado,
+        isAdminMediaciones,
       });
       setLoading(false);
     })();
   }, [router]);
 
-  function selectRole(role: "superadmin" | "expedientes" | "cedulas" | "abogado") {
+  function selectRole(role: "superadmin" | "expedientes" | "cedulas" | "abogado" | "mediaciones") {
     // Guardar rol seleccionado en localStorage
     localStorage.setItem("selectedRole", role);
     
@@ -89,6 +97,8 @@ export default function SelectRolePage() {
       router.push("/app/expedientes");
     } else if (role === "cedulas") {
       router.push("/app");
+    } else if (role === "mediaciones") {
+      router.push("/app/mediaciones");
     } else {
       router.push("/app");
     }
@@ -106,7 +116,7 @@ export default function SelectRolePage() {
     );
   }
 
-  const roleCount = [roles.isSuperadmin, roles.isAdminExpedientes, roles.isAdminCedulas, roles.isAbogado].filter(Boolean).length;
+  const roleCount = [roles.isSuperadmin, roles.isAdminExpedientes, roles.isAdminCedulas, roles.isAbogado, roles.isAdminMediaciones].filter(Boolean).length;
 
   if (roleCount <= 1) {
     return null; // Ya se redirigió
@@ -172,6 +182,17 @@ export default function SelectRolePage() {
               >
                 <div style={{ fontWeight: 700, marginBottom: 4 }}>MIS CÉDULAS</div>
                 <div style={{ fontSize: 13, opacity: 0.8 }}>Gestionar cédulas y oficios</div>
+              </button>
+            )}
+
+            {roles.isAdminMediaciones && (
+              <button
+                className="btn primary"
+                onClick={() => selectRole("mediaciones")}
+                style={{ padding: "16px 24px", fontSize: 16, textAlign: "left" }}
+              >
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>MEDIACIONES</div>
+                <div style={{ fontSize: 13, opacity: 0.8 }}>Trámites de mediación y lotes</div>
               </button>
             )}
           </div>

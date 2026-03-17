@@ -11,6 +11,7 @@ type User = {
   is_superadmin: boolean;
   is_admin_expedientes: boolean;
   is_admin_cedulas: boolean;
+  is_admin_mediaciones: boolean;
   is_abogado: boolean;
   must_change_password: boolean;
   juzgados: string[];
@@ -31,6 +32,7 @@ export default function WebMasterPage() {
   const [formIsSuperadmin, setFormIsSuperadmin] = useState(false);
   const [formIsAdminExpedientes, setFormIsAdminExpedientes] = useState(false);
   const [formIsAdminCedulas, setFormIsAdminCedulas] = useState(false);
+  const [formIsAdminMediaciones, setFormIsAdminMediaciones] = useState(false);
   const [formIsAbogado, setFormIsAbogado] = useState(false);
   const [formJuzgados, setFormJuzgados] = useState<string[]>([]);
   const [newJuzgado, setNewJuzgado] = useState("");
@@ -106,6 +108,7 @@ export default function WebMasterPage() {
       setFormIsSuperadmin(user.is_superadmin);
       setFormIsAdminExpedientes(user.is_admin_expedientes);
       setFormIsAdminCedulas(user.is_admin_cedulas);
+      setFormIsAdminMediaciones(!!user.is_admin_mediaciones);
       setFormIsAbogado(user.is_abogado);
       setFormJuzgados([...user.juzgados]);
     } else {
@@ -116,6 +119,7 @@ export default function WebMasterPage() {
       setFormIsSuperadmin(false);
       setFormIsAdminExpedientes(false);
       setFormIsAdminCedulas(false);
+      setFormIsAdminMediaciones(false);
       setFormIsAbogado(false);
       setFormJuzgados([]);
     }
@@ -204,6 +208,7 @@ export default function WebMasterPage() {
         is_superadmin: formIsSuperadmin,
         is_admin_expedientes: formIsAdminExpedientes,
         is_admin_cedulas: formIsAdminCedulas,
+        is_admin_mediaciones: formIsAdminMediaciones,
         is_abogado: formIsAbogado,
       };
 
@@ -404,12 +409,17 @@ export default function WebMasterPage() {
                               Admin Cédulas
                             </span>
                           )}
+                          {user.is_admin_mediaciones && (
+                            <span className="badge badge--gris" style={{ fontSize: 11, padding: "4px 8px" }}>
+                              Admin Mediaciones
+                            </span>
+                          )}
                           {user.is_abogado && (
                             <span className="badge badge--gris" style={{ fontSize: 11, padding: "4px 8px" }}>
                               Abogado
                             </span>
                           )}
-                          {!user.is_superadmin && !user.is_admin_expedientes && !user.is_admin_cedulas && !user.is_abogado && (
+                          {!user.is_superadmin && !user.is_admin_expedientes && !user.is_admin_cedulas && !user.is_admin_mediaciones && !user.is_abogado && (
                             <span className="muted" style={{ fontSize: 12 }}>Sin roles</span>
                           )}
                         </div>
@@ -582,6 +592,14 @@ export default function WebMasterPage() {
                         onChange={(e) => setFormIsAdminCedulas(e.target.checked)}
                       />
                       <span>Admin Cédulas</span>
+                    </label>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={!!formIsAdminMediaciones}
+                        onChange={(e) => setFormIsAdminMediaciones(e.target.checked)}
+                      />
+                      <span>Admin Mediaciones</span>
                     </label>
                     <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
                       <input

@@ -148,10 +148,12 @@ export default function MisExpedientesPage() {
     isSuperadmin: boolean;
     isAdminExpedientes: boolean;
     isAbogado: boolean;
+    isAdminMediaciones: boolean;
   }>({
     isSuperadmin: false,
     isAdminExpedientes: false,
     isAbogado: false,
+    isAdminMediaciones: false,
   });
   const [currentUserName, setCurrentUserName] = useState<string>("");
 
@@ -187,13 +189,14 @@ export default function MisExpedientesPage() {
       // Verificar roles del usuario
       const { data: roleData, error: roleErr } = await supabase
         .from("user_roles")
-        .select("is_admin_expedientes, is_abogado, is_superadmin")
+        .select("is_admin_expedientes, is_abogado, is_superadmin, is_admin_mediaciones")
         .eq("user_id", uid)
         .maybeSingle();
       
       const isAdminExp = !roleErr && roleData?.is_admin_expedientes === true;
       const isAbogado = !roleErr && roleData?.is_abogado === true;
       const isSuperadmin = !roleErr && roleData?.is_superadmin === true;
+      const isAdminMediaciones = !roleErr && roleData?.is_admin_mediaciones === true;
       
       if (!isAdminExp && !isAbogado) {
         window.location.href = "/app";
@@ -205,6 +208,7 @@ export default function MisExpedientesPage() {
         isSuperadmin: isSuperadmin || false,
         isAdminExpedientes: isAdminExp || false,
         isAbogado: isAbogado || false,
+        isAdminMediaciones: isAdminMediaciones || false,
       });
 
       // must_change_password guard

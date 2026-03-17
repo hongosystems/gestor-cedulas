@@ -61,7 +61,7 @@ export async function PUT(
 
     const { userId: targetUserId } = await params;
     const body = await req.json();
-    const { email, full_name, password, is_superadmin, is_admin_expedientes, is_admin_cedulas, is_abogado, juzgados } = body;
+    const { email, full_name, password, is_superadmin, is_admin_expedientes, is_admin_cedulas, is_admin_mediaciones, is_abogado, juzgados } = body;
 
     const supabaseAdmin = getSupabaseAdmin();
 
@@ -114,6 +114,9 @@ export async function PUT(
     }
     if (is_admin_cedulas !== undefined) {
       roleData.is_admin_cedulas = is_admin_cedulas;
+    }
+    if (is_admin_mediaciones !== undefined) {
+      roleData.is_admin_mediaciones = is_admin_mediaciones;
     }
     if (is_abogado !== undefined) {
       roleData.is_abogado = is_abogado;

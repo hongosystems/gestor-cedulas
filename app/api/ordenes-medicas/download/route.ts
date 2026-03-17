@@ -3,6 +3,11 @@ import { supabaseService } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
 
+function normalizePdfFilename(raw: string | null | undefined, fallback: string) {
+  const base = raw || fallback;
+  return base.replace(/\.pdf_$/i, ".pdf");
+}
+
 async function getUserFromRequest(req: Request) {
   const authHeader = req.headers.get("authorization");
   if (!authHeader) return null;
@@ -128,12 +133,13 @@ export async function GET(req: NextRequest) {
 
       const arrayBuffer = await fileData.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
+      const filename = normalizePdfFilename(archivoData.filename, "orden-medica.pdf");
 
       // Retornar archivo individual
       return new NextResponse(buffer, {
         headers: {
           "Content-Type": archivoData.mime || "application/pdf",
-          "Content-Disposition": `attachment; filename="${archivoData.filename || "orden-medica.pdf"}"`,
+          "Content-Disposition": `attachment; filename="${filename}"`,
           "Content-Length": buffer.length.toString(),
         },
       });
@@ -169,11 +175,12 @@ export async function GET(req: NextRequest) {
 
         const arrayBuffer = await fileData.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
+        const filename = normalizePdfFilename(ordenCompleta.filename, "orden-medica.pdf");
 
         return new NextResponse(buffer, {
           headers: {
             "Content-Type": ordenCompleta.mime || "application/pdf",
-            "Content-Disposition": `attachment; filename="${ordenCompleta.filename || "orden-medica.pdf"}"`,
+            "Content-Disposition": `attachment; filename="${filename}"`,
             "Content-Length": buffer.length.toString(),
           },
         });
@@ -197,11 +204,12 @@ export async function GET(req: NextRequest) {
 
       const arrayBuffer = await fileData.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
+      const filename = normalizePdfFilename(archivo.filename, "orden-medica.pdf");
 
       return new NextResponse(buffer, {
         headers: {
           "Content-Type": archivo.mime || "application/pdf",
-          "Content-Disposition": `attachment; filename="${archivo.filename || "orden-medica.pdf"}"`,
+          "Content-Disposition": `attachment; filename="${filename}"`,
           "Content-Length": buffer.length.toString(),
         },
       });
@@ -227,7 +235,10 @@ export async function GET(req: NextRequest) {
         const buffer = Buffer.from(arrayBuffer);
 
         // Agregar archivo al ZIP con nombre único
-        const nombreArchivo = archivo.filename || `archivo-${archivo.orden_archivo}.pdf`;
+        const nombreArchivo = normalizePdfFilename(
+          archivo.filename || `archivo-${archivo.orden_archivo}.pdf`,
+          `archivo-${archivo.orden_archivo}.pdf`
+        );
         zip.file(nombreArchivo, buffer);
       } catch (err) {
         console.error(`Error procesando archivo ${archivo.filename}:`, err);

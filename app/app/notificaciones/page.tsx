@@ -114,7 +114,7 @@ export default function NotificacionesPage() {
       // Detectar rol del usuario para determinar la URL de retorno
       const { data: roleData } = await supabase
         .from("user_roles")
-        .select("is_superadmin, is_admin_expedientes, is_admin_cedulas, is_abogado")
+        .select("is_superadmin, is_admin_expedientes, is_admin_cedulas, is_abogado, is_admin_mediaciones")
         .eq("user_id", uid)
         .maybeSingle();
 

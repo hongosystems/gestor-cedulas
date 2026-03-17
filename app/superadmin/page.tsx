@@ -492,7 +492,7 @@ export default function SuperAdminPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string>("");
   const [currentUserName, setCurrentUserName] = useState<string>("");
-  const [roleFlags, setRoleFlags] = useState<{ isSuperadmin: boolean; isAbogado: boolean }>({ isSuperadmin: false, isAbogado: false });
+  const [roleFlags, setRoleFlags] = useState<{ isSuperadmin: boolean; isAbogado: boolean; isAdminMediaciones: boolean }>({ isSuperadmin: false, isAbogado: false, isAdminMediaciones: false });
 
   // Cerrar menú al hacer clic fuera
   useEffect(() => {
@@ -527,18 +527,19 @@ export default function SuperAdminPage() {
       if (pErr) { window.location.href = "/login"; return; }
       if (prof?.must_change_password) { window.location.href = "/cambiar-password"; return; }
 
-      // Verificar roles del usuario (superadmin, abogado, expedientes)
+      // Verificar roles del usuario (superadmin, abogado, expedientes, mediaciones)
       const { data: roleData } = await supabase
         .from("user_roles")
-        .select("is_superadmin, is_abogado, is_admin_expedientes")
+        .select("is_superadmin, is_abogado, is_admin_expedientes, is_admin_mediaciones")
         .eq("user_id", uid)
         .maybeSingle();
       
       const isSuperadmin = roleData?.is_superadmin === true;
       const isAbogado = roleData?.is_abogado === true;
       const isAdminExpedientes = roleData?.is_admin_expedientes === true;
+      const isAdminMediaciones = roleData?.is_admin_mediaciones === true;
 
-      setRoleFlags({ isSuperadmin, isAbogado });
+      setRoleFlags({ isSuperadmin, isAbogado, isAdminMediaciones });
       
       console.log(`[Dashboard] Roles del usuario:`, {
         isSuperadmin,
@@ -2294,6 +2295,58 @@ export default function SuperAdminPage() {
               >
                 📥 Recibidos / Enviados
               </Link>
+              {(roleFlags.isAdminMediaciones || roleFlags.isSuperadmin) && (
+                <Link
+                  href="/app/mediaciones"
+                  onClick={() => setMenuOpen(false)}
+                  style={{
+                    display: "block",
+                    padding: "12px 20px",
+                    color: "var(--text)",
+                    textDecoration: "none",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    transition: "background 0.2s ease",
+                    borderLeft: "3px solid transparent"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                    e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.borderLeftColor = "transparent";
+                  }}
+                >
+                  ⚖️ Mediaciones
+                </Link>
+              )}
+              {(roleFlags.isAdminMediaciones || roleFlags.isSuperadmin) && (
+                <Link
+                  href="/app/mediaciones/lotes"
+                  onClick={() => setMenuOpen(false)}
+                  style={{
+                    display: "block",
+                    padding: "12px 20px",
+                    color: "var(--text)",
+                    textDecoration: "none",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    transition: "background 0.2s ease",
+                    borderLeft: "3px solid transparent"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                    e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.borderLeftColor = "transparent";
+                  }}
+                >
+                  📦 Lotes mediaciones
+                </Link>
+              )}
               {roleFlags.isAbogado && (
                 <Link
                   href="/prueba-pericia"

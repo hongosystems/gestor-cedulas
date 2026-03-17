@@ -75,7 +75,7 @@ export async function GET(req: NextRequest) {
     // Obtener roles
     const { data: roles, error: rolesError } = await supabaseAdmin
       .from("user_roles")
-      .select("user_id, is_superadmin, is_admin_expedientes, is_admin_cedulas, is_abogado")
+      .select("user_id, is_superadmin, is_admin_expedientes, is_admin_cedulas, is_admin_mediaciones, is_abogado")
       .in("user_id", userIds);
 
     // Obtener juzgados asignados para abogados
@@ -108,6 +108,7 @@ export async function GET(req: NextRequest) {
         is_superadmin: role?.is_superadmin || false,
         is_admin_expedientes: role?.is_admin_expedientes || false,
         is_admin_cedulas: role?.is_admin_cedulas || false,
+        is_admin_mediaciones: role?.is_admin_mediaciones || false,
         is_abogado: role?.is_abogado || false,
         must_change_password: profile?.must_change_password || false,
         juzgados: userJuzgados,
@@ -129,7 +130,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { email, password, full_name, is_superadmin, is_admin_expedientes, is_admin_cedulas, is_abogado, juzgados } = body;
+    const { email, password, full_name, is_superadmin, is_admin_expedientes, is_admin_cedulas, is_admin_mediaciones, is_abogado, juzgados } = body;
 
     if (!email || !password || !full_name) {
       return NextResponse.json({ error: "Faltan campos requeridos: email, password, full_name" }, { status: 400 });
@@ -175,6 +176,7 @@ export async function POST(req: NextRequest) {
         is_superadmin: is_superadmin || false,
         is_admin_expedientes: is_admin_expedientes || false,
         is_admin_cedulas: is_admin_cedulas || false,
+        is_admin_mediaciones: is_admin_mediaciones || false,
         is_abogado: is_abogado || false,
       }, { onConflict: "user_id" });
 
@@ -208,6 +210,7 @@ export async function POST(req: NextRequest) {
         is_superadmin: is_superadmin || false,
         is_admin_expedientes: is_admin_expedientes || false,
         is_admin_cedulas: is_admin_cedulas || false,
+        is_admin_mediaciones: is_admin_mediaciones || false,
         is_abogado: is_abogado || false,
       }
     });

@@ -86,12 +86,11 @@ export default function ChatWidget() {
     }
   }, []);
 
-  // Cargar conversaciones y usuarios (debe estar antes del useEffect que lo usa)
-  const loadData = useCallback(async () => {
+  // Cargar solo conversaciones (optimización: separado de usuarios)
+  const loadConversations = useCallback(async () => {
     try {
       const { data: session, error: sessionError } = await supabase.auth.getSession();
       
-      // Si hay error de refresh token, limpiar sesión y redirigir
       if (sessionError) {
         console.error("Error de sesión:", sessionError);
         await handleAuthError(sessionError);
@@ -100,7 +99,6 @@ export default function ChatWidget() {
       
       if (!session?.session) return;
 
-      // Cargar conversaciones
       const convRes = await fetch("/api/chat/conversations", {
         headers: {
           Authorization: `Bearer ${session.session.access_token}`,
@@ -108,7 +106,6 @@ export default function ChatWidget() {
       });
       
       if (convRes.status === 401) {
-        // Token inválido, redirigir a login
         await handleAuthError({ message: "Unauthorized" });
         return;
       }
@@ -116,25 +113,18 @@ export default function ChatWidget() {
       if (!convRes.ok) {
         const errorText = await convRes.text();
         console.error("[ChatWidget] Error al cargar conversaciones:", convRes.status, errorText);
-        setLoading(false);
         return;
       }
       
       const convData = await convRes.json();
-      console.log("[ChatWidget] Conversaciones cargadas:", convData);
       
       if (convData.ok && convData.data) {
-        console.log("[ChatWidget] Estableciendo conversaciones:", convData.data.length, "conversaciones");
         // Preservar el estado optimista de conversaciones marcadas como leídas
         setConversations((prevConvs) => {
           const newConvs = convData.data || [];
-          // Obtener el Set actual de conversaciones leídas desde el ref
           const readSet = readConversationsRef.current;
-          // Si una conversación fue marcada como leída localmente, preservar unread_count = 0
           return newConvs.map((newConv: Conversation) => {
             const prevConv = prevConvs.find(c => c.id === newConv.id);
-            // Si la conversación estaba marcada como leída localmente (unread_count = 0)
-            // y está en el set de leídas, preservar el estado local
             if (prevConv && prevConv.unread_count === 0 && readSet.has(newConv.id)) {
               return { ...newConv, unread_count: 0 };
             }
@@ -142,11 +132,26 @@ export default function ChatWidget() {
           });
         });
       } else {
-        console.warn("[ChatWidget] Formato de respuesta inesperado:", convData);
         setConversations(convData.data || []);
       }
+    } catch (error) {
+      console.error("Error loading conversations:", error);
+      await handleAuthError(error);
+    }
+  }, [handleAuthError]);
 
-      // Cargar lista de usuarios para iniciar conversaciones
+  // Cargar solo usuarios (optimización: separado de conversaciones)
+  const loadUsers = useCallback(async () => {
+    try {
+      const { data: session, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError) {
+        await handleAuthError(sessionError);
+        return;
+      }
+      
+      if (!session?.session) return;
+
       const usersRes = await fetch("/api/users/list", {
         headers: {
           Authorization: `Bearer ${session.session.access_token}`,
@@ -161,20 +166,33 @@ export default function ChatWidget() {
       if (!usersRes.ok) {
         const errorText = await usersRes.text();
         console.error("[ChatWidget] Error al cargar usuarios:", usersRes.status, errorText);
-        // No retornar aquí, continuar aunque falle la carga de usuarios
+        // No lanzar error, solo loguear (comportamiento original)
       } else {
         const usersData = await usersRes.json();
-        console.log("[ChatWidget] Usuarios cargados:", usersData);
         setUsers(usersData.users || usersData.data || []);
       }
+    } catch (error) {
+      console.error("Error loading users:", error);
+      // No llamar handleAuthError aquí para mantener compatibilidad
+    }
+  }, [handleAuthError]);
 
-      setLoading(false);
+  // Cargar datos completos (mantener para compatibilidad con carga inicial)
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      // Cargar ambos en paralelo para mejor rendimiento
+      await Promise.all([
+        loadConversations(),
+        loadUsers()
+      ]);
     } catch (error) {
       console.error("Error loading data:", error);
       await handleAuthError(error);
+    } finally {
       setLoading(false);
     }
-  }, [handleAuthError]);
+  }, [loadConversations, loadUsers, handleAuthError]);
 
   // Cargar mensajes de una conversación (debe estar antes de los useEffect que lo usan)
   const loadMessages = useCallback(async (conversationId: string) => {
@@ -318,8 +336,8 @@ export default function ChatWidget() {
       }
 
       if (!res.ok) {
-        // Si falla, revertir el estado optimista recargando datos
-        loadData().catch(console.error);
+        // Si falla, revertir el estado optimista recargando solo conversaciones
+        loadConversations().catch(console.error);
         return;
       }
 
@@ -329,11 +347,11 @@ export default function ChatWidget() {
       console.log("[ChatWidget] Conversación marcada como leída (optimistic UI aplicado).");
     } catch (error) {
       console.error("[ChatWidget] Error marking as read:", error);
-      // Si hay error, revertir el estado optimista recargando datos
-      loadData().catch(console.error);
+      // Si hay error, revertir el estado optimista recargando solo conversaciones
+      loadConversations().catch(console.error);
       await handleAuthError(error);
     }
-  }, [handleAuthError, loadData]);
+  }, [handleAuthError, loadConversations]);
 
   // Cargar mensajes cuando se selecciona una conversación
   useEffect(() => {
@@ -420,8 +438,8 @@ export default function ChatWidget() {
             loadMessages(selectedConversation).catch(console.error);
           }, 100);
 
-          // Actualizar conversaciones para reflejar el nuevo mensaje
-          loadData().catch(console.error);
+          // Actualizar solo conversaciones (no usuarios) para reflejar el nuevo mensaje
+          loadConversations().catch(console.error);
         }
       )
       .subscribe((status) => {
@@ -432,7 +450,7 @@ export default function ChatWidget() {
       console.log("[ChatWidget] Desuscribiéndose de mensajes de conversación:", selectedConversation);
       supabase.removeChannel(channel);
     };
-  }, [selectedConversation, handleAuthError, loadData, isScrolledUp]);
+  }, [selectedConversation, handleAuthError, loadMessages, loadConversations, isScrolledUp]);
 
   // Suscribirse a actualizaciones de conversaciones, participantes y mensajes globales
   useEffect(() => {
@@ -447,7 +465,7 @@ export default function ChatWidget() {
         },
         () => {
           console.log("[ChatWidget] Cambio detectado en conversations, recargando...");
-          loadData().catch(console.error);
+          loadConversations().catch(console.error);
         }
       )
       .on(
@@ -459,7 +477,7 @@ export default function ChatWidget() {
         },
         () => {
           console.log("[ChatWidget] Cambio detectado en participants, recargando...");
-          loadData().catch(console.error);
+          loadConversations().catch(console.error);
         }
       )
       .on(
@@ -469,10 +487,10 @@ export default function ChatWidget() {
           schema: "public",
           table: "messages",
         },
-        (payload) => {
-          console.log("[ChatWidget] Nuevo mensaje global detectado:", payload);
-          // Recargar conversaciones para actualizar el último mensaje y contador de no leídos
-          loadData().catch(console.error);
+        () => {
+          console.log("[ChatWidget] Nuevo mensaje global detectado");
+          // Solo actualizar conversaciones (no usuarios) para actualizar el último mensaje y contador
+          loadConversations().catch(console.error);
           
           // NO recargar mensajes aquí si es de la conversación actual
           // La suscripción específica ya se encarga de eso
@@ -486,7 +504,7 @@ export default function ChatWidget() {
     return () => {
       supabase.removeChannel(conversationsChannel);
     };
-  }, [loadData, selectedConversation, loadMessages]);
+  }, [loadConversations]);
 
   const sendMessage = async () => {
     if (!selectedConversation || !newMessage.trim() || sending) return;
@@ -561,9 +579,9 @@ export default function ChatWidget() {
         }
         // Auto-scroll al enviar
         setTimeout(() => scrollToBottom(true), 100);
-        // Recargar conversaciones para asegurar que se actualice la lista
+        // Recargar solo conversaciones (no usuarios) para asegurar que se actualice la lista
         setTimeout(() => {
-          loadData().catch(console.error);
+          loadConversations().catch(console.error);
         }, 300);
       } else {
         const error = await res.json();
@@ -605,9 +623,9 @@ export default function ChatWidget() {
         const data = await res.json();
         setSelectedConversation(data.data.conversation_id);
         setShowUserList(false);
-        // Recargar conversaciones para mostrar la nueva
+        // Recargar solo conversaciones (no usuarios) para mostrar la nueva
         setTimeout(() => {
-          loadData().catch(console.error);
+          loadConversations().catch(console.error);
         }, 300);
       } else {
         const error = await res.json();
@@ -808,6 +826,13 @@ export default function ChatWidget() {
     });
   };
 
+
+  // Cargar usuarios lazy cuando se abre la lista (optimización)
+  useEffect(() => {
+    if (showUserList && users.length === 0) {
+      loadUsers().catch(console.error);
+    }
+  }, [showUserList, users.length, loadUsers]);
 
   // No mostrar el chat si no hay sesión
   const [hasSession, setHasSession] = useState(false);

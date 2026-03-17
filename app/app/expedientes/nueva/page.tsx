@@ -67,10 +67,12 @@ export default function NuevaExpedientePage() {
     isSuperadmin: boolean;
     isAdminExpedientes: boolean;
     isAbogado: boolean;
+    isAdminMediaciones: boolean;
   }>({
     isSuperadmin: false,
     isAdminExpedientes: false,
     isAbogado: false,
+    isAdminMediaciones: false,
   });
   const [currentUserName, setCurrentUserName] = useState<string>("");
 
@@ -122,13 +124,14 @@ export default function NuevaExpedientePage() {
       // Verificar roles del usuario
       const { data: roleData, error: roleErr } = await supabase
         .from("user_roles")
-        .select("is_superadmin, is_admin_expedientes, is_abogado")
+        .select("is_superadmin, is_admin_expedientes, is_abogado, is_admin_mediaciones")
         .eq("user_id", uid)
         .maybeSingle();
       
       const isAdminExp = !roleErr && roleData?.is_admin_expedientes === true;
       const isAbogado = !roleErr && roleData?.is_abogado === true;
       const isSuperadmin = !roleErr && roleData?.is_superadmin === true;
+      const isAdminMediaciones = !roleErr && roleData?.is_admin_mediaciones === true;
       
       if (!isAdminExp && !isAbogado) {
         window.location.href = "/app";
@@ -140,6 +143,7 @@ export default function NuevaExpedientePage() {
         isSuperadmin: isSuperadmin || false,
         isAdminExpedientes: isAdminExp || false,
         isAbogado: isAbogado || false,
+        isAdminMediaciones: isAdminMediaciones || false,
       });
 
       const { data: prof, error: pErr } = await supabase
@@ -529,6 +533,32 @@ export default function NuevaExpedientePage() {
                       >
                         📋 Mis Juzgados
                       </Link>
+                      {userRoles.isAdminMediaciones && (
+                        <Link
+                          href="/app/mediaciones"
+                          onClick={() => setMenuOpen(false)}
+                          style={{
+                            display: "block",
+                            padding: "12px 20px",
+                            color: "#1a1a1a",
+                            textDecoration: "none",
+                            fontSize: 14,
+                            fontWeight: 600,
+                            transition: "background 0.2s ease",
+                            borderLeft: "3px solid transparent"
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = "rgba(96,141,186,.08)";
+                            e.currentTarget.style.borderLeftColor = "var(--brand-blue-2)";
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = "transparent";
+                            e.currentTarget.style.borderLeftColor = "transparent";
+                          }}
+                        >
+                          ⚖️ Mediaciones
+                        </Link>
+                      )}
                       {userRoles.isAbogado && (
                         <Link
                           href="/prueba-pericia"
