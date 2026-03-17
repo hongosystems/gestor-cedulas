@@ -45,11 +45,75 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { other_user_id } = await req.json();
+    const body = await req.json();
+    const { other_user_id, participant_ids, name: groupName } = body;
 
+    const svc = supabaseService();
+
+    // Conversación grupal: participant_ids es un array de user IDs (mínimo 1)
+    if (participant_ids && Array.isArray(participant_ids)) {
+      const ids = participant_ids.filter((id: string) => id && id !== user.id);
+      if (ids.length === 0) {
+        return NextResponse.json(
+          { error: "Selecciona al menos un usuario para el grupo" },
+          { status: 400 }
+        );
+      }
+      const allIds = [user.id, ...ids];
+      const uniqueIds = [...new Set(allIds)];
+
+      // Verificar que todos los usuarios existen
+      const { data: profiles } = await svc
+        .from("profiles")
+        .select("id")
+        .in("id", uniqueIds);
+      if (!profiles || profiles.length !== uniqueIds.length) {
+        return NextResponse.json(
+          { error: "Uno o más usuarios no encontrados" },
+          { status: 404 }
+        );
+      }
+
+      const name = (groupName && String(groupName).trim()) || "Grupo";
+      const { data: newConv, error: createError } = await svc
+        .from("conversations")
+        .insert({ type: "group", name })
+        .select()
+        .single();
+
+      if (createError || !newConv) {
+        return NextResponse.json(
+          { error: createError?.message || "Error al crear conversación grupal" },
+          { status: 500 }
+        );
+      }
+
+      const rows = uniqueIds.map((uid: string) => ({
+        conversation_id: newConv.id,
+        user_id: uid,
+      }));
+      const { error: participantsError } = await svc
+        .from("conversation_participants")
+        .insert(rows);
+
+      if (participantsError) {
+        console.error("Error al agregar participantes al grupo:", participantsError);
+        return NextResponse.json(
+          { error: "Error al agregar participantes a la conversación" },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json({
+        ok: true,
+        data: { conversation_id: newConv.id },
+      });
+    }
+
+    // Conversación directa 1 a 1
     if (!other_user_id) {
       return NextResponse.json(
-        { error: "other_user_id es requerido" },
+        { error: "other_user_id o participant_ids es requerido" },
         { status: 400 }
       );
     }
@@ -61,9 +125,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const svc = supabaseService();
-
-    // Verificar que el otro usuario existe
     const { data: otherUser, error: userError } = await svc
       .from("profiles")
       .select("id, full_name, email")
@@ -77,7 +138,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Usar la función RPC para obtener o crear la conversación
     const { data: conversationId, error: rpcError } = await svc.rpc(
       "get_or_create_direct_conversation",
       { other_user_id }
@@ -85,9 +145,6 @@ export async function POST(req: NextRequest) {
 
     if (rpcError) {
       console.error("Error al obtener/crear conversación:", rpcError);
-      
-      // Fallback: buscar manualmente conversación existente
-      // Primero obtener todas las conversaciones del usuario actual
       const { data: userConvs } = await svc
         .from("conversation_participants")
         .select("conversation_id")
@@ -95,8 +152,6 @@ export async function POST(req: NextRequest) {
 
       if (userConvs && userConvs.length > 0) {
         const convIds = userConvs.map((c: any) => c.conversation_id);
-        
-        // Buscar si alguna de esas conversaciones tiene al otro usuario
         const { data: otherUserConvs } = await svc
           .from("conversation_participants")
           .select("conversation_id")
@@ -104,7 +159,6 @@ export async function POST(req: NextRequest) {
           .in("conversation_id", convIds);
 
         if (otherUserConvs && otherUserConvs.length > 0) {
-          // Verificar que sea una conversación directa
           const foundConvId = otherUserConvs[0].conversation_id;
           const { data: conv } = await svc
             .from("conversations")
@@ -114,15 +168,11 @@ export async function POST(req: NextRequest) {
             .single();
 
           if (conv) {
-            return NextResponse.json({ 
-              ok: true, 
-              data: { conversation_id: conv.id } 
-            });
+            return NextResponse.json({ ok: true, data: { conversation_id: conv.id } });
           }
         }
       }
 
-      // Crear nueva conversación
       const { data: newConv, error: createError } = await svc
         .from("conversations")
         .insert({ type: "direct" })
@@ -136,7 +186,6 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Agregar participantes
       const { error: participantsError } = await svc
         .from("conversation_participants")
         .insert([
@@ -152,15 +201,12 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      return NextResponse.json({ 
-        ok: true, 
-        data: { conversation_id: newConv.id } 
-      });
+      return NextResponse.json({ ok: true, data: { conversation_id: newConv.id } });
     }
 
-    return NextResponse.json({ 
-      ok: true, 
-      data: { conversation_id: conversationId } 
+    return NextResponse.json({
+      ok: true,
+      data: { conversation_id: conversationId },
     });
   } catch (e: any) {
     console.error("Error en get/create conversation:", e);

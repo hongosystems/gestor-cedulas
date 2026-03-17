@@ -205,10 +205,8 @@ function NotasTextareaCedula({
     })();
   }, []);
 
-  // Detectar menciones y crear notificaciones
+  // Detectar menciones y crear notificaciones (incluye @todos / @arrobatodos para notificar a todos)
   const detectarYNotificarMenciones = React.useCallback(async (texto: string, currentUserId: string) => {
-    // Regex mejorado: captura @username donde username puede tener letras, números, puntos, guiones y guiones bajos
-    // Ejemplos válidos: @victoria.estudiohisi, @juan.perez, @user_123, @test-user
     const mentionRegex = /@([\w.-]+)/g;
     const matches = [...texto.matchAll(mentionRegex)];
     const mentionedUsernames = [...new Set(matches.map(m => m[1].toLowerCase()))];
@@ -230,27 +228,58 @@ function NotasTextareaCedula({
       .single();
     
     const currentUserName = currentUserProfile?.full_name || currentUserProfile?.email || "Un usuario";
+    const link = `/app#${itemId}`;
+    const notaCompleta = texto.trim();
+    const { data: session } = await supabase.auth.getSession();
+    const senderId = session.session?.user.id;
+    const metadata = {
+      caratula: caratula || null,
+      juzgado: juzgado || null,
+      cedula_id: itemId,
+      sender_id: senderId,
+    };
+
+    const todosMention = mentionedUsernames.some(u => u === "todos" || u === "arrobatodos");
+    if (todosMention) {
+      try {
+        const { data: sess } = await supabase.auth.getSession();
+        if (!sess.session) return;
+        const res = await fetch("/api/notifications/create-mention-all", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${sess.session.access_token}`,
+          },
+          body: JSON.stringify({
+            title: caratula ? `Mensaje a todos: ${caratula.substring(0, 50)}${caratula.length > 50 ? "..." : ""}` : "Mensaje a todos en notas",
+            body: `${currentUserName} envió un mensaje a todos en las notas${caratula ? ` de "${caratula}"` : ""}`,
+            link,
+            expediente_id: itemId,
+            is_pjn_favorito: false,
+            nota_context: notaCompleta,
+            metadata,
+          }),
+        });
+        if (res.ok) {
+          const result = await res.json();
+          console.log("[NotasTextareaCedula] Notificación a todos creada:", result);
+        } else {
+          console.error("[NotasTextareaCedula] Error create-mention-all:", await res.text());
+        }
+      } catch (err) {
+        console.error("Error al notificar a todos:", err);
+      }
+    }
     
     for (const username of mentionedUsernames) {
+      if (username === "todos" || username === "arrobatodos") continue;
       const mentionedUser = users.find(u => u.username.toLowerCase() === username);
       if (!mentionedUser || mentionedUser.id === currentUserId) continue;
       
-      const link = `/app#${itemId}`;
       const mentionIndex = texto.toLowerCase().indexOf(`@${username}`);
       const startContext = Math.max(0, mentionIndex - 50);
       const endContext = Math.min(texto.length, mentionIndex + username.length + 50);
       const notaContextParaAsunto = texto.substring(startContext, endContext).trim();
-      const notaCompleta = texto.trim();
-      
-      const { data: session } = await supabase.auth.getSession();
-      const senderId = session.session?.user.id;
-      
-      const metadata = {
-        caratula: caratula || null,
-        juzgado: juzgado || null,
-        cedula_id: itemId,
-        sender_id: senderId,
-      };
       
       try {
         const { data: session } = await supabase.auth.getSession();
@@ -479,16 +508,19 @@ function NotasTextareaCedula({
     };
   }, []);
 
+  const TODOS_OPTION: User = { id: "__todos__", username: "todos", full_name: "Todos", email: "" };
   const filteredUsers = mentionState ? (() => {
     const query = mentionState.query.toLowerCase();
-    if (!query || query.length === 0) {
-      return users.slice(0, 20);
-    }
-    return users.filter(u => 
-      u.username.toLowerCase().includes(query) ||
-      (u.full_name && u.full_name.toLowerCase().includes(query)) ||
-      u.email.toLowerCase().includes(query)
-    ).slice(0, 20);
+    const showTodos = !query || "todos".startsWith(query) || "arrobatodos".startsWith(query);
+    const fromUsers = !query || query.length === 0
+      ? users.slice(0, 20)
+      : users.filter(u =>
+          u.username.toLowerCase().includes(query) ||
+          (u.full_name && u.full_name.toLowerCase().includes(query)) ||
+          u.email.toLowerCase().includes(query)
+        ).slice(0, 20);
+    if (showTodos) return [TODOS_OPTION, ...fromUsers.filter(u => u.id !== TODOS_OPTION.id)];
+    return fromUsers;
   })() : [];
 
   if (isEditing) {

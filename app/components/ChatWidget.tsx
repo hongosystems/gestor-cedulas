@@ -47,6 +47,10 @@ export default function ChatWidget() {
   const [sending, setSending] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
   const [showUserList, setShowUserList] = useState(false);
+  const [showGroupMode, setShowGroupMode] = useState(false);
+  const [groupSelectedIds, setGroupSelectedIds] = useState<Set<string>>(new Set());
+  const [groupName, setGroupName] = useState("");
+  const [creatingGroup, setCreatingGroup] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -543,7 +547,35 @@ export default function ChatWidget() {
       if (res.ok) {
         const responseData = await res.json();
         const sentMessage = responseData.data;
-        
+        const content = newMessage.trim();
+
+        // Si el mensaje contiene @todos o @arrobatodos, notificar a todos los usuarios
+        if (/\@(todos|arrobatodos)\b/i.test(content)) {
+          try {
+            const mentionAllRes = await fetch("/api/notifications/create-mention-all", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${session.session.access_token}`,
+              },
+              body: JSON.stringify({
+                title: content.length > 50 ? content.substring(0, 50) + "…" : content,
+                body: "Mensaje a todos en el chat",
+                link: "/app",
+                metadata: {
+                  conversation_id: selectedConversation,
+                  sender_id: currentUserId,
+                },
+              }),
+            });
+            if (!mentionAllRes.ok) {
+              console.error("[ChatWidget] Error al notificar a todos:", await mentionAllRes.text());
+            }
+          } catch (err) {
+            console.error("[ChatWidget] Error create-mention-all:", err);
+          }
+        }
+
         // Agregar mensaje inmediatamente al estado (optimistic update)
         if (sentMessage && currentUserId) {
           const optimisticMessage: Message = {
@@ -560,12 +592,8 @@ export default function ChatWidget() {
           };
           
           setMessages((prevMessages) => {
-            // Verificar si ya existe (por si llegó por Realtime antes)
             const exists = prevMessages.some(msg => msg.id === optimisticMessage.id);
-            if (exists) {
-              return prevMessages;
-            }
-            // Agregar al final y ordenar por fecha
+            if (exists) return prevMessages;
             return [...prevMessages, optimisticMessage].sort((a, b) => 
               new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
             );
@@ -573,16 +601,11 @@ export default function ChatWidget() {
         }
         
         setNewMessage("");
-        // Resetear altura del textarea
         if (textareaRef.current) {
           textareaRef.current.style.height = "auto";
         }
-        // Auto-scroll al enviar
         setTimeout(() => scrollToBottom(true), 100);
-        // Recargar solo conversaciones (no usuarios) para asegurar que se actualice la lista
-        setTimeout(() => {
-          loadConversations().catch(console.error);
-        }, 300);
+        setTimeout(() => loadConversations().catch(console.error), 300);
       } else {
         const error = await res.json();
         alert(error.error || "Error al enviar mensaje");
@@ -623,10 +646,10 @@ export default function ChatWidget() {
         const data = await res.json();
         setSelectedConversation(data.data.conversation_id);
         setShowUserList(false);
-        // Recargar solo conversaciones (no usuarios) para mostrar la nueva
-        setTimeout(() => {
-          loadConversations().catch(console.error);
-        }, 300);
+        setShowGroupMode(false);
+        setGroupSelectedIds(new Set());
+        setGroupName("");
+        setTimeout(() => loadConversations().catch(console.error), 300);
       } else {
         const error = await res.json();
         alert(error.error || "Error al crear conversación");
@@ -636,6 +659,73 @@ export default function ChatWidget() {
       await handleAuthError(error);
       alert("Error al crear conversación");
     }
+  };
+
+  const startGroupConversation = async () => {
+    const ids = [...groupSelectedIds];
+    if (ids.length === 0) {
+      alert("Selecciona al menos un usuario para el grupo.");
+      return;
+    }
+    setCreatingGroup(true);
+    try {
+      const { data: session, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) {
+        await handleAuthError(sessionError);
+        setCreatingGroup(false);
+        return;
+      }
+      if (!session?.session) {
+        setCreatingGroup(false);
+        return;
+      }
+
+      const res = await fetch("/api/chat/conversation", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.session.access_token}`,
+        },
+        body: JSON.stringify({
+          participant_ids: ids,
+          name: (groupName && groupName.trim()) || "Grupo",
+        }),
+      });
+
+      if (res.status === 401) {
+        await handleAuthError({ message: "Unauthorized" });
+        setCreatingGroup(false);
+        return;
+      }
+
+      if (res.ok) {
+        const data = await res.json();
+        setSelectedConversation(data.data.conversation_id);
+        setShowUserList(false);
+        setShowGroupMode(false);
+        setGroupSelectedIds(new Set());
+        setGroupName("");
+        setTimeout(() => loadConversations().catch(console.error), 300);
+      } else {
+        const error = await res.json();
+        alert(error.error || "Error al crear grupo");
+      }
+    } catch (error) {
+      console.error("Error creating group:", error);
+      await handleAuthError(error);
+      alert("Error al crear grupo");
+    } finally {
+      setCreatingGroup(false);
+    }
+  };
+
+  const toggleGroupUser = (userId: string) => {
+    setGroupSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId);
+      else next.add(userId);
+      return next;
+    });
   };
 
   const scrollToBottom = (force: boolean = false) => {
@@ -913,21 +1003,83 @@ export default function ChatWidget() {
 
           {showUserList ? (
             <div className={styles.userList}>
-              <h4>Seleccionar usuario</h4>
-              <div className={styles.userListContent}>
-                {users.map((user) => (
+              <div className={styles.userListHeader}>
+                <h4>{showGroupMode ? "Nueva conversación grupal" : "Seleccionar usuario"}</h4>
+                <div className={styles.chatActions}>
                   <button
-                    key={user.id}
-                    className={styles.userItem}
-                    onClick={() => startConversation(user.id)}
+                    type="button"
+                    className={!showGroupMode ? styles.groupModeActive : styles.groupModeButton}
+                    onClick={() => { setShowGroupMode(false); setGroupSelectedIds(new Set()); setGroupName(""); }}
+                    title="Chat con una persona"
                   >
-                    <div className={styles.userName}>
-                      {user.full_name || user.email}
-                    </div>
-                    <div className={styles.userEmail}>{user.email}</div>
+                    1 a 1
                   </button>
-                ))}
+                  <button
+                    type="button"
+                    className={showGroupMode ? styles.groupModeActive : styles.groupModeButton}
+                    onClick={() => setShowGroupMode(true)}
+                    title="Chat grupal"
+                  >
+                    Grupo
+                  </button>
+                </div>
               </div>
+              {showGroupMode ? (
+                <>
+                  <div className={styles.groupNameRow}>
+                    <input
+                      type="text"
+                      placeholder="Nombre del grupo"
+                      value={groupName}
+                      onChange={(e) => setGroupName(e.target.value)}
+                      className={styles.groupNameInput}
+                    />
+                  </div>
+                  <div className={styles.userListContent}>
+                    {users.filter((u) => u.id !== currentUserId).map((user) => (
+                      <button
+                        key={user.id}
+                        type="button"
+                        className={`${styles.userItem} ${styles.userItemGroup} ${groupSelectedIds.has(user.id) ? styles.userItemSelected : ""}`}
+                        onClick={() => toggleGroupUser(user.id)}
+                      >
+                        <span className={styles.groupCheckbox}>
+                          {groupSelectedIds.has(user.id) ? "✓" : ""}
+                        </span>
+                        <div className={styles.userItemLabels}>
+                          <div className={styles.userName}>{user.full_name || user.email}</div>
+                          <div className={styles.userEmail}>{user.email}</div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                  <div className={styles.groupActions}>
+                    <button
+                      type="button"
+                      className={styles.createGroupButton}
+                      onClick={startGroupConversation}
+                      disabled={groupSelectedIds.size === 0 || creatingGroup}
+                    >
+                      {creatingGroup ? "Creando…" : `Crear grupo (${groupSelectedIds.size})`}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className={styles.userListContent}>
+                  {users.map((user) => (
+                    <button
+                      key={user.id}
+                      className={styles.userItem}
+                      onClick={() => startConversation(user.id)}
+                    >
+                      <div className={styles.userName}>
+                        {user.full_name || user.email}
+                      </div>
+                      <div className={styles.userEmail}>{user.email}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           ) : (
             <>

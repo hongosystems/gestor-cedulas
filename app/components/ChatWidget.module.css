@@ -694,6 +694,138 @@
   color: var(--chat-text-muted);
 }
 
+.userListHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--chat-border);
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.userListHeader h4 {
+  padding: 0;
+  margin: 0;
+  border: none;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--chat-text);
+}
+
+.groupModeButton,
+.groupModeActive {
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--chat-border);
+  background: var(--chat-surface);
+  color: var(--chat-text-muted);
+  transition: background 0.2s, color 0.2s;
+}
+
+.groupModeButton:hover {
+  background: var(--chat-surface-2);
+  color: var(--chat-text);
+}
+
+.groupModeActive {
+  background: var(--chat-primary);
+  color: white;
+  border-color: var(--chat-primary);
+}
+
+.groupNameRow {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--chat-border);
+}
+
+.groupNameInput {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--chat-border);
+  background: var(--chat-surface);
+  color: var(--chat-text);
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.groupNameInput::placeholder {
+  color: var(--chat-text-muted);
+}
+
+.userItemSelected {
+  background: rgba(0, 82, 156, 0.2);
+  border-left: 3px solid var(--chat-primary);
+}
+
+.groupCheckbox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-right: 10px;
+  border: 2px solid var(--chat-border);
+  border-radius: 4px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: white;
+  background: var(--chat-surface);
+}
+
+.userItemSelected .groupCheckbox {
+  background: var(--chat-primary);
+  border-color: var(--chat-primary);
+}
+
+.userItemGroup {
+  display: flex;
+  align-items: center;
+}
+
+.userItemLabels {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.userItemGroup .userName {
+  margin-bottom: 0;
+}
+
+.groupActions {
+  padding: 12px 16px;
+  border-top: 1px solid var(--chat-border);
+}
+
+.createGroupButton {
+  width: 100%;
+  padding: 10px 16px;
+  background: var(--chat-primary);
+  color: white;
+  border: 1px solid var(--chat-border);
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, opacity 0.2s;
+}
+
+.createGroupButton:hover:not(:disabled) {
+  background: var(--chat-primary-light);
+}
+
+.createGroupButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* ===== Empty State ===== */
 .emptyState {
   padding: 32px;

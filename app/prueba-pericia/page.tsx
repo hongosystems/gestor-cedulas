@@ -524,7 +524,6 @@ function NotasTextarea({
     const mentionRegex = /@([\w.-]+)/g;
     const matches = [...texto.matchAll(mentionRegex)];
     const mentionedUsernames = [...new Set(matches.map(m => m[1].toLowerCase()))];
-    
     if (mentionedUsernames.length === 0) return;
 
     const claveDedup = `${itemId}:${mentionedUsernames.sort().join(",")}:${texto.trim().substring(0, 500)}`;
@@ -534,48 +533,69 @@ function NotasTextarea({
       const arr = [...mencionesNotificadasRef.current];
       mencionesNotificadasRef.current = new Set(arr.slice(-25));
     }
-    
+
     const { data: currentUserProfile } = await supabase
       .from("profiles")
       .select("full_name, email")
       .eq("id", currentUserId)
       .single();
-    
     const currentUserName = currentUserProfile?.full_name || currentUserProfile?.email || "Un usuario";
+    const link = isPjnFavorito ? `/prueba-pericia#pjn_${itemId.replace(/^pjn_/, "")}` : `/prueba-pericia#${itemId}`;
+    const notaCompleta = texto.trim();
+    const expedienteIdLimpio = itemId.replace(/^pjn_/, "");
+    const expedienteIdForDb = isUuid(expedienteIdLimpio) ? expedienteIdLimpio : null;
+    const { data: session } = await supabase.auth.getSession();
+    const senderId = session.session?.user.id;
+    const metadata = {
+      caratula: caratula || null,
+      juzgado: juzgado || null,
+      numero: numeroExpediente || null,
+      expediente_ref: itemId,
+      is_pjn_favorito: isPjnFavorito,
+      sender_id: senderId,
+    };
+
+    const todosMention = mentionedUsernames.some(u => u === "todos" || u === "arrobatodos");
+    if (todosMention) {
+      try {
+        const { data: sess } = await supabase.auth.getSession();
+        if (!sess.session) return;
+        const res = await fetch("/api/notifications/create-mention-all", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${sess.session.access_token}`,
+          },
+          body: JSON.stringify({
+            title: caratula ? `Mensaje a todos: ${caratula.substring(0, 50)}${caratula.length > 50 ? "..." : ""}` : "Mensaje a todos en notas",
+            body: `${currentUserName} envió un mensaje a todos en las notas${caratula ? ` del expediente "${caratula}"` : numeroExpediente ? ` del expediente ${numeroExpediente}` : ""}`,
+            link,
+            expediente_id: expedienteIdForDb,
+            is_pjn_favorito: isPjnFavorito,
+            nota_context: notaCompleta,
+            metadata,
+          }),
+        });
+        if (res.ok) console.log("[NotasTextarea] Notificación a todos creada:", await res.json());
+        else console.error("[NotasTextarea] Error create-mention-all:", await res.text());
+      } catch (err) {
+        console.error("Error al notificar a todos:", err);
+      }
+    }
 
     for (const username of mentionedUsernames) {
+      if (username === "todos" || username === "arrobatodos") continue;
       const mentionedUser = users.find(u => u.username.toLowerCase() === username);
       if (!mentionedUser || mentionedUser.id === currentUserId) continue;
-      
-      const link = isPjnFavorito 
-        ? `/prueba-pericia#pjn_${itemId.replace(/^pjn_/, "")}`
-        : `/prueba-pericia#${itemId}`;
-      
+
       const mentionIndex = texto.toLowerCase().indexOf(`@${username}`);
       const startContext = Math.max(0, mentionIndex - 50);
       const endContext = Math.min(texto.length, mentionIndex + username.length + 50);
       const notaContextParaAsunto = texto.substring(startContext, endContext).trim();
-      
-      const notaCompleta = texto.trim();
-      const expedienteIdLimpio = itemId.replace(/^pjn_/, "");
-      const expedienteIdForDb = isUuid(expedienteIdLimpio) ? expedienteIdLimpio : null;
-      
-      const { data: session } = await supabase.auth.getSession();
-      const senderId = session.session?.user.id;
-      
-      const metadata = {
-        caratula: caratula || null,
-        juzgado: juzgado || null,
-        numero: numeroExpediente || null,
-        expediente_ref: itemId, // puede ser "CIV 059088/2024" (NO UUID)
-        is_pjn_favorito: isPjnFavorito,
-        sender_id: senderId,
-      };
-      
+
       try {
         const { data: session } = await supabase.auth.getSession();
         if (!session.session) return;
-        
         const res = await fetch("/api/notifications/create-mention", {
           method: "POST",
           headers: {
@@ -593,11 +613,7 @@ function NotasTextarea({
             metadata: metadata,
           }),
         });
-        
-        if (!res.ok) {
-          const errorText = await res.text();
-          console.error("[NotasTextarea] Error al crear notificación:", errorText);
-        }
+        if (!res.ok) console.error("[NotasTextarea] Error:", await res.text());
       } catch (err) {
         console.error(`Error al crear notificación:`, err);
       }
@@ -921,16 +937,19 @@ function NotasTextarea({
     };
   }, []);
 
+  const TODOS_OPTION = { id: "__todos__", username: "todos", full_name: "Todos", email: "" };
   const filteredUsers = mentionState ? (() => {
     const query = mentionState.query.toLowerCase();
-    if (!query || query.length === 0) {
-      return users.slice(0, 20);
-    }
-    return users.filter(u => 
-      u.username.toLowerCase().includes(query) ||
-      (u.full_name && u.full_name.toLowerCase().includes(query)) ||
-      u.email.toLowerCase().includes(query)
-    ).slice(0, 20);
+    const showTodos = !query || "todos".startsWith(query) || "arrobatodos".startsWith(query);
+    const fromUsers = !query || query.length === 0
+      ? users.slice(0, 20)
+      : users.filter(u =>
+          u.username.toLowerCase().includes(query) ||
+          (u.full_name && u.full_name.toLowerCase().includes(query)) ||
+          u.email.toLowerCase().includes(query)
+        ).slice(0, 20);
+    if (showTodos) return [TODOS_OPTION, ...fromUsers.filter((u: any) => u.id !== TODOS_OPTION.id)];
+    return fromUsers;
   })() : [];
 
   if (isEditing) {
