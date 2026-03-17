@@ -3300,9 +3300,10 @@ export default function PruebaPericiaPage() {
                             const a = document.createElement("a");
                             a.href = url;
                             const contentDisposition = res.headers.get("Content-Disposition");
-                            const filename = contentDisposition
+                            const rawFilename = contentDisposition
                               ? contentDisposition.match(/filename="?(.+)"?/)?.[1] || archivo.filename || "archivo.pdf"
                               : archivo.filename || "archivo.pdf";
+                            const filename = rawFilename.replace(/\.pdf_$/i, ".pdf");
                             a.download = filename;
                             document.body.appendChild(a);
                             a.click();
@@ -3358,11 +3359,12 @@ export default function PruebaPericiaPage() {
                     a.href = url;
                     // Obtener el nombre del archivo del header Content-Disposition
                     const contentDisposition = res.headers.get("Content-Disposition");
-                    const filename = contentDisposition
+                    const rawFilename = contentDisposition
                       ? contentDisposition.match(/filename="?(.+)"?/)?.[1] || "orden-medica.zip"
                       : (selectedOrden.archivos && selectedOrden.archivos.length > 1)
                         ? `orden-medica-${selectedOrden.case_ref || selectedOrden.id.substring(0, 8)}.zip`
                         : selectedOrden.filename || "orden-medica.pdf";
+                    const filename = rawFilename.replace(/\.pdf_$/i, ".pdf");
                     a.download = filename;
                     document.body.appendChild(a);
                     a.click();
