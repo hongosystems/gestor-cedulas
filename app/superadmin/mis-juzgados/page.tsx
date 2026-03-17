@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { pjnScraperSupabase } from "@/lib/pjn-scraper-supabase";
 import { daysSince } from "@/lib/semaforo";
 import NotificationBell from "@/app/components/NotificationBell";
+import ResponsableAvatars from "@/app/components/ResponsableAvatars";
 
 // Estilos globales para mejorar contraste del dropdown
 if (typeof document !== 'undefined') {
@@ -1218,6 +1219,7 @@ export default function MisJuzgadosPage() {
   const [currentUserName, setCurrentUserName] = useState<string>("");
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [lastSyncDate, setLastSyncDate] = useState<string | null>(null);
+  const [usuariosByKey, setUsuariosByKey] = useState<Record<string, { id: string; nombre: string; email?: string }[]>>({});
 
   const loadData = async () => {
     try {
@@ -2581,6 +2583,61 @@ export default function MisJuzgadosPage() {
       .sort((a, b) => a.name.localeCompare(b.name, "es", { sensitivity: "base" }));
   }, [expedientes, cedulas]);
 
+  // Clave para Responsable: debe coincidir exactamente con la API get-users-by-juzgado
+  const getResponsableKey = (juzgado: string | null | undefined, caratula: string | null | undefined): string =>
+    `${juzgado?.trim() || ""}|||${caratula?.trim() || ""}`;
+
+  // Cargar usuarios por juzgado para columna Responsable (abogados asignados)
+  useEffect(() => {
+    const allItems: { juzgado: string | null; caratula: string | null }[] = [
+      ...expedientes.map(e => ({ juzgado: e.juzgado, caratula: e.caratula })),
+      ...cedulas.map(c => ({ juzgado: c.juzgado, caratula: c.caratula })),
+    ];
+    const seen = new Set<string>();
+    const uniqueItems: { juzgado: string; caratula: string | null }[] = [];
+    for (const x of allItems) {
+      const j = x.juzgado?.trim() || "";
+      if (!j) continue;
+      const car = x.caratula?.trim() || null;
+      const key = getResponsableKey(j, car);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      uniqueItems.push({ juzgado: j, caratula: car });
+    }
+    if (uniqueItems.length === 0) {
+      setUsuariosByKey({});
+      return;
+    }
+    (async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        const token = data?.session?.access_token;
+        const BATCH_SIZE = 80;
+        const merged: Record<string, { id: string; nombre: string; email?: string }[]> = {};
+        for (let i = 0; i < uniqueItems.length; i += BATCH_SIZE) {
+          const batch = uniqueItems.slice(i, i + BATCH_SIZE);
+          const res = await fetch("/api/get-users-by-juzgado", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(token ? { "Authorization": `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({ items: batch }),
+          });
+          if (!res.ok) continue;
+          const json = await res.json();
+          const map = json.map || {};
+          for (const k of Object.keys(map)) {
+            merged[k] = map[k] || [];
+          }
+        }
+        setUsuariosByKey(merged);
+      } catch {
+        setUsuariosByKey({});
+      }
+    })();
+  }, [expedientes, cedulas]);
+
   const sortedItems = useMemo(() => {
     // Preparar items según el tab activo
     const itemsToShow = activeTab === "expedientes" 
@@ -3479,6 +3536,9 @@ export default function MisJuzgadosPage() {
                       {sortField === "juzgado" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
                     </span>
                   </th>
+                  <th style={{ width: 80, textAlign: "center" }} title="Responsable según juzgado asignado">
+                    <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 500 }}>Responsable</span>
+                  </th>
                   <th 
                     style={{ width: 220, cursor: "pointer" }}
                     onClick={() => handleSort("fecha")}
@@ -3531,6 +3591,15 @@ export default function MisJuzgadosPage() {
                         {item.caratula?.trim() ? item.caratula : <span className="muted">Sin carátula</span>}
                       </td>
                       <td>{item.juzgado ? limpiarJuzgadoParaMostrar(item.juzgado) : <span className="muted">—</span>}</td>
+                      <td style={{ textAlign: "center", verticalAlign: "middle" }}>
+                        <ResponsableAvatars
+                          usuarios={
+                            item.juzgado?.trim()
+                              ? usuariosByKey[getResponsableKey(item.juzgado, item.caratula)] || []
+                              : []
+                          }
+                        />
+                      </td>
                       <td>
                         {item.fecha_ultima_carga 
                           ? formatFecha(item.fecha_ultima_carga)
@@ -3640,10 +3709,10 @@ export default function MisJuzgadosPage() {
                   <tr>
                     <td colSpan={
                       activeTab === "expedientes" 
-                        ? 9 
+                        ? 10 
                         : isAbogado 
-                          ? 8 
-                          : 7
+                          ? 9 
+                          : 8
                     } className="muted">
                       No hay {activeTab === "expedientes" ? "expedientes" : activeTab === "cedulas" ? "cédulas" : "oficios"} cargados para tus juzgados asignados.
                     </td>

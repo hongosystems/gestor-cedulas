@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { daysSince } from "@/lib/semaforo";
 import NotificationBell from "@/app/components/NotificationBell";
+import ResponsableAvatars from "@/app/components/ResponsableAvatars";
 
 type Expediente = {
   id: string;
@@ -108,6 +109,7 @@ export default function AbogadoHomePage() {
   });
   const [menuOpen, setMenuOpen] = useState(false);
   const [currentUserName, setCurrentUserName] = useState<string>("");
+  const [usuariosByKey, setUsuariosByKey] = useState<Record<string, { id: string; nombre: string; email?: string }[]>>({});
 
   // Cerrar menú al hacer clic fuera
   useEffect(() => {
@@ -290,6 +292,47 @@ export default function AbogadoHomePage() {
       setLoading(false);
     })();
   }, []);
+
+  // Cargar usuarios por juzgado para columna Responsable (abogados asignados)
+  useEffect(() => {
+    if (expedientes.length === 0) {
+      setUsuariosByKey({});
+      return;
+    }
+    const seen = new Set<string>();
+    const uniqueItems: { juzgado: string; caratula: string | null }[] = [];
+    for (const e of expedientes) {
+      const j = e.juzgado?.trim() || "";
+      if (!j) continue;
+      const car = e.caratula?.trim() || null;
+      const key = `${j}|||${car || ""}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      uniqueItems.push({ juzgado: j, caratula: car });
+    }
+    if (uniqueItems.length === 0) {
+      setUsuariosByKey({});
+      return;
+    }
+    (async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        const res = await fetch("/api/get-users-by-juzgado", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${data?.session?.access_token}`,
+          },
+          body: JSON.stringify({ items: uniqueItems }),
+        });
+        if (!res.ok) return;
+        const json = await res.json();
+        setUsuariosByKey(json.map || {});
+      } catch {
+        setUsuariosByKey({});
+      }
+    })();
+  }, [expedientes]);
 
   const createdByOptions = useMemo(() => {
     const map = new Map<string, string>();
@@ -844,6 +887,9 @@ export default function AbogadoHomePage() {
                   </th>
                   <th>Carátula</th>
                   <th>Juzgado</th>
+                  <th style={{ width: 80, textAlign: "center" }} title="Responsable según juzgado asignado">
+                    <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 500 }}>Responsable</span>
+                  </th>
                   <th 
                     className="sortable"
                     style={{ width: 220 }}
@@ -884,6 +930,16 @@ export default function AbogadoHomePage() {
                     </td>
 
                     <td>{e.juzgado?.trim() ? e.juzgado : <span className="muted">—</span>}</td>
+
+                    <td style={{ textAlign: "center", verticalAlign: "middle" }}>
+                      <ResponsableAvatars
+                        usuarios={
+                          e.juzgado?.trim()
+                            ? usuariosByKey[`${e.juzgado.trim()}|||${(e.caratula || "").trim()}`] || []
+                            : []
+                        }
+                      />
+                    </td>
 
                     <td>
                       {e.fechaModISO ? isoToDDMMAAAA(e.fechaModISO) : <span className="muted">—</span>}
@@ -930,7 +986,7 @@ export default function AbogadoHomePage() {
 
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="muted">
+                    <td colSpan={9} className="muted">
                       No hay expedientes cargados para tus juzgados asignados.
                     </td>
                   </tr>
