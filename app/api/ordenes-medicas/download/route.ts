@@ -5,7 +5,10 @@ export const runtime = "nodejs";
 
 function normalizePdfFilename(raw: string | null | undefined, fallback: string) {
   const base = raw || fallback;
-  return base.replace(/\.pdf_$/i, ".pdf");
+  // 1) Si viene como "*.pdf_", "*.PDF__", etc. → quitar underscores extra
+  const withoutTrailingUnderscore = base.replace(/(\.pdf)_+$/i, "$1");
+  // 2) Forzar extensión en mayúsculas ".PDF"
+  return withoutTrailingUnderscore.replace(/\.pdf$/i, ".PDF");
 }
 
 async function getUserFromRequest(req: Request) {

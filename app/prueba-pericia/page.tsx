@@ -3303,7 +3303,9 @@ export default function PruebaPericiaPage() {
                             const rawFilename = contentDisposition
                               ? contentDisposition.match(/filename="?(.+)"?/)?.[1] || archivo.filename || "archivo.pdf"
                               : archivo.filename || "archivo.pdf";
-                            const filename = rawFilename.replace(/\.pdf_$/i, ".pdf");
+                            const filename = rawFilename
+                              .replace(/(\.pdf)_+$/i, "$1")  // quitar underscores después de .pdf
+                              .replace(/\.pdf$/i, ".PDF");   // forzar extensión .PDF en mayúsculas
                             a.download = filename;
                             document.body.appendChild(a);
                             a.click();
@@ -3364,7 +3366,9 @@ export default function PruebaPericiaPage() {
                       : (selectedOrden.archivos && selectedOrden.archivos.length > 1)
                         ? `orden-medica-${selectedOrden.case_ref || selectedOrden.id.substring(0, 8)}.zip`
                         : selectedOrden.filename || "orden-medica.pdf";
-                    const filename = rawFilename.replace(/\.pdf_$/i, ".pdf");
+                    const filename = rawFilename
+                      .replace(/(\.pdf)_+$/i, "$1")   // quitar underscores después de .pdf
+                      .replace(/\.pdf$/i, ".PDF");    // forzar extensión .PDF
                     a.download = filename;
                     document.body.appendChild(a);
                     a.click();
