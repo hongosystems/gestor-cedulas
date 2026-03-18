@@ -731,6 +731,7 @@ export default function MisCedulasPage() {
   const [sortField, setSortField] = useState<SortField>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [semaforoFilter, setSemaforoFilter] = useState<Semaforo | null>(null);
+  const [buscarTexto, setBuscarTexto] = useState("");
   const [currentUserName, setCurrentUserName] = useState<string>("");
   const [notasEditables, setNotasEditables] = useState<Record<string, string>>({});
   const [notasGuardando, setNotasGuardando] = useState<Record<string, boolean>>({});
@@ -946,6 +947,16 @@ export default function MisCedulasPage() {
       mapped = mapped.filter((c) => c.sem === semaforoFilter);
     }
 
+    // Aplicar búsqueda por expediente/carátula (solo Admin Cedulas)
+    if (isAdminCedulas && buscarTexto.trim()) {
+      const q = buscarTexto.trim().toLowerCase();
+      mapped = mapped.filter(
+        (c) =>
+          (c.caratula && c.caratula.toLowerCase().includes(q)) ||
+          (c.juzgado && c.juzgado.toLowerCase().includes(q))
+      );
+    }
+
     // Aplicar ordenamiento
     if (sortField) {
       mapped.sort((a, b) => {
@@ -994,7 +1005,7 @@ export default function MisCedulasPage() {
     }
 
     return mapped;
-  }, [cedulas, sortField, sortDirection, semaforoFilter, isAdminCedulas]);
+  }, [cedulas, sortField, sortDirection, semaforoFilter, isAdminCedulas, buscarTexto]);
 
   function handleSort(field: SortField) {
     if (sortField === field) {
@@ -1530,7 +1541,26 @@ export default function MisCedulasPage() {
               </button>
             )}
             {isAdminCedulas && (
-              <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <>
+                <span style={{ color: "var(--muted)", fontSize: 13 }}>Buscar:</span>
+                <input
+                  type="text"
+                  value={buscarTexto}
+                  onChange={(e) => setBuscarTexto(e.target.value)}
+                  placeholder="Expediente, Carátula..."
+                  style={{
+                    background: "#2e3948",
+                    border: "1px solid #7b858e",
+                    borderRadius: 999,
+                    color: "var(--text)",
+                    fontSize: 13,
+                    padding: "6px 14px",
+                    minWidth: 200,
+                    outline: "none",
+                  }}
+                  className="buscar-cedulas-input"
+                />
+                <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <button
                   onClick={() => {
                     const sel = rows.find(r => r.id === selectedCedulaId);
@@ -1579,7 +1609,8 @@ export default function MisCedulasPage() {
                 >
                   Completa
                 </button>
-              </div>
+                </div>
+              </>
             )}
           </div>
 

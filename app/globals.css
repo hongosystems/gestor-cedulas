@@ -120,6 +120,9 @@ select.input option{
   background: rgba(0,0,0,.95);
   color: var(--text);
 }
+.buscar-cedulas-input::placeholder {
+  color: #8c9ba5;
+}
 .actions{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top: 4px; }
 
 /* ===== Buttons ===== */
