@@ -6,6 +6,7 @@ export const runtime = "nodejs";
 
 type RequeridoPayload = {
   nombre: string;
+  empresa_nombre_razon_social?: string;
   condicion?: string;
   domicilio?: string;
   lesiones?: string;
@@ -52,6 +53,10 @@ export async function POST(req: NextRequest) {
       nro_siniestro,
       nro_poliza,
       mecanica_hecho,
+      linea_interno,
+      articulo,
+      intervino,
+      lesiones_ambos,
       requeridos = [],
     } = body;
 
@@ -81,6 +86,10 @@ export async function POST(req: NextRequest) {
         nro_siniestro: nro_siniestro ?? null,
         nro_poliza: nro_poliza ?? null,
         mecanica_hecho: mecanica_hecho ?? null,
+        linea_interno: linea_interno ?? null,
+        articulo: articulo ?? null,
+        intervino: intervino ?? null,
+        lesiones_ambos: lesiones_ambos ?? null,
       })
       .select("id, numero_tramite, estado, created_at")
       .single();
@@ -93,6 +102,7 @@ export async function POST(req: NextRequest) {
       const requeridosRows = (requeridos as RequeridoPayload[]).map((r, i) => ({
         mediacion_id: mediacion.id,
         nombre: r.nombre ?? "",
+        empresa_nombre_razon_social: r.empresa_nombre_razon_social ?? null,
         condicion: r.condicion ?? null,
         domicilio: r.domicilio ?? null,
         lesiones: r.lesiones ?? null,

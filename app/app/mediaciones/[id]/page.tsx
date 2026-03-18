@@ -35,6 +35,10 @@ type Mediacion = {
   nro_siniestro: string | null;
   nro_poliza: string | null;
   mecanica_hecho: string | null;
+  linea_interno?: string | null;
+  articulo?: string | null;
+  intervino?: string | null;
+  lesiones_ambos?: string | null;
   requeridos?: any[];
   observaciones?: { id: string; texto: string; autor_id: string; created_at: string; autor?: { full_name?: string; email?: string } }[];
   historial?: { id: string; estado_anterior: string | null; estado_nuevo: string; actor_id: string; comentario: string | null; created_at: string; actor?: { full_name?: string; email?: string } }[];
@@ -196,7 +200,7 @@ export default function MediacionDetailPage() {
     const res = await fetch(`/api/mediaciones/${id}/generate-doc`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
-      body: JSON.stringify({ tipo_plantilla: "carta_documento", modo_firma: "sin_firma" }),
+      body: JSON.stringify({ tipo_plantilla: "formulario_mediacion", modo_firma: "sin_firma" }),
     });
     const json = await res.json().catch(() => ({}));
     setGeneratingPdf(false);
@@ -206,7 +210,25 @@ export default function MediacionDetailPage() {
     }
     const docId = json.data?.documento_id || json.data?.id;
     setMediacion((prev) => (prev && json.data ? { ...prev, documentos: [json.data, ...(prev.documentos || [])], estado: "doc_generado" } : prev));
-    if (docId) window.open(`/api/mediaciones/download?documento_id=${docId}`, "_blank");
+    // `download` requiere auth; por eso no usamos window.open directo (el navegador no manda headers).
+    if (docId) {
+      try {
+        const downloadRes = await fetch(`/api/mediaciones/download?documento_id=${docId}`, {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        if (!downloadRes.ok) {
+          const text = await downloadRes.text();
+          setMsg(text || "Error al descargar el PDF");
+          return;
+        }
+        const blob = await downloadRes.blob();
+        const url = URL.createObjectURL(blob);
+        window.open(url, "_blank");
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      } catch {
+        setMsg("Error al descargar el PDF");
+      }
+    }
   }
 
   async function verDocumento() {
@@ -351,7 +373,11 @@ export default function MediacionDetailPage() {
                 {(mediacion.requeridos || []).length === 0 ? <p className="muted">—</p> : (
                   <ul style={{ paddingLeft: 20, margin: 0 }}>
                     {(mediacion.requeridos || []).map((r: any, i: number) => (
-                      <li key={r.id || i}>{r.nombre} {r.condicion && `(${r.condicion})`} {r.lesiones && ` · Lesiones: ${r.lesiones}`}</li>
+                      <li key={r.id || i}>
+                        {r.nombre}
+                        {r.empresa_nombre_razon_social && ` · ${r.empresa_nombre_razon_social}`}
+                        {r.lesiones && ` · Lesiones: ${r.lesiones}`}
+                      </li>
                     ))}
                   </ul>
                 )}
@@ -360,9 +386,17 @@ export default function MediacionDetailPage() {
               <Section title="Hecho y reclamo" open={openHecho} onToggle={() => setOpenHecho(!openHecho)}>
                 <p><strong>Objeto:</strong> {mediacion.objeto_reclamo || "—"}</p>
                 <p className="muted">Fecha: {formatDate(mediacion.fecha_hecho)} · Lugar: {mediacion.lugar_hecho || "—"}</p>
-                <p className="muted">Vehículo: {mediacion.vehiculo || "—"} · Dominio: {mediacion.dominio_patente || "—"}</p>
+                <p className="muted">Vehículo: {mediacion.vehiculo || "—"}{mediacion.linea_interno ? ` · Línea/Interno: ${mediacion.linea_interno}` : ""} · Dominio: {mediacion.dominio_patente || "—"}</p>
                 <p className="muted">Siniestro: {mediacion.nro_siniestro || "—"} · Póliza: {mediacion.nro_poliza || "—"}</p>
+                {(mediacion.articulo || mediacion.intervino) && (
+                  <p className="muted">
+                    {mediacion.articulo ? `Art: ${mediacion.articulo}` : ""}
+                    {mediacion.articulo && mediacion.intervino ? " · " : ""}
+                    {mediacion.intervino ? `Intervino: ${mediacion.intervino}` : ""}
+                  </p>
+                )}
                 {mediacion.mecanica_hecho && <p style={{ marginTop: 8, whiteSpace: "pre-wrap" }}>{mediacion.mecanica_hecho}</p>}
+                {mediacion.lesiones_ambos && <p style={{ marginTop: 8, whiteSpace: "pre-wrap" }}><strong>Lesiones de ambos:</strong> {mediacion.lesiones_ambos}</p>}
               </Section>
 
               {/* Acciones por estado */}

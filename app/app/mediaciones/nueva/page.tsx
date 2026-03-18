@@ -9,12 +9,8 @@ const LETRADO_CARACTER = ["Apoderado", "Patrocinante", "Apoderado y Patrocinante
 const REQ_CONDICION = ["Conductor", "Asegurado", "Propietario", "Conductor y asegurado", "Otro"];
 const LESIONES = ["Sí", "No", "A determinar"];
 const OBJETO_RECLAMO = [
-  "Accidente de tránsito con lesiones",
-  "Acc. tránsito daños materiales",
-  "Daños y perjuicios",
-  "Mala praxis médica",
-  "Incumplimiento contractual",
-  "Otro",
+  "Accidente de Transito con Lesiones",
+  "Accidente de Transito con Lesiones y/o Muerte",
 ];
 
 function formatDateInput(value: string): string {
@@ -40,12 +36,9 @@ function ddmmaaaaToISO(ddmmaaaa: string): string | null {
 type Requerido = {
   id: string;
   nombre: string;
-  condicion: string;
+  empresa_nombre_razon_social: string;
   domicilio: string;
   lesiones: string;
-  es_aseguradora: boolean;
-  aseguradora_nombre: string;
-  aseguradora_domicilio: string;
 };
 
 async function requireSessionOrRedirect() {
@@ -57,7 +50,7 @@ async function requireSessionOrRedirect() {
   return data.session;
 }
 
-const STEP_TITLES = ["Datos letrado", "Requirente", "Requerido/s", "Hecho y reclamo", "Revisión"];
+const STEP_TITLES = ["Datos letrado requirente", "Requirente", "Requerido/s", "Hecho y reclamo", "Revisión"];
 
 export default function NuevaMediacionPage() {
   const router = useRouter();
@@ -67,14 +60,14 @@ export default function NuevaMediacionPage() {
   const [msg, setMsg] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const [letrado_nombre, setLetrado_nombre] = useState("");
-  const [letrado_caracter, setLetrado_caracter] = useState("");
-  const [letrado_tomo, setLetrado_tomo] = useState("");
-  const [letrado_folio, setLetrado_folio] = useState("");
-  const [letrado_domicilio, setLetrado_domicilio] = useState("");
-  const [letrado_telefono, setLetrado_telefono] = useState("");
-  const [letrado_celular, setLetrado_celular] = useState("");
-  const [letrado_email, setLetrado_email] = useState("");
+  const [letrado_nombre, setLetrado_nombre] = useState("Dr. Gustavo Federico Hisi (APODERADO)");
+  const [letrado_caracter, setLetrado_caracter] = useState("Apoderado");
+  const [letrado_tomo, setLetrado_tomo] = useState("110");
+  const [letrado_folio, setLetrado_folio] = useState("492");
+  const [letrado_domicilio, setLetrado_domicilio] = useState("Uruguay 228 piso 1 of 28 CABA");
+  const [letrado_telefono, setLetrado_telefono] = useState("1551779201");
+  const [letrado_celular, setLetrado_celular] = useState("1551779201");
+  const [letrado_email, setLetrado_email] = useState("gfhisi@gmail.com");
 
   const [req_nombre, setReq_nombre] = useState("");
   const [req_dni, setReq_dni] = useState("");
@@ -83,7 +76,7 @@ export default function NuevaMediacionPage() {
   const [req_celular, setReq_celular] = useState("");
 
   const [requeridos, setRequeridos] = useState<Requerido[]>([
-    { id: "1", nombre: "", condicion: "", domicilio: "", lesiones: "", es_aseguradora: false, aseguradora_nombre: "", aseguradora_domicilio: "" },
+    { id: "1", nombre: "", empresa_nombre_razon_social: "", domicilio: "", lesiones: "" },
   ]);
 
   const [objeto_reclamo, setObjeto_reclamo] = useState("");
@@ -94,6 +87,10 @@ export default function NuevaMediacionPage() {
   const [nro_siniestro, setNro_siniestro] = useState("");
   const [nro_poliza, setNro_poliza] = useState("");
   const [mecanica_hecho, setMecanica_hecho] = useState("");
+  const [linea_interno, setLinea_interno] = useState("");
+  const [articulo, setArticulo] = useState("");
+  const [intervino, setIntervino] = useState("");
+  const [lesiones_ambos, setLesiones_ambos] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -111,7 +108,14 @@ export default function NuevaMediacionPage() {
   }, [menuOpen]);
 
   function addRequerido() {
-    setRequeridos((prev) => [...prev, { id: crypto.randomUUID(), nombre: "", condicion: "", domicilio: "", lesiones: "", es_aseguradora: false, aseguradora_nombre: "", aseguradora_domicilio: "" }]);
+    setRequeridos((prev) =>
+      prev.length >= 3
+        ? prev
+        : [
+            ...prev,
+            { id: crypto.randomUUID(), nombre: "", empresa_nombre_razon_social: "", domicilio: "", lesiones: "" },
+          ]
+    );
   }
   function removeRequerido(id: string) {
     setRequeridos((prev) => prev.filter((r) => r.id !== id));
@@ -153,6 +157,10 @@ export default function NuevaMediacionPage() {
         nro_siniestro: nro_siniestro.trim() || null,
         nro_poliza: nro_poliza.trim() || null,
         mecanica_hecho: mecanica_hecho.trim() || null,
+        linea_interno: linea_interno.trim() || null,
+        articulo: articulo.trim() || null,
+        intervino: intervino.trim() || null,
+        lesiones_ambos: lesiones_ambos.trim() || null,
       })
       .select("id")
       .single();
@@ -169,15 +177,16 @@ export default function NuevaMediacionPage() {
       actor_id: session.user.id,
     });
 
-    const reqRows = requeridos.filter((r) => r.nombre.trim()).map((r, i) => ({
+    const reqRows = requeridos.filter((r) => r.nombre.trim() || r.empresa_nombre_razon_social.trim()).map((r, i) => ({
       mediacion_id: mediacion.id,
-      nombre: r.nombre.trim(),
-      condicion: r.condicion || null,
+      nombre: r.nombre.trim() || "—",
+      empresa_nombre_razon_social: r.empresa_nombre_razon_social.trim() || null,
+      condicion: null,
       domicilio: r.domicilio.trim() || null,
       lesiones: r.lesiones || null,
-      es_aseguradora: r.es_aseguradora,
-      aseguradora_nombre: r.aseguradora_nombre.trim() || null,
-      aseguradora_domicilio: r.aseguradora_domicilio.trim() || null,
+      es_aseguradora: false,
+      aseguradora_nombre: null,
+      aseguradora_domicilio: null,
       orden: i,
     }));
     if (reqRows.length > 0) {
@@ -257,19 +266,26 @@ export default function NuevaMediacionPage() {
 
           {step === 1 && (
             <div className="form" style={{ maxWidth: 560 }}>
-              <h3 style={{ marginBottom: 16 }}>Datos del letrado</h3>
-              <div className="field"><label className="label">Nombre</label><input className="input" value={letrado_nombre} onChange={(e) => setLetrado_nombre(e.target.value)} /></div>
+              <h3 style={{ marginBottom: 16 }}>DATOS LETRADO REQUIRENTE</h3>
+              <div className="field"><label className="label">Nombre y Apellido</label><input className="input" value={letrado_nombre} onChange={(e) => setLetrado_nombre(e.target.value)} /></div>
               <div className="field"><label className="label">Carácter</label><select className="input" value={letrado_caracter} onChange={(e) => setLetrado_caracter(e.target.value)}><option value="">—</option>{LETRADO_CARACTER.map((c) => <option key={c} value={c}>{c}</option>)}</select></div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <div className="field"><label className="label">Tomo</label><input className="input" value={letrado_tomo} onChange={(e) => setLetrado_tomo(e.target.value)} /></div>
                 <div className="field"><label className="label">Folio</label><input className="input" value={letrado_folio} onChange={(e) => setLetrado_folio(e.target.value)} /></div>
               </div>
               <div className="field"><label className="label">Domicilio profesional</label><input className="input" value={letrado_domicilio} onChange={(e) => setLetrado_domicilio(e.target.value)} /></div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <div className="field"><label className="label">Teléfono</label><input className="input" value={letrado_telefono} onChange={(e) => setLetrado_telefono(e.target.value)} /></div>
-                <div className="field"><label className="label">Celular</label><input className="input" value={letrado_celular} onChange={(e) => setLetrado_celular(e.target.value)} /></div>
+              <div className="field">
+                <label className="label">Teléfono Estudio / Celular</label>
+                <input
+                  className="input"
+                  value={letrado_telefono}
+                  onChange={(e) => {
+                    setLetrado_telefono(e.target.value);
+                    setLetrado_celular(e.target.value);
+                  }}
+                />
               </div>
-              <div className="field"><label className="label">Email</label><input className="input" type="email" value={letrado_email} onChange={(e) => setLetrado_email(e.target.value)} /></div>
+              <div className="field"><label className="label">Mail</label><input className="input" type="email" value={letrado_email} onChange={(e) => setLetrado_email(e.target.value)} /></div>
             </div>
           )}
 
@@ -295,23 +311,13 @@ export default function NuevaMediacionPage() {
                     <span className="label">Requerido</span>
                     <button type="button" className="btn danger" onClick={() => removeRequerido(r.id)} style={{ padding: "4px 10px", fontSize: 12 }}>Quitar</button>
                   </div>
-                  <div className="field"><input className="input" placeholder="Nombre o razón social" value={r.nombre} onChange={(e) => updateRequerido(r.id, "nombre", e.target.value)} /></div>
-                  <div className="field"><select className="input" value={r.condicion} onChange={(e) => updateRequerido(r.id, "condicion", e.target.value)}><option value="">Condición</option>{REQ_CONDICION.map((c) => <option key={c} value={c}>{c}</option>)}</select></div>
+                  <div className="field"><input className="input" placeholder="Nombre y Apellido" value={r.nombre} onChange={(e) => updateRequerido(r.id, "nombre", e.target.value)} /></div>
+                  <div className="field"><input className="input" placeholder="Empresa nombre o razón social" value={r.empresa_nombre_razon_social} onChange={(e) => updateRequerido(r.id, "empresa_nombre_razon_social", e.target.value)} /></div>
                   <div className="field"><input className="input" placeholder="Domicilio" value={r.domicilio} onChange={(e) => updateRequerido(r.id, "domicilio", e.target.value)} /></div>
                   <div className="field"><select className="input" value={r.lesiones} onChange={(e) => updateRequerido(r.id, "lesiones", e.target.value)}><option value="">Lesiones</option>{LESIONES.map((l) => <option key={l} value={l}>{l}</option>)}</select></div>
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
-                    <input type="checkbox" checked={r.es_aseguradora} onChange={(e) => updateRequerido(r.id, "es_aseguradora", e.target.checked)} />
-                    <span>Aseguradora</span>
-                  </label>
-                  {r.es_aseguradora && (
-                    <>
-                      <div className="field" style={{ marginTop: 8 }}><input className="input" placeholder="Nombre aseguradora" value={r.aseguradora_nombre} onChange={(e) => updateRequerido(r.id, "aseguradora_nombre", e.target.value)} /></div>
-                      <div className="field"><input className="input" placeholder="Domicilio aseguradora" value={r.aseguradora_domicilio} onChange={(e) => updateRequerido(r.id, "aseguradora_domicilio", e.target.value)} /></div>
-                    </>
-                  )}
                 </div>
               ))}
-              <button type="button" className="btn" onClick={addRequerido}>+ Agregar otro requerido</button>
+              <button type="button" className="btn" onClick={addRequerido} disabled={requeridos.length >= 3}>+ Agregar otro requerido</button>
             </div>
           )}
 
@@ -323,13 +329,19 @@ export default function NuevaMediacionPage() {
               <div className="field"><label className="label">Lugar</label><input className="input" value={lugar_hecho} onChange={(e) => setLugar_hecho(e.target.value)} /></div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <div className="field"><label className="label">Vehículo</label><input className="input" value={vehiculo} onChange={(e) => setVehiculo(e.target.value)} /></div>
+                <div className="field"><label className="label">Colectivo — Línea e interno</label><input className="input" value={linea_interno} onChange={(e) => setLinea_interno(e.target.value)} /></div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <div className="field"><label className="label">Dominio/Patente</label><input className="input" value={dominio_patente} onChange={(e) => setDominio_patente(e.target.value)} /></div>
+                <div className="field"><label className="label">Art</label><input className="input" value={articulo} onChange={(e) => setArticulo(e.target.value)} /></div>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <div className="field"><label className="label">N° Siniestro</label><input className="input" value={nro_siniestro} onChange={(e) => setNro_siniestro(e.target.value)} /></div>
                 <div className="field"><label className="label">N° Póliza</label><input className="input" value={nro_poliza} onChange={(e) => setNro_poliza(e.target.value)} /></div>
               </div>
               <div className="field"><label className="label">Mecánica del hecho</label><textarea className="input" rows={4} value={mecanica_hecho} onChange={(e) => setMecanica_hecho(e.target.value)} placeholder="Describa brevemente el hecho..." /></div>
+              <div className="field"><label className="label">Intervino</label><input className="input" value={intervino} onChange={(e) => setIntervino(e.target.value)} placeholder="Ej: policía, ambulancia, bomberos" /></div>
+              <div className="field"><label className="label">Lesiones de ambos</label><textarea className="input" rows={3} value={lesiones_ambos} onChange={(e) => setLesiones_ambos(e.target.value)} /></div>
             </div>
           )}
 

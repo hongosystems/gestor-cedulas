@@ -130,6 +130,10 @@ export async function PATCH(
       nro_siniestro,
       nro_poliza,
       mecanica_hecho,
+      linea_interno,
+      articulo,
+      intervino,
+      lesiones_ambos,
       requeridos,
     } = body;
 
@@ -158,6 +162,10 @@ export async function PATCH(
     if (nro_siniestro !== undefined) updatePayload.nro_siniestro = nro_siniestro;
     if (nro_poliza !== undefined) updatePayload.nro_poliza = nro_poliza;
     if (mecanica_hecho !== undefined) updatePayload.mecanica_hecho = mecanica_hecho;
+    if (linea_interno !== undefined) updatePayload.linea_interno = linea_interno;
+    if (articulo !== undefined) updatePayload.articulo = articulo;
+    if (intervino !== undefined) updatePayload.intervino = intervino;
+    if (lesiones_ambos !== undefined) updatePayload.lesiones_ambos = lesiones_ambos;
 
     if (estado !== undefined && estado !== existing.estado) {
       await svc.from("mediacion_historial").insert({
@@ -184,6 +192,7 @@ export async function PATCH(
         const rows = requeridos.map((r: any, i: number) => ({
           mediacion_id: id,
           nombre: r.nombre ?? "",
+          empresa_nombre_razon_social: r.empresa_nombre_razon_social ?? null,
           condicion: r.condicion ?? null,
           domicilio: r.domicilio ?? null,
           lesiones: r.lesiones ?? null,

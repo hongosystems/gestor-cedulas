@@ -13,104 +13,134 @@ async function requireAdmin(
   return isAdminMediaciones || isSuperadmin;
 }
 
-const REMITENTE = "Dr. Adrián Bustinduy — Paraná 785 4° Piso B, CABA (1017)";
 const NOMBRE_MEDIADOR = "Dr. Adrián Bustinduy";
+const MATRICULA_MEDIADOR = "Mediador M.J. 1562";
 
-const TEXTO_MEDIACION_PREJUDICIAL =
-  "Por la presente se realiza la presente solicitud de mediación prejudicial obligatoria en los términos de la Ley 26.589 y normas complementarias. " +
-  "Se requiere la designación de fecha de audiencia a los efectos de intentar un acuerdo que evite la vía judicial.";
+function isoToDDMMAAAA(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = String(iso).substring(0, 10);
+  const parts = d.split("-");
+  if (parts.length !== 3) return String(iso);
+  const [y, m, day] = parts;
+  return `${day}/${m}/${y}`;
+}
 
-function buildCartaDocumentoPdf(mediacion: any, requeridos: any[]): Buffer {
+function buildFormularioMediacionPdf(mediacion: any, requeridos: any[]): Buffer {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 20;
+  const footerReservedMm = 20; // Reserva vertical para que el pie de pagina no se solape
+  const usableBottom = pageHeight - margin - footerReservedMm;
   let y = margin;
 
-  const font = (size: number, bold: boolean = false) => {
+  const setFont = (size: number, bold: boolean = false) => {
     doc.setFontSize(size);
-    doc.setFont("helvetica", bold ? "bold" : "normal");
+    doc.setFont("times", bold ? "bold" : "normal");
   };
 
-  // ——— Encabezado ———
-  font(16, true);
-  doc.text("CARTA DOCUMENTO", pageWidth / 2, y, { align: "center" });
-  y += 14;
+  const ensureSpace = (needed: number) => {
+    if (y + needed > usableBottom) {
+      doc.addPage();
+      y = margin;
+    }
+  };
 
-  font(9, false);
-  doc.text(`Nº Trámite: ${mediacion.numero_tramite || "—"}`, margin, y);
-  y += 8;
-
-  // ——— Remitente ———
-  font(10, true);
-  doc.text("Remitente:", margin, y);
-  y += 6;
-  font(10, false);
-  doc.text(REMITENTE, margin, y);
-  y += 10;
-
-  // ——— Destinatario (primer requerido) ———
-  font(10, true);
-  doc.text("Destinatario:", margin, y);
-  y += 6;
-  font(10, false);
-  const primerRequerido = requeridos && requeridos[0];
-  if (primerRequerido) {
-    doc.text(primerRequerido.nombre || "—", margin, y);
-    y += 6;
-    if (primerRequerido.domicilio && String(primerRequerido.domicilio).trim()) {
-      doc.text(String(primerRequerido.domicilio).trim(), margin, y);
+  const line = (text: string, bold: boolean = false, size: number = 11) => {
+    setFont(size, bold);
+    const maxWidth = pageWidth - 2 * margin;
+    const parts = doc.splitTextToSize(text, maxWidth);
+    ensureSpace(parts.length * 6 + 2);
+    for (const part of parts) {
+      doc.text(part, margin, y);
       y += 6;
     }
-    if (primerRequerido.condicion && String(primerRequerido.condicion).trim()) {
-      doc.text(`Condición: ${String(primerRequerido.condicion).trim()}`, margin, y);
-      y += 6;
-    }
-  } else {
-    doc.text("—", margin, y);
-    y += 6;
-  }
-  y += 8;
+  };
 
-  // ——— Cuerpo: mediación prejudicial, Ley 26.589, tipo de reclamo, fecha y lugar ———
-  font(10, true);
-  doc.text("Cuerpo:", margin, y);
+  const centered = (text: string, bold: boolean = false, size: number = 14) => {
+    ensureSpace(10);
+    setFont(size, bold);
+    doc.text(text, pageWidth / 2, y, { align: "center" });
+    y += 10;
+  };
+
+  const v = (val: any) => (val === null || val === undefined ? "" : String(val));
+
+  centered("FORMULARIO DE MEDIACION", true, 16);
+  y -= 2;
+
+  // DATOS LETRADO REQUIRENTE
+  line("DATOS LETRADO REQUIRENTE", true, 12);
+  line(`Nombre y Apellido: ${v(mediacion.letrado_nombre)}`, false, 11);
+  ensureSpace(6);
+  setFont(11, false);
+  doc.text(`Tomo: ${v(mediacion.letrado_tomo)}`, margin, y);
+  doc.text(`Folio: ${v(mediacion.letrado_folio)}`, margin + 70, y);
   y += 6;
-  font(10, false);
-  const lineHeight = 6;
-  const maxWidth = pageWidth - 2 * margin;
-  const parrafos: string[] = [
-    TEXTO_MEDIACION_PREJUDICIAL,
-    `Tipo de reclamo: ${mediacion.objeto_reclamo || "—"}.`,
-    `Fecha del hecho: ${mediacion.fecha_hecho || "—"}.`,
-    `Lugar del hecho: ${mediacion.lugar_hecho || "—"}.`,
-  ];
-  for (const str of parrafos) {
-    const lines = doc.splitTextToSize(str, maxWidth);
-    for (const line of lines) {
-      if (y > pageHeight - 35) {
-        doc.addPage();
-        y = margin;
-      }
-      doc.text(line, margin, y);
-      y += lineHeight;
-    }
-    y += 2;
-  }
-  y += 8;
-
-  // ——— Pie: línea de firma con nombre del mediador ———
-  if (y > pageHeight - 40) {
-    doc.addPage();
-    y = margin;
-  }
-  doc.setDrawColor(0, 0, 0);
-  doc.line(margin, y, margin + 60, y);
-  y += 2;
-  font(9, false);
-  doc.text(NOMBRE_MEDIADOR, margin, y);
+  line(`Domicilio: ${v(mediacion.letrado_domicilio)}`, false, 11);
+  line(`Teléfono Estudio / Celular: ${v(mediacion.letrado_telefono) || v(mediacion.letrado_celular)}`, false, 11);
+  line(`Mail: ${v(mediacion.letrado_email)}`, false, 11);
   y += 4;
-  doc.text("Mediador", margin, y);
+
+  // DATOS REQUIRENTE/S
+  line("DATOS REQUIRENTE/S", true, 12);
+  line(`    A. Nombre y apellido del requirente: ${v(mediacion.req_nombre)}`, false, 11);
+  line(`    B. DNI del requirente: ${v(mediacion.req_dni)}`, false, 11);
+  line(`    C. Domicilio real del requirente: ${v(mediacion.req_domicilio)}`, false, 11);
+  line(`    D. Correo electrónico personal del requirente: ${v(mediacion.req_email)}`, false, 11);
+  line(`    E. Celular personal del requirente: ${v(mediacion.req_celular)}`, false, 11);
+  y += 2;
+  line(`- Nombre y Apellido: ${v(mediacion.req_nombre)}`, false, 11);
+  line(`(Empresa nombre o razón social):`, false, 11);
+  y += 4;
+
+  // DATOS REQUERIDO/S (siempre 3 bloques)
+  line("DATOS REQUERIDO/S", true, 12);
+  for (let i = 0; i < 3; i++) {
+    const r = requeridos?.[i] || {};
+    line(`- Nombre y Apellido: ${v(r.nombre)}`, false, 11);
+    line(`(Empresa nombre o razón social): ${v(r.empresa_nombre_razon_social)}`, false, 11);
+    y += 2;
+    line(`Domicilio: ${v(r.domicilio)}`, false, 11);
+    y += 2;
+    line(`Lesiones: ${v(r.lesiones)}`, false, 11);
+    y += 4;
+  }
+
+  ensureSpace(10);
+  setFont(10, false);
+  // String suficientemente corto como para no salirse del ancho
+  doc.text("-".repeat(80), margin, y);
+  y += 8;
+
+  // Bloque hecho/reclamo
+  line(`Objeto del reclamo: ${v(mediacion.objeto_reclamo)}`, false, 11);
+  line(`Fecha del Hecho: ${isoToDDMMAAAA(mediacion.fecha_hecho)}`, false, 11);
+  line(`Lugar del Hecho: ${v(mediacion.lugar_hecho)}`, false, 11);
+  line(`Vehiculo: ${v(mediacion.vehiculo)}`, false, 11);
+  line(`(Colectivo agregar Línea e interno): ${v(mediacion.linea_interno)}`, false, 11);
+  line(`Dominio: ${v(mediacion.dominio_patente)}`, false, 11);
+  line(`Nº de Siniestro: ${v(mediacion.nro_siniestro)}`, false, 11);
+  y += 2;
+  line(`Póliza: ${v(mediacion.nro_poliza)}`, false, 11);
+  y += 4;
+
+  // Sección final
+  line(`Art: ${v(mediacion.articulo)}`, false, 11);
+  y += 2;
+  line(`Mecánica: ${v(mediacion.mecanica_hecho)}`, false, 11);
+  y += 2;
+  line(`Intervino: ${v(mediacion.intervino)}`, false, 11);
+  y += 2;
+  line(`Lesiones de ambos: ${v(mediacion.lesiones_ambos)}`, false, 11);
+
+  // Pie de pagina centrado (siempre al final para no romper el contenido)
+  const footerY1 = usableBottom + footerReservedMm - 10;
+  doc.setFontSize(12);
+  doc.setFont("times", "normal");
+  doc.text(NOMBRE_MEDIADOR, pageWidth / 2, footerY1, { align: "center" });
+  doc.setFontSize(11);
+  doc.text(MATRICULA_MEDIADOR, pageWidth / 2, footerY1 + 6, { align: "center" });
 
   return Buffer.from(doc.output("arraybuffer"));
 }
@@ -134,7 +164,7 @@ export async function POST(
 
     const { id: mediacionId } = await params;
     const body = await req.json().catch(() => ({}));
-    const tipo_plantilla = body.tipo_plantilla || "carta_documento";
+    const tipo_plantilla = body.tipo_plantilla || "formulario_mediacion";
     const modo_firma = body.modo_firma || "sin_firma";
 
     const svc = supabaseService();
@@ -158,7 +188,7 @@ export async function POST(
       .eq("mediacion_id", mediacionId)
       .order("orden");
 
-    const pdfBuffer = buildCartaDocumentoPdf(mediacion, requeridos || []);
+    const pdfBuffer = buildFormularioMediacionPdf(mediacion, requeridos || []);
 
     const fileName = safeFileName(mediacion.numero_tramite, mediacionId);
     const storagePath = `${mediacionId}/${fileName}`;

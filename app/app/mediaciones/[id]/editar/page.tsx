@@ -40,12 +40,9 @@ function ddmmaaaaToISO(ddmmaaaa: string): string | null {
 type Requerido = {
   id: string;
   nombre: string;
-  condicion: string;
+  empresa_nombre_razon_social: string;
   domicilio: string;
   lesiones: string;
-  es_aseguradora: boolean;
-  aseguradora_nombre: string;
-  aseguradora_domicilio: string;
 };
 
 async function requireSessionOrRedirect() {
@@ -88,6 +85,10 @@ export default function EditarMediacionPage() {
   const [nro_siniestro, setNro_siniestro] = useState("");
   const [nro_poliza, setNro_poliza] = useState("");
   const [mecanica_hecho, setMecanica_hecho] = useState("");
+  const [linea_interno, setLinea_interno] = useState("");
+  const [articulo, setArticulo] = useState("");
+  const [intervino, setIntervino] = useState("");
+  const [lesiones_ambos, setLesiones_ambos] = useState("");
   const [requeridos, setRequeridos] = useState<Requerido[]>([]);
 
   useEffect(() => {
@@ -127,19 +128,20 @@ export default function EditarMediacionPage() {
       setNro_siniestro(m.nro_siniestro || "");
       setNro_poliza(m.nro_poliza || "");
       setMecanica_hecho(m.mecanica_hecho || "");
+      setLinea_interno(m.linea_interno || "");
+      setArticulo(m.articulo || "");
+      setIntervino(m.intervino || "");
+      setLesiones_ambos(m.lesiones_ambos || "");
       setRequeridos(
         (m.requeridos || []).length > 0
           ? (m.requeridos || []).map((r: any, i: number) => ({
               id: r.id || String(i),
               nombre: r.nombre || "",
-              condicion: r.condicion || "",
+              empresa_nombre_razon_social: r.empresa_nombre_razon_social || "",
               domicilio: r.domicilio || "",
               lesiones: r.lesiones || "",
-              es_aseguradora: r.es_aseguradora === true,
-              aseguradora_nombre: r.aseguradora_nombre || "",
-              aseguradora_domicilio: r.aseguradora_domicilio || "",
             }))
-          : [{ id: "1", nombre: "", condicion: "", domicilio: "", lesiones: "", es_aseguradora: false, aseguradora_nombre: "", aseguradora_domicilio: "" }]
+          : [{ id: "1", nombre: "", empresa_nombre_razon_social: "", domicilio: "", lesiones: "" }]
       );
       setLoading(false);
     })();
@@ -153,7 +155,14 @@ export default function EditarMediacionPage() {
   }, [menuOpen]);
 
   function addRequerido() {
-    setRequeridos((prev) => [...prev, { id: crypto.randomUUID(), nombre: "", condicion: "", domicilio: "", lesiones: "", es_aseguradora: false, aseguradora_nombre: "", aseguradora_domicilio: "" }]);
+    setRequeridos((prev) =>
+      prev.length >= 3
+        ? prev
+        : [
+            ...prev,
+            { id: crypto.randomUUID(), nombre: "", empresa_nombre_razon_social: "", domicilio: "", lesiones: "" },
+          ]
+    );
   }
   function removeRequerido(rid: string) {
     setRequeridos((prev) => prev.filter((r) => r.id !== rid));
@@ -189,11 +198,23 @@ export default function EditarMediacionPage() {
       fecha_hecho: ddmmaaaaToISO(fecha_hecho) || null,
       lugar_hecho: lugar_hecho.trim() || null,
       vehiculo: vehiculo.trim() || null,
+      linea_interno: linea_interno.trim() || null,
       dominio_patente: dominio_patente.trim() || null,
       nro_siniestro: nro_siniestro.trim() || null,
       nro_poliza: nro_poliza.trim() || null,
+      articulo: articulo.trim() || null,
       mecanica_hecho: mecanica_hecho.trim() || null,
-      requeridos: requeridos.filter((r) => r.nombre.trim()).map((r, i) => ({ nombre: r.nombre.trim(), condicion: r.condicion || null, domicilio: r.domicilio.trim() || null, lesiones: r.lesiones || null, es_aseguradora: r.es_aseguradora, aseguradora_nombre: r.aseguradora_nombre.trim() || null, aseguradora_domicilio: r.aseguradora_domicilio.trim() || null, orden: i })),
+      intervino: intervino.trim() || null,
+      lesiones_ambos: lesiones_ambos.trim() || null,
+      requeridos: requeridos
+        .filter((r) => r.nombre.trim() || r.empresa_nombre_razon_social.trim())
+        .map((r, i) => ({
+          nombre: r.nombre.trim() || "—",
+          empresa_nombre_razon_social: r.empresa_nombre_razon_social.trim() || null,
+          domicilio: r.domicilio.trim() || null,
+          lesiones: r.lesiones || null,
+          orden: i,
+        })),
     };
 
     const res = await fetch(`/api/mediaciones/${id}`, {
@@ -293,13 +314,19 @@ export default function EditarMediacionPage() {
             <div className="field"><label className="label">Lugar</label><input className="input" value={lugar_hecho} onChange={(e) => setLugar_hecho(e.target.value)} /></div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <div className="field"><label className="label">Vehículo</label><input className="input" value={vehiculo} onChange={(e) => setVehiculo(e.target.value)} /></div>
+              <div className="field"><label className="label">Colectivo — Línea e interno</label><input className="input" value={linea_interno} onChange={(e) => setLinea_interno(e.target.value)} /></div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <div className="field"><label className="label">Dominio/Patente</label><input className="input" value={dominio_patente} onChange={(e) => setDominio_patente(e.target.value)} /></div>
+              <div className="field"><label className="label">Art</label><input className="input" value={articulo} onChange={(e) => setArticulo(e.target.value)} /></div>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <div className="field"><label className="label">Nº Siniestro</label><input className="input" value={nro_siniestro} onChange={(e) => setNro_siniestro(e.target.value)} /></div>
               <div className="field"><label className="label">Nº Póliza</label><input className="input" value={nro_poliza} onChange={(e) => setNro_poliza(e.target.value)} /></div>
             </div>
             <div className="field"><label className="label">Mecánica del hecho</label><textarea className="input" rows={2} value={mecanica_hecho} onChange={(e) => setMecanica_hecho(e.target.value)} /></div>
+            <div className="field"><label className="label">Intervino</label><input className="input" value={intervino} onChange={(e) => setIntervino(e.target.value)} placeholder="Ej: policía, ambulancia, bomberos" /></div>
+            <div className="field"><label className="label">Lesiones de ambos</label><textarea className="input" rows={3} value={lesiones_ambos} onChange={(e) => setLesiones_ambos(e.target.value)} /></div>
 
             <h3 style={{ marginTop: 24, marginBottom: 12 }}>Requeridos</h3>
             {requeridos.map((r) => (
@@ -308,23 +335,13 @@ export default function EditarMediacionPage() {
                   <span className="label">Requerido</span>
                   <button type="button" className="btn danger" onClick={() => removeRequerido(r.id)} style={{ padding: "4px 10px", fontSize: 12 }}>Quitar</button>
                 </div>
-                <div className="field"><input className="input" placeholder="Nombre" value={r.nombre} onChange={(e) => updateRequerido(r.id, "nombre", e.target.value)} /></div>
-                <div className="field"><select className="input" value={r.condicion} onChange={(e) => updateRequerido(r.id, "condicion", e.target.value)}><option value="">Condición</option>{REQ_CONDICION.map((c) => <option key={c} value={c}>{c}</option>)}</select></div>
+                <div className="field"><input className="input" placeholder="Nombre y Apellido" value={r.nombre} onChange={(e) => updateRequerido(r.id, "nombre", e.target.value)} /></div>
+                <div className="field"><input className="input" placeholder="Empresa nombre o razón social" value={r.empresa_nombre_razon_social} onChange={(e) => updateRequerido(r.id, "empresa_nombre_razon_social", e.target.value)} /></div>
                 <div className="field"><input className="input" placeholder="Domicilio" value={r.domicilio} onChange={(e) => updateRequerido(r.id, "domicilio", e.target.value)} /></div>
                 <div className="field"><select className="input" value={r.lesiones} onChange={(e) => updateRequerido(r.id, "lesiones", e.target.value)}><option value="">Lesiones</option>{LESIONES.map((l) => <option key={l} value={l}>{l}</option>)}</select></div>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
-                  <input type="checkbox" checked={r.es_aseguradora} onChange={(e) => updateRequerido(r.id, "es_aseguradora", e.target.checked)} />
-                  <span>Es aseguradora</span>
-                </label>
-                {r.es_aseguradora && (
-                  <>
-                    <div className="field" style={{ marginTop: 8 }}><input className="input" placeholder="Aseguradora nombre" value={r.aseguradora_nombre} onChange={(e) => updateRequerido(r.id, "aseguradora_nombre", e.target.value)} /></div>
-                    <div className="field"><input className="input" placeholder="Aseguradora domicilio" value={r.aseguradora_domicilio} onChange={(e) => updateRequerido(r.id, "aseguradora_domicilio", e.target.value)} /></div>
-                  </>
-                )}
               </div>
             ))}
-            <button type="button" className="btn" onClick={addRequerido}>+ Agregar requerido</button>
+            <button type="button" className="btn" onClick={addRequerido} disabled={requeridos.length >= 3}>+ Agregar requerido</button>
 
             <div className="actions" style={{ marginTop: 24 }}>
               <button type="submit" className="btn primary" disabled={saving}>{saving ? "Guardando…" : "Guardar"}</button>
