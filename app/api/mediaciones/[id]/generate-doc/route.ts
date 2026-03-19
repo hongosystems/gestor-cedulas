@@ -71,14 +71,22 @@ function buildFormularioMediacionPdf(mediacion: any, requeridos: any[]): Buffer 
 
   // DATOS LETRADO REQUIRENTE
   line("DATOS LETRADO REQUIRENTE", true, 12);
-  line(`Nombre y Apellido: ${v(mediacion.letrado_nombre)}`, false, 11);
+  line(
+    `Nombre y Apellido: ${v(mediacion.letrado_nombre)}${mediacion.letrado_caracter ? ` (${v(mediacion.letrado_caracter)})` : ""}`,
+    false,
+    11
+  );
   ensureSpace(6);
   setFont(11, false);
   doc.text(`Tomo: ${v(mediacion.letrado_tomo)}`, margin, y);
   doc.text(`Folio: ${v(mediacion.letrado_folio)}`, margin + 70, y);
   y += 6;
   line(`Domicilio: ${v(mediacion.letrado_domicilio)}`, false, 11);
-  line(`Teléfono Estudio / Celular: ${v(mediacion.letrado_telefono) || v(mediacion.letrado_celular)}`, false, 11);
+  const telefonoCelular = [mediacion.letrado_telefono, mediacion.letrado_celular]
+    .filter((x: any) => x !== null && x !== undefined && String(x).trim() !== "")
+    .map((x: any) => String(x).trim())
+    .join(" · ");
+  line(`Teléfono Estudio / Celular: ${telefonoCelular || "—"}`, false, 11);
   line(`Mail: ${v(mediacion.letrado_email)}`, false, 11);
   y += 4;
 
@@ -89,21 +97,21 @@ function buildFormularioMediacionPdf(mediacion: any, requeridos: any[]): Buffer 
   line(`    C. Domicilio real del requirente: ${v(mediacion.req_domicilio)}`, false, 11);
   line(`    D. Correo electrónico personal del requirente: ${v(mediacion.req_email)}`, false, 11);
   line(`    E. Celular personal del requirente: ${v(mediacion.req_celular)}`, false, 11);
-  y += 2;
-  line(`- Nombre y Apellido: ${v(mediacion.req_nombre)}`, false, 11);
-  line(`(Empresa nombre o razón social):`, false, 11);
   y += 4;
 
-  // DATOS REQUERIDO/S (siempre 3 bloques)
+  // DATOS REQUERIDO/S (mismo "cantidad de cards" que el formulario)
   line("DATOS REQUERIDO/S", true, 12);
-  for (let i = 0; i < 3; i++) {
-    const r = requeridos?.[i] || {};
+  const requeridosList = Array.isArray(requeridos) ? requeridos : [];
+  const requeridosCount = Math.max(1, requeridosList.length);
+  for (let i = 0; i < requeridosCount; i++) {
+    const r = requeridosList[i] || {};
     line(`- Nombre y Apellido: ${v(r.nombre)}`, false, 11);
     line(`(Empresa nombre o razón social): ${v(r.empresa_nombre_razon_social)}`, false, 11);
     y += 2;
     line(`Domicilio: ${v(r.domicilio)}`, false, 11);
     y += 2;
-    line(`Lesiones: ${v(r.lesiones)}`, false, 11);
+    const lesionesTexto = r.lesiones == null || String(r.lesiones).trim() === "" ? "Lesiones" : String(r.lesiones);
+    line(`Lesiones: ${lesionesTexto}`, false, 11);
     y += 4;
   }
 

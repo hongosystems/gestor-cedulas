@@ -177,7 +177,7 @@ export default function NuevaMediacionPage() {
       actor_id: session.user.id,
     });
 
-    const reqRows = requeridos.filter((r) => r.nombre.trim() || r.empresa_nombre_razon_social.trim()).map((r, i) => ({
+    const reqRows = requeridos.map((r, i) => ({
       mediacion_id: mediacion.id,
       nombre: r.nombre.trim() || "—",
       empresa_nombre_razon_social: r.empresa_nombre_razon_social.trim() || null,
@@ -350,10 +350,49 @@ export default function NuevaMediacionPage() {
               <h3 style={{ marginBottom: 16 }}>Revisión</h3>
               <div style={{ background: "rgba(0,0,0,.15)", borderRadius: 12, padding: 20, marginBottom: 20 }}>
                 <p><strong>Letrado:</strong> {letrado_nombre || "—"} {letrado_caracter && `(${letrado_caracter})`}</p>
-                <p><strong>Requirente:</strong> {req_nombre || "—"} {req_dni && `DNI ${req_dni}`}</p>
-                <p><strong>Requeridos:</strong> {requeridos.filter((r) => r.nombre.trim()).map((r) => r.nombre).join(", ") || "—"}</p>
-                <p><strong>Objeto:</strong> {objeto_reclamo || "—"}</p>
-                <p><strong>Fecha hecho:</strong> {fecha_hecho || "—"}</p>
+                <p><strong>Tomo/Folio:</strong> {letrado_tomo || "—"} / {letrado_folio || "—"}</p>
+                <p><strong>Domicilio profesional:</strong> {letrado_domicilio || "—"}</p>
+                <p><strong>Teléfono Estudio / Celular:</strong> {[letrado_telefono, letrado_celular].filter(Boolean).join(" · ") || "—"}</p>
+                <p><strong>Mail:</strong> {letrado_email || "—"}</p>
+
+                <div style={{ height: 10 }} />
+
+                <p><strong>Requirente:</strong></p>
+                <p style={{ marginLeft: 14 }}><strong>Nombre y apellido:</strong> {req_nombre || "—"}</p>
+                <p style={{ marginLeft: 14 }}><strong>DNI:</strong> {req_dni || "—"}</p>
+                <p style={{ marginLeft: 14 }}><strong>Domicilio real:</strong> {req_domicilio || "—"}</p>
+                <p style={{ marginLeft: 14 }}><strong>Email:</strong> {req_email || "—"}</p>
+                <p style={{ marginLeft: 14 }}><strong>Celular:</strong> {req_celular || "—"}</p>
+
+                <div style={{ height: 10 }} />
+
+                <p><strong>Requeridos:</strong></p>
+                <div style={{ marginLeft: 14 }}>
+                  {requeridos.map((r) => (
+                    <div key={r.id} style={{ marginBottom: 8 }}>
+                      <p><strong>Nombre y Apellido:</strong> {r.nombre.trim() || "Nombre y Apellido"}</p>
+                      <p><strong>Empresa:</strong> {r.empresa_nombre_razon_social.trim() || "Empresa nombre o razón social"}</p>
+                      <p><strong>Domicilio:</strong> {r.domicilio.trim() || "Domicilio"}</p>
+                      <p><strong>Lesiones:</strong> {r.lesiones.trim() || "Lesiones"}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ height: 10 }} />
+
+                <p><strong>Hecho y reclamo:</strong></p>
+                <p style={{ marginLeft: 14 }}><strong>Objeto del reclamo:</strong> {objeto_reclamo || "—"}</p>
+                <p style={{ marginLeft: 14 }}><strong>Fecha del hecho:</strong> {fecha_hecho || "—"}</p>
+                <p style={{ marginLeft: 14 }}><strong>Lugar:</strong> {lugar_hecho || "—"}</p>
+                <p style={{ marginLeft: 14 }}><strong>Vehículo:</strong> {vehiculo || "—"}</p>
+                <p style={{ marginLeft: 14 }}><strong>Línea/Interno:</strong> {linea_interno || "—"}</p>
+                <p style={{ marginLeft: 14 }}><strong>Dominio/Patente:</strong> {dominio_patente || "—"}</p>
+                <p style={{ marginLeft: 14 }}><strong>Art:</strong> {articulo || "—"}</p>
+                <p style={{ marginLeft: 14 }}><strong>N° Siniestro:</strong> {nro_siniestro || "—"}</p>
+                <p style={{ marginLeft: 14 }}><strong>N° Póliza:</strong> {nro_poliza || "—"}</p>
+                <p style={{ marginLeft: 14 }}><strong>Mecánica del hecho:</strong> {mecanica_hecho || "—"}</p>
+                <p style={{ marginLeft: 14 }}><strong>Intervino:</strong> {intervino || "—"}</p>
+                <p style={{ marginLeft: 14 }}><strong>Lesiones de ambos:</strong> {lesiones_ambos || "—"}</p>
               </div>
               <button className="btn primary" onClick={enviarSolicitud} disabled={saving} style={{ padding: "12px 24px", fontSize: 16 }}>{saving ? "Enviando…" : "Enviar solicitud"}</button>
             </div>

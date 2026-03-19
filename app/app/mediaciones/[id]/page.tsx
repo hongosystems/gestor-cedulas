@@ -418,6 +418,7 @@ export default function MediacionDetailPage() {
                       <li key={r.id || i}>
                         {r.nombre}
                         {r.empresa_nombre_razon_social && ` · ${r.empresa_nombre_razon_social}`}
+                        {r.domicilio && ` · Domicilio: ${r.domicilio}`}
                         {r.lesiones && ` · Lesiones: ${r.lesiones}`}
                       </li>
                     ))}

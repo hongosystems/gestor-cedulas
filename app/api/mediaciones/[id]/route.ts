@@ -215,3 +215,40 @@ export async function PATCH(
     );
   }
 }
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const user = await getUserFromRequest(req);
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { id } = await params;
+    const svc = supabaseService();
+
+    const { data: existing, error: existingErr } = await svc.from("mediaciones").select("id").eq("id", id).single();
+    if (existingErr || !existing) {
+      return NextResponse.json({ error: "Mediación no encontrada" }, { status: 404 });
+    }
+
+    if (!(await requireAdmin(user.id, svc))) {
+      return NextResponse.json({ error: "Solo administradores de mediaciones" }, { status: 403 });
+    }
+
+    const { error: deleteErr } = await svc.from("mediaciones").delete().eq("id", id);
+    if (deleteErr) {
+      return NextResponse.json({ error: deleteErr.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ ok: true });
+  } catch (e: any) {
+    console.error("[mediaciones/[id]] DELETE", e);
+    return NextResponse.json(
+      { error: e?.message || "Error desconocido" },
+      { status: 500 }
+    );
+  }
+}

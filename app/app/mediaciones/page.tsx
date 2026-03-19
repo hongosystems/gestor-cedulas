@@ -150,6 +150,36 @@ export default function MediacionesPage() {
     window.location.href = "/login";
   }
 
+  async function borrarMediacion(id: string, numeroTramite: string | null) {
+    const ok = window.confirm(`¿Desea borrar la mediación ${numeroTramite || id}?`);
+    if (!ok) return;
+
+    setMsg("");
+    try {
+      const session = await supabase.auth.getSession();
+      const token = session.data.session?.access_token;
+      if (!token) {
+        setMsg("Sesión expirada. Iniciá sesión nuevamente.");
+        return;
+      }
+
+      const res = await fetch(`/api/mediaciones/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const json = await res.json().catch(() => ({} as any));
+      if (!res.ok) {
+        setMsg(json.error || "Error al borrar la mediación");
+        return;
+      }
+
+      setRows((prev) => prev.filter((x) => x.id !== id));
+    } catch {
+      setMsg("Error al borrar la mediación");
+    }
+  }
+
   if (loading) {
     return (
       <main className="container">
@@ -277,6 +307,7 @@ export default function MediacionesPage() {
                   <th>Tipo</th>
                   <th>Estado</th>
                   <th>Fecha</th>
+                  <th style={{ width: 44 }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -298,11 +329,27 @@ export default function MediacionesPage() {
                     <td style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.objeto_reclamo || ""}>{r.objeto_reclamo || "—"}</td>
                     <td><span style={badgeStyle(r.estado)}>{r.estado.replace(/_/g, " ")}</span></td>
                     <td>{formatDate(r.created_at)}</td>
+                    <td style={{ textAlign: "right" }}>
+                      <button
+                        type="button"
+                        title="Borrar mediación"
+                        aria-label="Borrar mediación"
+                        className="btn danger"
+                        style={{ padding: "6px 10px", minWidth: 44 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          borrarMediacion(r.id, r.numero_tramite);
+                        }}
+                      >
+                        🗑️
+                      </button>
+                    </td>
                   </tr>
                 ))}
                 {filteredRows.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="muted">No hay mediaciones con los filtros aplicados.</td>
+                    <td colSpan={6} className="muted">No hay mediaciones con los filtros aplicados.</td>
                   </tr>
                 )}
               </tbody>
