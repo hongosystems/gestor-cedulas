@@ -70,7 +70,19 @@ async function requireSessionOrRedirect() {
   return data.session;
 }
 
-function Section({ title, open, onToggle, children }: { title: string; open: boolean; onToggle: () => void; children: React.ReactNode }) {
+function Section({
+  title,
+  open,
+  onToggle,
+  children,
+  editHref,
+}: {
+  title: string;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+  editHref?: string;
+}) {
   return (
     <div style={{ border: "1px solid var(--border)", borderRadius: 12, marginBottom: 12, overflow: "hidden" }}>
       <button
@@ -90,8 +102,38 @@ function Section({ title, open, onToggle, children }: { title: string; open: boo
           alignItems: "center",
         }}
       >
-        {title}
-        <span style={{ fontSize: 18 }}>{open ? "−" : "+"}</span>
+        <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+          <span>{title}</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {editHref && (
+              <Link
+                href={editHref}
+                aria-label="Editar mediación"
+                title="Editar"
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 22,
+                  height: 22,
+                  borderRadius: 8,
+                  background: "rgba(255,255,255,.06)",
+                  border: "1px solid rgba(255,255,255,.16)",
+                  color: "var(--text)",
+                  textDecoration: "none",
+                  cursor: "pointer",
+                  userSelect: "none",
+                  fontSize: 14,
+                  lineHeight: "22px",
+                }}
+              >
+                ✏️
+              </Link>
+            )}
+            <span style={{ fontSize: 18 }}>{open ? "−" : "+"}</span>
+          </span>
+        </span>
       </button>
       {open && <div style={{ padding: "16px 18px", borderTop: "1px solid var(--border)" }}>{children}</div>}
     </div>
@@ -356,20 +398,20 @@ export default function MediacionDetailPage() {
                 </div>
               )}
 
-              <Section title="Letrado" open={openLetrado} onToggle={() => setOpenLetrado(!openLetrado)}>
+              <Section title="Letrado" open={openLetrado} onToggle={() => setOpenLetrado(!openLetrado)} editHref={`/app/mediaciones/${id}/editar`}>
                 <p><strong>{mediacion.letrado_nombre || "—"}</strong> {mediacion.letrado_caracter && `(${mediacion.letrado_caracter})`}</p>
                 <p className="muted">Tomo/Folio: {mediacion.letrado_tomo && mediacion.letrado_folio ? `${mediacion.letrado_tomo} / ${mediacion.letrado_folio}` : "—"}</p>
                 <p className="muted">{mediacion.letrado_domicilio || "—"}</p>
                 <p className="muted">{[mediacion.letrado_telefono, mediacion.letrado_celular, mediacion.letrado_email].filter(Boolean).join(" · ") || "—"}</p>
               </Section>
 
-              <Section title="Requirente" open={openRequirente} onToggle={() => setOpenRequirente(!openRequirente)}>
+              <Section title="Requirente" open={openRequirente} onToggle={() => setOpenRequirente(!openRequirente)} editHref={`/app/mediaciones/${id}/editar`}>
                 <p><strong>{mediacion.req_nombre || "—"}</strong> {mediacion.req_dni && `DNI ${mediacion.req_dni}`}</p>
                 <p className="muted">{mediacion.req_domicilio || "—"}</p>
                 <p className="muted">{[mediacion.req_email, mediacion.req_celular].filter(Boolean).join(" · ") || "—"}</p>
               </Section>
 
-              <Section title="Requerido/s" open={openRequeridos} onToggle={() => setOpenRequeridos(!openRequeridos)}>
+              <Section title="Requerido/s" open={openRequeridos} onToggle={() => setOpenRequeridos(!openRequeridos)} editHref={`/app/mediaciones/${id}/editar`}>
                 {(mediacion.requeridos || []).length === 0 ? <p className="muted">—</p> : (
                   <ul style={{ paddingLeft: 20, margin: 0 }}>
                     {(mediacion.requeridos || []).map((r: any, i: number) => (
@@ -383,7 +425,7 @@ export default function MediacionDetailPage() {
                 )}
               </Section>
 
-              <Section title="Hecho y reclamo" open={openHecho} onToggle={() => setOpenHecho(!openHecho)}>
+              <Section title="Hecho y reclamo" open={openHecho} onToggle={() => setOpenHecho(!openHecho)} editHref={`/app/mediaciones/${id}/editar`}>
                 <p><strong>Objeto:</strong> {mediacion.objeto_reclamo || "—"}</p>
                 <p className="muted">Fecha: {formatDate(mediacion.fecha_hecho)} · Lugar: {mediacion.lugar_hecho || "—"}</p>
                 <p className="muted">Vehículo: {mediacion.vehiculo || "—"}{mediacion.linea_interno ? ` · Línea/Interno: ${mediacion.linea_interno}` : ""} · Dominio: {mediacion.dominio_patente || "—"}</p>
@@ -422,12 +464,27 @@ export default function MediacionDetailPage() {
             {/* Timeline historial */}
             <div style={{ width: 280, flexShrink: 0 }}>
               <h3 style={{ marginBottom: 12 }}>Historial</h3>
-              <div style={{ borderLeft: "2px solid var(--border)", paddingLeft: 16 }}>
+              <div style={{ borderLeft: "2px solid var(--border)", paddingLeft: 16, position: "relative" }}>
+                
                 {(mediacion.historial || []).map((h) => (
                   <div key={h.id} style={{ marginBottom: 16, position: "relative" }}>
-                    <div style={{ position: "absolute", left: -21, width: 8, height: 8, borderRadius: "50%", background: "var(--brand-blue-2)", top: 4 }} />
-                    <div style={{ fontSize: 13 }}>{h.estado_anterior || "—"} → <strong>{h.estado_nuevo.replace(/_/g, " ")}</strong></div>
-                    <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{h.actor?.full_name || h.actor?.email || "—"} · {formatDateTime(h.created_at)}</div>
+                    <div
+                      style={{
+                        position: "absolute",
+                        left: -21,
+                        width: 8,
+                        height: 8,
+                        borderRadius: "50%",
+                        background: "var(--brand-blue-2)",
+                        top: 4,
+                      }}
+                    />
+                    <div style={{ fontSize: 13 }}>
+                      {h.estado_anterior || "—"} → <strong>{h.estado_nuevo.replace(/_/g, " ")}</strong>
+                    </div>
+                    <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+                      {h.actor?.full_name || h.actor?.email || "—"} · {formatDateTime(h.created_at)}
+                    </div>
                     {h.comentario && <div style={{ fontSize: 12, marginTop: 4 }}>{h.comentario}</div>}
                   </div>
                 ))}
