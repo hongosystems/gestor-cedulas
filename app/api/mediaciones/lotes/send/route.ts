@@ -33,7 +33,7 @@ async function sendLoteMail(payload: {
         content: a.content,
       }));
       const { data, error } = await resend.emails.send({
-        from: process.env.RESEND_FROM || "Mediaciones <onboarding@resend.dev>",
+        from: process.env.RESEND_FROM || "Mediaciones <notificaciones@estudiohif.com.ar>",
         to: payload.to,
         subject: payload.subject,
         html: payload.body.replace(/\n/g, "<br>"),
