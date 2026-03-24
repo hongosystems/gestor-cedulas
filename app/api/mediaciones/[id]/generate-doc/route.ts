@@ -25,7 +25,20 @@ function isoToDDMMAAAA(iso: string | null | undefined): string {
   return `${day}/${m}/${y}`;
 }
 
-function buildFormularioMediacionPdf(mediacion: any, requeridos: any[]): Buffer {
+function resolveRequirentesList(mediacion: any, rows: any[]): any[] {
+  if (rows && rows.length > 0) return rows;
+  return [
+    {
+      nombre: mediacion.req_nombre,
+      dni: mediacion.req_dni,
+      domicilio: mediacion.req_domicilio,
+      email: mediacion.req_email,
+      celular: mediacion.req_celular,
+    },
+  ];
+}
+
+function buildFormularioMediacionPdf(mediacion: any, requeridos: any[], requirentesRows: any[]): Buffer {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
@@ -91,12 +104,30 @@ function buildFormularioMediacionPdf(mediacion: any, requeridos: any[]): Buffer 
   y += 4;
 
   // DATOS REQUIRENTE/S
+  const requirentesList = resolveRequirentesList(mediacion, requirentesRows);
   line("DATOS REQUIRENTE/S", true, 12);
-  line(`    A. Nombre y apellido del requirente: ${v(mediacion.req_nombre)}`, false, 11);
-  line(`    B. DNI del requirente: ${v(mediacion.req_dni)}`, false, 11);
-  line(`    C. Domicilio real del requirente: ${v(mediacion.req_domicilio)}`, false, 11);
-  line(`    D. Correo electrónico personal del requirente: ${v(mediacion.req_email)}`, false, 11);
-  line(`    E. Celular personal del requirente: ${v(mediacion.req_celular)}`, false, 11);
+  if (requirentesList.length === 1) {
+    const q = requirentesList[0];
+    line(`    A. Nombre y apellido del requirente: ${v(q.nombre)}`, false, 11);
+    line(`    B. DNI del requirente: ${v(q.dni)}`, false, 11);
+    line(`    C. Domicilio real del requirente: ${v(q.domicilio)}`, false, 11);
+    line(`    D. Correo electrónico personal del requirente: ${v(q.email)}`, false, 11);
+    line(`    E. Celular personal del requirente: ${v(q.celular)}`, false, 11);
+  } else {
+    for (let i = 0; i < requirentesList.length; i++) {
+      const r = requirentesList[i] || {};
+      line(`- Nombre y Apellido: ${v(r.nombre)}`, false, 11);
+      y += 2;
+      line(`DNI: ${v(r.dni)}`, false, 11);
+      y += 2;
+      line(`Domicilio real: ${v(r.domicilio)}`, false, 11);
+      y += 2;
+      line(`Correo electrónico personal: ${v(r.email)}`, false, 11);
+      y += 2;
+      line(`Celular personal: ${v(r.celular)}`, false, 11);
+      y += 4;
+    }
+  }
   y += 4;
 
   // DATOS REQUERIDO/S (mismo "cantidad de cards" que el formulario)
@@ -190,13 +221,12 @@ export async function POST(
       return NextResponse.json({ error: "Mediación no encontrada" }, { status: 404 });
     }
 
-    const { data: requeridos } = await svc
-      .from("mediacion_requeridos")
-      .select("*")
-      .eq("mediacion_id", mediacionId)
-      .order("orden");
+    const [{ data: requeridos }, { data: requirentesRows }] = await Promise.all([
+      svc.from("mediacion_requeridos").select("*").eq("mediacion_id", mediacionId).order("orden"),
+      svc.from("mediacion_requirentes").select("*").eq("mediacion_id", mediacionId).order("orden"),
+    ]);
 
-    const pdfBuffer = buildFormularioMediacionPdf(mediacion, requeridos || []);
+    const pdfBuffer = buildFormularioMediacionPdf(mediacion, requeridos || [], requirentesRows || []);
 
     const fileName = safeFileName(mediacion.numero_tramite, mediacionId);
     const storagePath = `${mediacionId}/${fileName}`;

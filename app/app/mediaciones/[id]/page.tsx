@@ -40,6 +40,15 @@ type Mediacion = {
   intervino?: string | null;
   lesiones_ambos?: string | null;
   requeridos?: any[];
+  requirentes?: {
+    id: string;
+    nombre: string;
+    dni: string | null;
+    domicilio: string | null;
+    email: string | null;
+    celular: string | null;
+    orden: number;
+  }[];
   observaciones?: { id: string; texto: string; autor_id: string; created_at: string; autor?: { full_name?: string; email?: string } }[];
   historial?: { id: string; estado_anterior: string | null; estado_nuevo: string; actor_id: string; comentario: string | null; created_at: string; actor?: { full_name?: string; email?: string } }[];
   documentos?: { id: string; tipo_plantilla: string; storage_path: string; modo_firma: string; created_at: string }[];
@@ -405,15 +414,41 @@ export default function MediacionDetailPage() {
                 <p className="muted">{[mediacion.letrado_telefono, mediacion.letrado_celular, mediacion.letrado_email].filter(Boolean).join(" · ") || "—"}</p>
               </Section>
 
-              <Section title="Requirente" open={openRequirente} onToggle={() => setOpenRequirente(!openRequirente)} editHref={`/app/mediaciones/${id}/editar`}>
-                <p><strong>{mediacion.req_nombre || "—"}</strong> {mediacion.req_dni && `DNI ${mediacion.req_dni}`}</p>
-                <p className="muted">{mediacion.req_domicilio || "—"}</p>
-                <p className="muted">{[mediacion.req_email, mediacion.req_celular].filter(Boolean).join(" · ") || "—"}</p>
+              <Section
+                title={(mediacion.requirentes || []).length > 1 ? "Requirente/s" : "Requirente"}
+                open={openRequirente}
+                onToggle={() => setOpenRequirente(!openRequirente)}
+                editHref={`/app/mediaciones/${id}/editar`}
+              >
+                {(mediacion.requirentes || []).length > 0 ? (
+                  <ul style={{ paddingLeft: 20, margin: 0, overflowX: "hidden", wordBreak: "break-word", overflowWrap: "break-word" }}>
+                    {(mediacion.requirentes || []).map((r, i) => (
+                      <li key={r.id || i} style={{ marginBottom: 8 }}>
+                        <strong>{r.nombre?.trim() || "—"}</strong>
+                        {r.dni?.trim() ? ` · DNI ${r.dni}` : ""}
+                        {r.domicilio?.trim() ? ` · Domicilio: ${r.domicilio}` : ""}
+                        {[r.email, r.celular].filter((x) => x != null && String(x).trim() !== "").length > 0
+                          ? ` · ${[r.email, r.celular].filter((x) => x != null && String(x).trim() !== "").join(" · ")}`
+                          : ""}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <>
+                    <p style={{ wordBreak: "break-word", overflowWrap: "break-word" }}>
+                      <strong>{mediacion.req_nombre || "—"}</strong> {mediacion.req_dni && `DNI ${mediacion.req_dni}`}
+                    </p>
+                    <p className="muted" style={{ wordBreak: "break-word", overflowWrap: "break-word" }}>{mediacion.req_domicilio || "—"}</p>
+                    <p className="muted" style={{ wordBreak: "break-word", overflowWrap: "break-word" }}>
+                      {[mediacion.req_email, mediacion.req_celular].filter(Boolean).join(" · ") || "—"}
+                    </p>
+                  </>
+                )}
               </Section>
 
               <Section title="Requerido/s" open={openRequeridos} onToggle={() => setOpenRequeridos(!openRequeridos)} editHref={`/app/mediaciones/${id}/editar`}>
                 {(mediacion.requeridos || []).length === 0 ? <p className="muted">—</p> : (
-                  <ul style={{ paddingLeft: 20, margin: 0 }}>
+                  <ul style={{ paddingLeft: 20, margin: 0, overflowX: "hidden", wordBreak: "break-word", overflowWrap: "break-word" }}>
                     {(mediacion.requeridos || []).map((r: any, i: number) => (
                       <li key={r.id || i}>
                         {r.nombre}
@@ -427,19 +462,27 @@ export default function MediacionDetailPage() {
               </Section>
 
               <Section title="Hecho y reclamo" open={openHecho} onToggle={() => setOpenHecho(!openHecho)} editHref={`/app/mediaciones/${id}/editar`}>
-                <p><strong>Objeto:</strong> {mediacion.objeto_reclamo || "—"}</p>
-                <p className="muted">Fecha: {formatDate(mediacion.fecha_hecho)} · Lugar: {mediacion.lugar_hecho || "—"}</p>
-                <p className="muted">Vehículo: {mediacion.vehiculo || "—"}{mediacion.linea_interno ? ` · Línea/Interno: ${mediacion.linea_interno}` : ""} · Dominio: {mediacion.dominio_patente || "—"}</p>
-                <p className="muted">Siniestro: {mediacion.nro_siniestro || "—"} · Póliza: {mediacion.nro_poliza || "—"}</p>
-                {(mediacion.articulo || mediacion.intervino) && (
-                  <p className="muted">
-                    {mediacion.articulo ? `Art: ${mediacion.articulo}` : ""}
-                    {mediacion.articulo && mediacion.intervino ? " · " : ""}
-                    {mediacion.intervino ? `Intervino: ${mediacion.intervino}` : ""}
-                  </p>
-                )}
-                {mediacion.mecanica_hecho && <p style={{ marginTop: 8, whiteSpace: "pre-wrap" }}>{mediacion.mecanica_hecho}</p>}
-                {mediacion.lesiones_ambos && <p style={{ marginTop: 8, whiteSpace: "pre-wrap" }}><strong>Lesiones de ambos:</strong> {mediacion.lesiones_ambos}</p>}
+                <div style={{ overflowX: "hidden", wordBreak: "break-word", overflowWrap: "break-word" }}>
+                  <p><strong>Objeto:</strong> {mediacion.objeto_reclamo || "—"}</p>
+                  <p className="muted">Fecha: {formatDate(mediacion.fecha_hecho)} · Lugar: {mediacion.lugar_hecho || "—"}</p>
+                  <p className="muted">Vehículo: {mediacion.vehiculo || "—"}{mediacion.linea_interno ? ` · Línea/Interno: ${mediacion.linea_interno}` : ""} · Dominio: {mediacion.dominio_patente || "—"}</p>
+                  <p className="muted">Siniestro: {mediacion.nro_siniestro || "—"} · Póliza: {mediacion.nro_poliza || "—"}</p>
+                  {(mediacion.articulo || mediacion.intervino) && (
+                    <p className="muted">
+                      {mediacion.articulo ? `Art: ${mediacion.articulo}` : ""}
+                      {mediacion.articulo && mediacion.intervino ? " · " : ""}
+                      {mediacion.intervino ? `Intervino: ${mediacion.intervino}` : ""}
+                    </p>
+                  )}
+                  {mediacion.mecanica_hecho && (
+                    <p style={{ marginTop: 8, whiteSpace: "pre-wrap", wordBreak: "break-word", overflowWrap: "break-word" }}>{mediacion.mecanica_hecho}</p>
+                  )}
+                  {mediacion.lesiones_ambos && (
+                    <p style={{ marginTop: 8, whiteSpace: "pre-wrap", wordBreak: "break-word", overflowWrap: "break-word" }}>
+                      <strong>Lesiones de ambos:</strong> {mediacion.lesiones_ambos}
+                    </p>
+                  )}
+                </div>
               </Section>
 
               {/* Acciones por estado */}

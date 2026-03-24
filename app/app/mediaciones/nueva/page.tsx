@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -33,6 +33,15 @@ function ddmmaaaaToISO(ddmmaaaa: string): string | null {
   return date.toISOString().slice(0, 10);
 }
 
+type Requirente = {
+  id: string;
+  nombre: string;
+  dni: string;
+  domicilio: string;
+  email: string;
+  celular: string;
+};
+
 type Requerido = {
   id: string;
   nombre: string;
@@ -52,6 +61,17 @@ async function requireSessionOrRedirect() {
 
 const STEP_TITLES = ["Datos letrado requirente", "Requirente", "Requerido/s", "Hecho y reclamo", "Revisión"];
 
+const REVIEW_WRAP = {
+  overflowX: "hidden" as const,
+  wordBreak: "break-word" as const,
+  overflowWrap: "break-word" as const,
+};
+
+const REVIEW_P: CSSProperties = {
+  wordBreak: "break-word",
+  overflowWrap: "break-word",
+};
+
 export default function NuevaMediacionPage() {
   const router = useRouter();
   const [step, setStep] = useState(1);
@@ -69,11 +89,9 @@ export default function NuevaMediacionPage() {
   const [letrado_celular, setLetrado_celular] = useState("1551779201");
   const [letrado_email, setLetrado_email] = useState("gfhisi@gmail.com");
 
-  const [req_nombre, setReq_nombre] = useState("");
-  const [req_dni, setReq_dni] = useState("");
-  const [req_domicilio, setReq_domicilio] = useState("");
-  const [req_email, setReq_email] = useState("");
-  const [req_celular, setReq_celular] = useState("");
+  const [requirentes, setRequirentes] = useState<Requirente[]>([
+    { id: "1", nombre: "", dni: "", domicilio: "", email: "", celular: "" },
+  ]);
 
   const [requeridos, setRequeridos] = useState<Requerido[]>([
     { id: "1", nombre: "", empresa_nombre_razon_social: "", domicilio: "", lesiones: "" },
@@ -107,6 +125,20 @@ export default function NuevaMediacionPage() {
     return () => document.removeEventListener("click", close);
   }, [menuOpen]);
 
+  function addRequirente() {
+    setRequirentes((prev) =>
+      prev.length >= 3
+        ? prev
+        : [...prev, { id: crypto.randomUUID(), nombre: "", dni: "", domicilio: "", email: "", celular: "" }]
+    );
+  }
+  function removeRequirente(id: string) {
+    setRequirentes((prev) => prev.filter((r) => r.id !== id));
+  }
+  function updateRequirente(id: string, field: keyof Requirente, value: string) {
+    setRequirentes((prev) => prev.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
+  }
+
   function addRequerido() {
     setRequeridos((prev) =>
       prev.length >= 3
@@ -131,6 +163,7 @@ export default function NuevaMediacionPage() {
     setSaving(true);
     setMsg("");
 
+    const firstReq = requirentes[0];
     const { data: mediacion, error: insErr } = await supabase
       .from("mediaciones")
       .insert({
@@ -144,11 +177,11 @@ export default function NuevaMediacionPage() {
         letrado_telefono: letrado_telefono.trim() || null,
         letrado_celular: letrado_celular.trim() || null,
         letrado_email: letrado_email.trim() || null,
-        req_nombre: req_nombre.trim() || null,
-        req_dni: req_dni.trim() || null,
-        req_domicilio: req_domicilio.trim() || null,
-        req_email: req_email.trim() || null,
-        req_celular: req_celular.trim() || null,
+        req_nombre: firstReq?.nombre.trim() || null,
+        req_dni: firstReq?.dni.trim() || null,
+        req_domicilio: firstReq?.domicilio.trim() || null,
+        req_email: firstReq?.email.trim() || null,
+        req_celular: firstReq?.celular.trim() || null,
         objeto_reclamo: objeto_reclamo || null,
         fecha_hecho: ddmmaaaaToISO(fecha_hecho) || null,
         lugar_hecho: lugar_hecho.trim() || null,
@@ -176,6 +209,19 @@ export default function NuevaMediacionPage() {
       estado_nuevo: "pendiente_rta",
       actor_id: session.user.id,
     });
+
+    const requirenteRows = requirentes.map((r, i) => ({
+      mediacion_id: mediacion.id,
+      nombre: r.nombre.trim() || "—",
+      dni: r.dni.trim() || null,
+      domicilio: r.domicilio.trim() || null,
+      email: r.email.trim() || null,
+      celular: r.celular.trim() || null,
+      orden: i,
+    }));
+    if (requirenteRows.length > 0) {
+      await supabase.from("mediacion_requirentes").insert(requirenteRows);
+    }
 
     const reqRows = requeridos.map((r, i) => ({
       mediacion_id: mediacion.id,
@@ -292,13 +338,24 @@ export default function NuevaMediacionPage() {
           {step === 2 && (
             <div className="form" style={{ maxWidth: 560 }}>
               <h3 style={{ marginBottom: 16 }}>Requirente</h3>
-              <div className="field"><label className="label">Nombre y apellido</label><input className="input" value={req_nombre} onChange={(e) => setReq_nombre(e.target.value)} /></div>
-              <div className="field"><label className="label">DNI</label><input className="input" value={req_dni} onChange={(e) => setReq_dni(e.target.value)} /></div>
-              <div className="field"><label className="label">Domicilio real</label><input className="input" value={req_domicilio} onChange={(e) => setReq_domicilio(e.target.value)} /></div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <div className="field"><label className="label">Email</label><input className="input" type="email" value={req_email} onChange={(e) => setReq_email(e.target.value)} /></div>
-                <div className="field"><label className="label">Celular</label><input className="input" value={req_celular} onChange={(e) => setReq_celular(e.target.value)} /></div>
-              </div>
+              {requirentes.map((r, idx) => (
+                <div key={r.id} style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 16, marginBottom: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <span className="label">Requirente {idx + 1}</span>
+                    {idx > 0 && (
+                      <button type="button" className="btn danger" onClick={() => removeRequirente(r.id)} style={{ padding: "4px 10px", fontSize: 12 }}>Quitar</button>
+                    )}
+                  </div>
+                  <div className="field"><label className="label">Nombre y apellido</label><input className="input" value={r.nombre} onChange={(e) => updateRequirente(r.id, "nombre", e.target.value)} /></div>
+                  <div className="field"><label className="label">DNI</label><input className="input" value={r.dni} onChange={(e) => updateRequirente(r.id, "dni", e.target.value)} /></div>
+                  <div className="field"><label className="label">Domicilio real</label><input className="input" value={r.domicilio} onChange={(e) => updateRequirente(r.id, "domicilio", e.target.value)} /></div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                    <div className="field"><label className="label">Email</label><input className="input" type="email" value={r.email} onChange={(e) => updateRequirente(r.id, "email", e.target.value)} /></div>
+                    <div className="field"><label className="label">Celular</label><input className="input" value={r.celular} onChange={(e) => updateRequirente(r.id, "celular", e.target.value)} /></div>
+                  </div>
+                </div>
+              ))}
+              <button type="button" className="btn" onClick={addRequirente} disabled={requirentes.length >= 3}>+ Agregar otro requirente</button>
             </div>
           )}
 
@@ -346,53 +403,67 @@ export default function NuevaMediacionPage() {
           )}
 
           {step === 5 && (
-            <div className="form" style={{ maxWidth: 640 }}>
+            <div className="form" style={{ maxWidth: 640, ...REVIEW_WRAP }}>
               <h3 style={{ marginBottom: 16 }}>Revisión</h3>
-              <div style={{ background: "rgba(0,0,0,.15)", borderRadius: 12, padding: 20, marginBottom: 20 }}>
-                <p><strong>Letrado:</strong> {letrado_nombre || "—"} {letrado_caracter && `(${letrado_caracter})`}</p>
-                <p><strong>Tomo/Folio:</strong> {letrado_tomo || "—"} / {letrado_folio || "—"}</p>
-                <p><strong>Domicilio profesional:</strong> {letrado_domicilio || "—"}</p>
-                <p><strong>Teléfono Estudio / Celular:</strong> {[letrado_telefono, letrado_celular].filter(Boolean).join(" · ") || "—"}</p>
-                <p><strong>Mail:</strong> {letrado_email || "—"}</p>
+              <div
+                style={{
+                  background: "rgba(0,0,0,.15)",
+                  borderRadius: 12,
+                  padding: 20,
+                  marginBottom: 20,
+                  ...REVIEW_WRAP,
+                }}
+              >
+                <p style={REVIEW_P}><strong>Letrado:</strong> {letrado_nombre || "—"} {letrado_caracter && `(${letrado_caracter})`}</p>
+                <p style={REVIEW_P}><strong>Tomo/Folio:</strong> {letrado_tomo || "—"} / {letrado_folio || "—"}</p>
+                <p style={REVIEW_P}><strong>Domicilio profesional:</strong> {letrado_domicilio || "—"}</p>
+                <p style={REVIEW_P}><strong>Teléfono Estudio / Celular:</strong> {[letrado_telefono, letrado_celular].filter(Boolean).join(" · ") || "—"}</p>
+                <p style={REVIEW_P}><strong>Mail:</strong> {letrado_email || "—"}</p>
 
                 <div style={{ height: 10 }} />
 
-                <p><strong>Requirente:</strong></p>
-                <p style={{ marginLeft: 14 }}><strong>Nombre y apellido:</strong> {req_nombre || "—"}</p>
-                <p style={{ marginLeft: 14 }}><strong>DNI:</strong> {req_dni || "—"}</p>
-                <p style={{ marginLeft: 14 }}><strong>Domicilio real:</strong> {req_domicilio || "—"}</p>
-                <p style={{ marginLeft: 14 }}><strong>Email:</strong> {req_email || "—"}</p>
-                <p style={{ marginLeft: 14 }}><strong>Celular:</strong> {req_celular || "—"}</p>
-
-                <div style={{ height: 10 }} />
-
-                <p><strong>Requeridos:</strong></p>
-                <div style={{ marginLeft: 14 }}>
-                  {requeridos.map((r) => (
+                <p style={REVIEW_P}><strong>Requirente/s:</strong></p>
+                <div style={{ marginLeft: 14, ...REVIEW_WRAP }}>
+                  {requirentes.map((r) => (
                     <div key={r.id} style={{ marginBottom: 8 }}>
-                      <p><strong>Nombre y Apellido:</strong> {r.nombre.trim() || "Nombre y Apellido"}</p>
-                      <p><strong>Empresa:</strong> {r.empresa_nombre_razon_social.trim() || "Empresa nombre o razón social"}</p>
-                      <p><strong>Domicilio:</strong> {r.domicilio.trim() || "Domicilio"}</p>
-                      <p><strong>Lesiones:</strong> {r.lesiones.trim() || "Lesiones"}</p>
+                      <p style={REVIEW_P}><strong>Nombre y Apellido:</strong> {r.nombre.trim() || "Nombre y Apellido"}</p>
+                      <p style={REVIEW_P}><strong>DNI:</strong> {r.dni.trim() || "DNI"}</p>
+                      <p style={REVIEW_P}><strong>Domicilio real:</strong> {r.domicilio.trim() || "Domicilio"}</p>
+                      <p style={REVIEW_P}><strong>Email:</strong> {r.email.trim() || "Email"}</p>
+                      <p style={REVIEW_P}><strong>Celular:</strong> {r.celular.trim() || "Celular"}</p>
                     </div>
                   ))}
                 </div>
 
                 <div style={{ height: 10 }} />
 
-                <p><strong>Hecho y reclamo:</strong></p>
-                <p style={{ marginLeft: 14 }}><strong>Objeto del reclamo:</strong> {objeto_reclamo || "—"}</p>
-                <p style={{ marginLeft: 14 }}><strong>Fecha del hecho:</strong> {fecha_hecho || "—"}</p>
-                <p style={{ marginLeft: 14 }}><strong>Lugar:</strong> {lugar_hecho || "—"}</p>
-                <p style={{ marginLeft: 14 }}><strong>Vehículo:</strong> {vehiculo || "—"}</p>
-                <p style={{ marginLeft: 14 }}><strong>Línea/Interno:</strong> {linea_interno || "—"}</p>
-                <p style={{ marginLeft: 14 }}><strong>Dominio/Patente:</strong> {dominio_patente || "—"}</p>
-                <p style={{ marginLeft: 14 }}><strong>Art:</strong> {articulo || "—"}</p>
-                <p style={{ marginLeft: 14 }}><strong>N° Siniestro:</strong> {nro_siniestro || "—"}</p>
-                <p style={{ marginLeft: 14 }}><strong>N° Póliza:</strong> {nro_poliza || "—"}</p>
-                <p style={{ marginLeft: 14 }}><strong>Mecánica del hecho:</strong> {mecanica_hecho || "—"}</p>
-                <p style={{ marginLeft: 14 }}><strong>Intervino:</strong> {intervino || "—"}</p>
-                <p style={{ marginLeft: 14 }}><strong>Lesiones de ambos:</strong> {lesiones_ambos || "—"}</p>
+                <p style={REVIEW_P}><strong>Requeridos:</strong></p>
+                <div style={{ marginLeft: 14, ...REVIEW_WRAP }}>
+                  {requeridos.map((r) => (
+                    <div key={r.id} style={{ marginBottom: 8 }}>
+                      <p style={REVIEW_P}><strong>Nombre y Apellido:</strong> {r.nombre.trim() || "Nombre y Apellido"}</p>
+                      <p style={REVIEW_P}><strong>Empresa:</strong> {r.empresa_nombre_razon_social.trim() || "Empresa nombre o razón social"}</p>
+                      <p style={REVIEW_P}><strong>Domicilio:</strong> {r.domicilio.trim() || "Domicilio"}</p>
+                      <p style={REVIEW_P}><strong>Lesiones:</strong> {r.lesiones.trim() || "Lesiones"}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ height: 10 }} />
+
+                <p style={REVIEW_P}><strong>Hecho y reclamo:</strong></p>
+                <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>Objeto del reclamo:</strong> {objeto_reclamo || "—"}</p>
+                <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>Fecha del hecho:</strong> {fecha_hecho || "—"}</p>
+                <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>Lugar:</strong> {lugar_hecho || "—"}</p>
+                <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>Vehículo:</strong> {vehiculo || "—"}</p>
+                <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>Línea/Interno:</strong> {linea_interno || "—"}</p>
+                <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>Dominio/Patente:</strong> {dominio_patente || "—"}</p>
+                <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>Art:</strong> {articulo || "—"}</p>
+                <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>N° Siniestro:</strong> {nro_siniestro || "—"}</p>
+                <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>N° Póliza:</strong> {nro_poliza || "—"}</p>
+                <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>Mecánica del hecho:</strong> {mecanica_hecho || "—"}</p>
+                <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>Intervino:</strong> {intervino || "—"}</p>
+                <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>Lesiones de ambos:</strong> {lesiones_ambos || "—"}</p>
               </div>
               <button className="btn primary" onClick={enviarSolicitud} disabled={saving} style={{ padding: "12px 24px", fontSize: 16 }}>{saving ? "Enviando…" : "Enviar solicitud"}</button>
             </div>

@@ -20,6 +20,8 @@ type Cedula = {
   read_by_name?: string | null;
   admin_cedulas_completada_at?: string | null;
   admin_cedulas_en_tramite_at?: string | null;
+  estado_ocr?: string | null;
+  ocr_error?: string | null;
 };
 
 type User = {
@@ -90,6 +92,54 @@ function SemaforoChip({ value }: { value: Semaforo }) {
         fontSize: 12,
         letterSpacing: 0.4,
         minWidth: 88,
+      }}
+    >
+      {value}
+    </span>
+  );
+}
+
+type EstadoCedula = "Completa" | "En Trámite" | "Pendiente";
+
+function getEstadoCedula(c: { admin_cedulas_completada_at?: string | null; admin_cedulas_en_tramite_at?: string | null }): EstadoCedula {
+  if (c.admin_cedulas_completada_at) return "Completa";
+  if (c.admin_cedulas_en_tramite_at) return "En Trámite";
+  return "Pendiente";
+}
+
+function EstadoChip({ value }: { value: EstadoCedula }) {
+  const style: React.CSSProperties =
+    value === "Completa"
+      ? {
+          background: "rgba(46, 204, 113, 0.16)",
+          border: "1px solid rgba(46, 204, 113, 0.35)",
+          color: "rgba(210, 255, 226, 0.95)",
+        }
+      : value === "En Trámite"
+      ? {
+          background: "rgba(96, 141, 186, 0.25)",
+          border: "1px solid rgba(96, 141, 186, 0.5)",
+          color: "rgba(234, 243, 255, 0.95)",
+        }
+      : {
+          background: "rgba(255, 255, 255, 0.06)",
+          border: "1px solid rgba(255, 255, 255, 0.15)",
+          color: "rgba(234, 243, 255, 0.75)",
+        };
+
+  return (
+    <span
+      style={{
+        ...style,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "6px 10px",
+        borderRadius: 999,
+        fontWeight: 600,
+        fontSize: 11,
+        letterSpacing: 0.3,
+        whiteSpace: "nowrap",
       }}
     >
       {value}
@@ -742,6 +792,7 @@ export default function MisCedulasPage() {
   const [popupCompleta, setPopupCompleta] = useState<{ cedula: Cedula; abogados: AbogadoInfo[] } | null>(null);
   const [completandoId, setCompletandoId] = useState<string | null>(null);
   const [tramitandoId, setTramitandoId] = useState<string | null>(null);
+  const [reintentandoOcrId, setReintentandoOcrId] = useState<string | null>(null);
   const [selectedCedulaId, setSelectedCedulaId] = useState<string | null>(null);
   const [usuariosByKey, setUsuariosByKey] = useState<Record<string, AbogadoInfo[]>>({});
 
@@ -807,17 +858,17 @@ export default function MisCedulasPage() {
       }
 
       // listar cédulas del usuario
-      // Intentar incluir admin_cedulas_completada_at, tipo_documento, notas, read_by_user_id, read_by_name
+      // Intentar incluir admin_cedulas_completada_at, tipo_documento, notas, read_by_user_id, read_by_name, estado_ocr, ocr_error
       let query = supabase
         .from("cedulas")
-        .select("id, owner_user_id, caratula, juzgado, fecha_carga, pdf_path, tipo_documento, notas, read_by_user_id, read_by_name, admin_cedulas_completada_at, admin_cedulas_en_tramite_at")
+        .select("id, owner_user_id, caratula, juzgado, fecha_carga, pdf_path, tipo_documento, notas, read_by_user_id, read_by_name, admin_cedulas_completada_at, admin_cedulas_en_tramite_at, estado_ocr, ocr_error")
         .eq("owner_user_id", uid)
         .order("fecha_carga", { ascending: false });
       
       const { data: cs, error: cErr } = await query;
       
       // Si el error es porque alguna columna no existe, intentar sin ellas
-      if (cErr && (cErr.message?.includes("tipo_documento") || cErr.message?.includes("notas") || cErr.message?.includes("read_by_user_id") || cErr.message?.includes("read_by_name") || cErr.message?.includes("admin_cedulas_completada_at") || cErr.message?.includes("admin_cedulas_en_tramite_at"))) {
+      if (cErr && (cErr.message?.includes("tipo_documento") || cErr.message?.includes("notas") || cErr.message?.includes("read_by_user_id") || cErr.message?.includes("read_by_name") || cErr.message?.includes("admin_cedulas_completada_at") || cErr.message?.includes("admin_cedulas_en_tramite_at") || cErr.message?.includes("estado_ocr") || cErr.message?.includes("ocr_error"))) {
         const { data: cs2, error: cErr2 } = await supabase
           .from("cedulas")
           .select("id, owner_user_id, caratula, juzgado, fecha_carga, pdf_path")
@@ -837,7 +888,9 @@ export default function MisCedulasPage() {
           read_by_user_id: null,
           read_by_name: null,
           admin_cedulas_completada_at: null,
-          admin_cedulas_en_tramite_at: null
+          admin_cedulas_en_tramite_at: null,
+          estado_ocr: null,
+          ocr_error: null
         }));
         setCedulas(csWithNull as Cedula[]);
         setLoading(false);
@@ -1075,10 +1128,48 @@ export default function MisCedulasPage() {
         c.id === p.cedula.id ? { ...c, admin_cedulas_en_tramite_at: new Date().toISOString() } : c
       ));
       setPopupEnTramite(null);
+
+      // Disparar OCR en background (fire and forget)
+      supabase.auth.getSession().then(({ data }) => {
+        const token = data?.session?.access_token;
+        fetch(`/api/cedulas/${p.cedula.id}/procesar-ocr`, {
+          method: "POST",
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        }).catch((err) => console.error("OCR background error:", err));
+      });
     } catch (err: any) {
       setMsg(err?.message || "Error al marcar como en trámite.");
     } finally {
       setTramitandoId(null);
+    }
+  }
+
+  async function reintentarOcr(cedulaId: string) {
+    setReintentandoOcrId(cedulaId);
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data?.session?.access_token;
+      if (!token) {
+        setMsg("Sesión expirada");
+        return;
+      }
+      const res = await fetch(`/api/cedulas/${cedulaId}/procesar-ocr`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        setMsg(json?.error || "Error al reintentar OCR");
+        return;
+      }
+      setMsg("OCR en proceso. Refresca en unos segundos.");
+      setCedulas((prev) =>
+        prev.map((c) => (c.id === cedulaId ? { ...c, estado_ocr: null, ocr_error: null } : c))
+      );
+    } catch (err: any) {
+      setMsg(err?.message || "Error al reintentar OCR");
+    } finally {
+      setReintentandoOcrId(null);
     }
   }
 
@@ -1631,6 +1722,7 @@ export default function MisCedulasPage() {
                       {sortField === "semaforo" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
                     </span>
                   </th>
+                  <th style={{ width: 110 }}>Estado</th>
                   <th>Carátula</th>
                   <th 
                     className="sortable"
@@ -1687,6 +1779,23 @@ export default function MisCedulasPage() {
                   >
                     <td>
                       <SemaforoChip value={c.sem} />
+                    </td>
+
+                    <td>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        <EstadoChip value={getEstadoCedula(c)} />
+                        {isAdminCedulas && c.estado_ocr === "error" && (
+                          <button
+                            type="button"
+                            className="btn"
+                            onClick={(e) => { e.stopPropagation(); reintentarOcr(c.id); }}
+                            disabled={!!reintentandoOcrId}
+                            style={{ fontSize: 11, padding: "4px 8px", alignSelf: "flex-start" }}
+                          >
+                            {reintentandoOcrId === c.id ? "Procesando…" : "Reintentar OCR"}
+                          </button>
+                        )}
+                      </div>
                     </td>
 
                     <td style={{ fontWeight: 650 }}>
@@ -1766,7 +1875,7 @@ export default function MisCedulasPage() {
 
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={isAdminCedulas ? 8 : 7} className="muted">
+                    <td colSpan={isAdminCedulas ? 9 : 8} className="muted">
                       Todavía no cargaste cédulas/oficios.
                     </td>
                   </tr>

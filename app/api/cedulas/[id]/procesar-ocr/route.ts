@@ -1,0 +1,205 @@
+import { NextRequest, NextResponse } from "next/server";
+import { after } from "next/server";
+import { supabaseService } from "@/lib/supabase-server";
+import { getUserFromRequest } from "@/lib/auth-api";
+
+export const runtime = "nodejs";
+
+// Aumentar timeout para OCR (Vercel Hobby: 10s, Pro: 60s)
+// La respuesta se envía de inmediato; el trabajo pesado corre en after()
+export const maxDuration = 60;
+
+async function requireAdminCedulas(
+  userId: string,
+  svc: ReturnType<typeof supabaseService>
+): Promise<boolean> {
+  const { data } = await svc
+    .from("user_roles")
+    .select("is_admin_cedulas, is_superadmin")
+    .eq("user_id", userId)
+    .maybeSingle();
+  return data?.is_admin_cedulas === true || data?.is_superadmin === true;
+}
+
+async function procesarOcrEnBackground(cedulaId: string, svc: ReturnType<typeof supabaseService>) {
+  const railwayUrl = process.env.RAILWAY_OCR_URL;
+  if (!railwayUrl) {
+    await svc
+      .from("cedulas")
+      .update({
+        estado_ocr: "error",
+        ocr_error: "RAILWAY_OCR_URL no configurada",
+      })
+      .eq("id", cedulaId);
+    return;
+  }
+
+  try {
+    // 1. Obtener cédula y pdf_path
+    const { data: cedula, error: cedulaErr } = await svc
+      .from("cedulas")
+      .select("id, pdf_path")
+      .eq("id", cedulaId)
+      .single();
+
+    if (cedulaErr || !cedula?.pdf_path) {
+      await svc
+        .from("cedulas")
+        .update({
+          estado_ocr: "error",
+          ocr_error: cedulaErr?.message || "Cédula no encontrada o sin PDF",
+        })
+        .eq("id", cedulaId);
+      return;
+    }
+
+    // 2. Descargar PDF desde Supabase Storage
+    const { data: fileData, error: downloadErr } = await svc.storage
+      .from("cedulas")
+      .download(cedula.pdf_path);
+
+    if (downloadErr || !fileData) {
+      await svc
+        .from("cedulas")
+        .update({
+          estado_ocr: "error",
+          ocr_error: downloadErr?.message || "No se pudo descargar el PDF",
+        })
+        .eq("id", cedulaId);
+      return;
+    }
+
+    const pdfBuffer = Buffer.from(await fileData.arrayBuffer());
+
+    // 3. Llamar al microservicio Railway
+    const formData = new FormData();
+    formData.append("pdf", new Blob([pdfBuffer], { type: "application/pdf" }), "cedula.pdf");
+
+    const railwayRes = await fetch(`${railwayUrl.replace(/\/$/, "")}/procesar`, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!railwayRes.ok) {
+      const errorBody = await railwayRes.text();
+      const errorMsg = errorBody || railwayRes.statusText || `Error ${railwayRes.status}`;
+      await svc
+        .from("cedulas")
+        .update({
+          estado_ocr: "error",
+          ocr_error: errorMsg,
+        })
+        .eq("id", cedulaId);
+      return;
+    }
+
+    // 4. Railway respondió OK: leer headers y subir PDF resultante
+    const expNro = railwayRes.headers.get("X-Exp-Nro") || railwayRes.headers.get("x-exp-nro") || null;
+    let caratulaOcr: string | null = railwayRes.headers.get("X-Caratula") || railwayRes.headers.get("x-caratula") || null;
+    if (caratulaOcr) {
+      try {
+        caratulaOcr = decodeURIComponent(caratulaOcr);
+      } catch {
+        // Mantener valor original si falla decodificación
+      }
+    }
+
+    const pdfResultado = await railwayRes.arrayBuffer();
+    const storagePath = `acredita/${cedulaId}.pdf`;
+
+    const { error: uploadErr } = await svc.storage
+      .from("cedulas")
+      .upload(storagePath, Buffer.from(pdfResultado), {
+        upsert: true,
+        contentType: "application/pdf",
+      });
+
+    if (uploadErr) {
+      await svc
+        .from("cedulas")
+        .update({
+          estado_ocr: "error",
+          ocr_error: `OCR OK pero falló subida: ${uploadErr.message}`,
+        })
+        .eq("id", cedulaId);
+      return;
+    }
+
+    // 5. Obtener URL pública del PDF subido
+    const { data: urlData } = svc.storage.from("cedulas").getPublicUrl(storagePath);
+
+    // 6. Actualizar cédula con éxito
+    await svc
+      .from("cedulas")
+      .update({
+        estado_ocr: "listo",
+        pdf_acredita_url: urlData.publicUrl,
+        ocr_exp_nro: expNro,
+        ocr_caratula: caratulaOcr,
+        ocr_procesado_at: new Date().toISOString(),
+        ocr_error: null,
+      })
+      .eq("id", cedulaId);
+  } catch (e: any) {
+    const errMsg = e?.message || "Error inesperado en OCR";
+    const errCause = e?.cause ? ` (causa: ${String(e.cause)})` : "";
+    console.error("[procesar-ocr] Error:", errMsg, errCause, "cedulaId:", cedulaId, "railwayUrl:", railwayUrl ? `${railwayUrl.slice(0, 30)}...` : "NO_CONFIGURADA");
+    await svc
+      .from("cedulas")
+      .update({
+        estado_ocr: "error",
+        ocr_error: errMsg + errCause,
+      })
+      .eq("id", cedulaId);
+  }
+}
+
+export async function POST(
+  req: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  const user = await getUserFromRequest(req);
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const svc = supabaseService();
+  const isAdmin = await requireAdminCedulas(user.id, svc);
+  if (!isAdmin) {
+    return NextResponse.json(
+      { error: "Solo usuarios con rol admin cédulas pueden procesar OCR" },
+      { status: 403 }
+    );
+  }
+
+  const { id: cedulaId } = await context.params;
+  if (!cedulaId) {
+    return NextResponse.json({ error: "ID de cédula requerido" }, { status: 400 });
+  }
+
+  // Verificar que la cédula existe y tiene pdf_path
+  const { data: cedula, error: fetchErr } = await svc
+    .from("cedulas")
+    .select("id, pdf_path")
+    .eq("id", cedulaId)
+    .single();
+
+  if (fetchErr || !cedula) {
+    return NextResponse.json(
+      { error: "Cédula no encontrada" },
+      { status: 404 }
+    );
+  }
+
+  if (!cedula.pdf_path) {
+    return NextResponse.json(
+      { error: "La cédula no tiene archivo PDF asociado" },
+      { status: 400 }
+    );
+  }
+
+  // Fire and forget: responder de inmediato, procesar en background
+  after(() => procesarOcrEnBackground(cedulaId, svc));
+
+  return NextResponse.json({ ok: true, status: "procesando" });
+}

@@ -15,7 +15,20 @@ async function canAccessMediacion(
   return isAdminMediaciones || isSuperadmin;
 }
 
-function buildCartaDocumentoPdf(mediacion: any, requeridos: any[]): Buffer {
+function resolveRequirentesList(mediacion: any, rows: any[]): any[] {
+  if (rows && rows.length > 0) return rows;
+  return [
+    {
+      nombre: mediacion.req_nombre,
+      dni: mediacion.req_dni,
+      domicilio: mediacion.req_domicilio,
+      email: mediacion.req_email,
+      celular: mediacion.req_celular,
+    },
+  ];
+}
+
+function buildCartaDocumentoPdf(mediacion: any, requeridos: any[], requirentesRows: any[]): Buffer {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
   const margin = 20;
@@ -58,16 +71,35 @@ function buildCartaDocumentoPdf(mediacion: any, requeridos: any[]): Buffer {
   fmt("Email", mediacion.letrado_email);
   y += 4;
 
-  font(11, true);
-  doc.text("Requirente", margin, y);
-  y += 7;
-  font(10, false);
-  fmt("Nombre", mediacion.req_nombre);
-  fmt("DNI", mediacion.req_dni);
-  fmt("Domicilio", mediacion.req_domicilio);
-  fmt("Email", mediacion.req_email);
-  fmt("Celular", mediacion.req_celular);
-  y += 4;
+  const requirentesList = resolveRequirentesList(mediacion, requirentesRows);
+
+  if (requirentesList.length === 1) {
+    const q = requirentesList[0];
+    font(11, true);
+    doc.text("Requirente", margin, y);
+    y += 7;
+    font(10, false);
+    fmt("Nombre", q.nombre);
+    fmt("DNI", q.dni);
+    fmt("Domicilio", q.domicilio);
+    fmt("Email", q.email);
+    fmt("Celular", q.celular);
+    y += 4;
+  } else {
+    font(11, true);
+    doc.text("Requirentes", margin, y);
+    y += 7;
+    font(10, false);
+    requirentesList.forEach((q: any) => {
+      fmt("Nombre", q.nombre);
+      fmt("DNI", q.dni);
+      fmt("Domicilio", q.domicilio);
+      fmt("Email", q.email);
+      fmt("Celular", q.celular);
+      y += 2;
+    });
+    y += 4;
+  }
 
   font(11, true);
   doc.text("Hecho", margin, y);
@@ -137,13 +169,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No autorizado" }, { status: 403 });
     }
 
-    const { data: requeridos } = await svc
-      .from("mediacion_requeridos")
-      .select("*")
-      .eq("mediacion_id", mediacionId)
-      .order("orden");
+    const [{ data: requeridos }, { data: requirentesRows }] = await Promise.all([
+      svc.from("mediacion_requeridos").select("*").eq("mediacion_id", mediacionId).order("orden"),
+      svc.from("mediacion_requirentes").select("*").eq("mediacion_id", mediacionId).order("orden"),
+    ]);
 
-    const pdfBuffer = buildCartaDocumentoPdf(mediacion, requeridos || []);
+    const pdfBuffer = buildCartaDocumentoPdf(mediacion, requeridos || [], requirentesRows || []);
 
     const docId = crypto.randomUUID();
     const storagePath = `${mediacion.user_id}/${mediacionId}/${docId}.pdf`;

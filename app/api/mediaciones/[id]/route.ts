@@ -39,8 +39,9 @@ export async function GET(
       return NextResponse.json({ error: "Solo administradores de mediaciones" }, { status: 403 });
     }
 
-    const [reqRes, obsRes, histRes, docRes] = await Promise.all([
+    const [reqRes, reqnteRes, obsRes, histRes, docRes] = await Promise.all([
       svc.from("mediacion_requeridos").select("*").eq("mediacion_id", id).order("orden"),
+      svc.from("mediacion_requirentes").select("*").eq("mediacion_id", id).order("orden"),
       svc.from("mediacion_observaciones").select("id, texto, autor_id, created_at").eq("mediacion_id", id).order("created_at", { ascending: false }),
       svc.from("mediacion_historial").select("id, estado_anterior, estado_nuevo, actor_id, comentario, created_at").eq("mediacion_id", id).order("created_at", { ascending: false }),
       svc.from("mediacion_documentos").select("id, tipo_plantilla, storage_path, modo_firma, created_at").eq("mediacion_id", id).order("created_at", { ascending: false }),
@@ -63,6 +64,7 @@ export async function GET(
       data: {
         ...mediacion,
         requeridos: reqRes.data || [],
+        requirentes: reqnteRes.data || [],
         observaciones,
         historial,
         documentos: docRes.data || [],
