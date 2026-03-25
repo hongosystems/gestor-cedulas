@@ -217,14 +217,6 @@ export async function POST(req: NextRequest) {
       );
     }
     
-    // Verificar que el recipientId no sea el mismo que quien está respondiendo
-    if (recipientId === user.id) {
-      return NextResponse.json(
-        { error: "No puedes responder a tu propia mención" },
-        { status: 400 }
-      );
-    }
-
     // Fase 1 (init): crear la transferencia y devolver el `storage_path`, pero SIN recibir/subir el archivo.
     if (phase === "init_transfer") {
       if (!hasFile || parentNotif.link !== "/app/recibidos") {
@@ -435,11 +427,14 @@ export async function POST(req: NextRequest) {
       console.log("[API reply] Transferencia creada exitosamente:", transferId);
     }
 
+    const isSelfReply = recipientId === user.id;
+
     // Crear la respuesta como nueva notificación
     const replyMetadata = {
       ...(parentMetadata as object || {}),
       sender_id: user.id, // El remitente de la respuesta es quien responde
       transfer_id: transferId || undefined, // Incluir transfer_id si se creó una transferencia
+      ...(isSelfReply ? { is_my_reply: true } : {}),
     };
 
     // Construir el link al expediente/cédula (usar el mismo que el padre si existe)
@@ -506,8 +501,12 @@ export async function POST(req: NextRequest) {
         user_id: recipientId, // Notificar al remitente original (quien mencionó)
         title: `Re: ${parentNotif.title}`,
         body: hasFile
-          ? `${senderName} respondió con archivo adjunto: ${messageTrimmed}`
-          : `${senderName} respondió: ${messageTrimmed}`,
+          ? isSelfReply
+            ? `Respondiste con archivo adjunto: ${messageTrimmed}`
+            : `${senderName} respondió con archivo adjunto: ${messageTrimmed}`
+          : isSelfReply
+            ? `Respondiste: ${messageTrimmed}`
+            : `${senderName} respondió: ${messageTrimmed}`,
         link: replyLink,
         parent_id: parent_notification_id,
         thread_id: threadId,
@@ -515,7 +514,7 @@ export async function POST(req: NextRequest) {
         is_pjn_favorito: is_pjn_favorito !== undefined ? is_pjn_favorito : parentNotif.is_pjn_favorito,
         metadata: replyMetadata,
         nota_context: messageTrimmed, // Guardar el mensaje como contexto (asegurar que no esté vacío)
-        is_read: false,
+        is_read: isSelfReply,
       })
       .select()
       .single();
@@ -565,44 +564,47 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Crear también una notificación para el usuario que responde, para que pueda ver su propia respuesta
-    // Esta notificación será idéntica pero con user_id del remitente
-    const senderReplyMetadata = {
-      ...(parentMetadata as object || {}),
-      sender_id: user.id,
-      transfer_id: transferId || undefined,
-      is_my_reply: true, // Marcar como respuesta propia
-    };
+    // Crear también una notificación para el usuario que responde, para que pueda ver su propia respuesta.
+    // Si `recipientId === user.id` entonces ya se creó una notificación para el mismo usuario,
+    // así que evitamos duplicarla.
+    if (!isSelfReply) {
+      const senderReplyMetadata = {
+        ...(parentMetadata as object || {}),
+        sender_id: user.id,
+        transfer_id: transferId || undefined,
+        is_my_reply: true, // Marcar como respuesta propia
+      };
 
-    const { data: senderReplyNotif, error: senderReplyError } = await svc
-      .from("notifications")
-      .insert({
-        user_id: user.id, // Notificar al usuario que responde
-        title: `Re: ${parentNotif.title}`,
-        body: hasFile
-          ? `Respondiste con archivo adjunto: ${messageTrimmed}`
-          : `Respondiste: ${messageTrimmed}`,
-        link: replyLink,
-        parent_id: parent_notification_id,
-        thread_id: threadId,
-        expediente_id: expediente_id || parentNotif.expediente_id,
-        is_pjn_favorito: is_pjn_favorito !== undefined ? is_pjn_favorito : parentNotif.is_pjn_favorito,
-        metadata: senderReplyMetadata,
-        nota_context: messageTrimmed,
-        is_read: true, // Marcar como leída porque el usuario ya la escribió
-      })
-      .select()
-      .single();
+      const { data: senderReplyNotif, error: senderReplyError } = await svc
+        .from("notifications")
+        .insert({
+          user_id: user.id, // Notificar al usuario que responde
+          title: `Re: ${parentNotif.title}`,
+          body: hasFile
+            ? `Respondiste con archivo adjunto: ${messageTrimmed}`
+            : `Respondiste: ${messageTrimmed}`,
+          link: replyLink,
+          parent_id: parent_notification_id,
+          thread_id: threadId,
+          expediente_id: expediente_id || parentNotif.expediente_id,
+          is_pjn_favorito: is_pjn_favorito !== undefined ? is_pjn_favorito : parentNotif.is_pjn_favorito,
+          metadata: senderReplyMetadata,
+          nota_context: messageTrimmed,
+          is_read: true, // Marcar como leída porque el usuario ya la escribió
+        })
+        .select()
+        .single();
 
-    if (senderReplyError) {
-      console.error("[API reply] Error al crear notificación para el remitente:", senderReplyError);
-      // No fallar si no se puede crear, la respuesta principal ya se creó
-    } else {
-      console.log("[API reply] Notificación para el remitente creada:", {
-        id: senderReplyNotif?.id,
-        user_id: senderReplyNotif?.user_id,
-        title: senderReplyNotif?.title
-      });
+      if (senderReplyError) {
+        console.error("[API reply] Error al crear notificación para el remitente:", senderReplyError);
+        // No fallar si no se puede crear, la respuesta principal ya se creó
+      } else {
+        console.log("[API reply] Notificación para el remitente creada:", {
+          id: senderReplyNotif?.id,
+          user_id: senderReplyNotif?.user_id,
+          title: senderReplyNotif?.title
+        });
+      }
     }
 
     // Actualizar la nota del expediente/cédula con la respuesta
