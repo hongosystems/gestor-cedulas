@@ -580,47 +580,123 @@ export default function NotificacionesPage() {
         session.session = refreshedSession.session;
       }
 
-      // Si hay un archivo adjunto, usar FormData; si no, usar JSON
-      let body: FormData | string;
-      let headers: HeadersInit;
-      
-      if (replyFile) {
-        const formData = new FormData();
-        formData.append("parent_notification_id", selectedNotif.id);
-        formData.append("message", replyText.trim());
-        formData.append("file", replyFile);
-        if (selectedNotif.expediente_id) {
-          formData.append("expediente_id", selectedNotif.expediente_id);
-        }
-        if (selectedNotif.is_pjn_favorito !== undefined) {
-          formData.append("is_pjn_favorito", String(selectedNotif.is_pjn_favorito));
-        }
-        body = formData;
-        headers = {
-          "Authorization": `Bearer ${session.session.access_token}`,
-        };
-      } else {
-        body = JSON.stringify({
-          parent_notification_id: selectedNotif.id,
-          message: replyText.trim(),
-          expediente_id: selectedNotif.expediente_id,
-          is_pjn_favorito: selectedNotif.is_pjn_favorito,
-        });
-        headers = {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${session.session.access_token}`,
-        };
-      }
+      const messageTrimmed = replyText.trim();
+      const token = session.session.access_token;
+      const MAX_DOCX_BYTES = 10 * 1024 * 1024; // 10MB
 
-      const res = await fetch("/api/notifications/reply", {
-        method: "POST",
-        headers,
-        body,
-      });
+      let res: Response;
+
+      // Si hay un archivo adjunto: evitar multipart hacia Vercel.
+      // En su lugar, hacemos:
+      // 1) init_transfer (crea la transferencia y devuelve storage_path)
+      // 2) upload directo a Supabase Storage desde el browser
+      // 3) commit_reply (crea versión + notificaciones, sin recibir el archivo)
+      if (replyFile) {
+        const name = (replyFile.name || "").toLowerCase();
+        if (!name.endsWith(".docx")) {
+          setToast({ type: "error", message: "Solo se permite .docx como archivo adjunto" });
+          setReplying(false);
+          return;
+        }
+        if (replyFile.size > MAX_DOCX_BYTES) {
+          setToast({ type: "error", message: "El archivo .docx excede el límite de 10MB" });
+          setReplying(false);
+          return;
+        }
+
+        const initRes = await fetch("/api/notifications/reply", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            phase: "init_transfer",
+            parent_notification_id: selectedNotif.id,
+            message: messageTrimmed,
+            expediente_id: selectedNotif.expediente_id,
+            is_pjn_favorito: selectedNotif.is_pjn_favorito,
+            has_file: true,
+          }),
+        });
+
+        const initJson = await initRes.json().catch(() => ({}));
+        if (!initRes.ok) {
+          setToast({
+            type: "error",
+            message: initJson?.error || `Error ${initRes.status}: ${initRes.statusText}`,
+            suggestion: initJson?.suggestion || "",
+          });
+          setReplying(false);
+          return;
+        }
+
+        let transfer: { transferId: string; version: number; storage_path: string } | undefined;
+        if (initJson?.transferNeeded) {
+          if (!initJson?.storage_path || !initJson?.transferId) {
+            setToast({ type: "error", message: "Respuesta inválida al inicializar transferencia" });
+            setReplying(false);
+            return;
+          }
+
+          const { error: uploadErr } = await supabase.storage
+            .from("transfers")
+            .upload(initJson.storage_path, replyFile, {
+              contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              upsert: true,
+            });
+
+          if (uploadErr) {
+            setToast({
+              type: "error",
+              message: uploadErr.message || "No se pudo subir el archivo adjunto",
+            });
+            setReplying(false);
+            return;
+          }
+
+          transfer = {
+            transferId: initJson.transferId,
+            version: initJson.version || 1,
+            storage_path: initJson.storage_path,
+          };
+        }
+
+        res = await fetch("/api/notifications/reply", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            phase: "commit_reply",
+            parent_notification_id: selectedNotif.id,
+            message: messageTrimmed,
+            expediente_id: selectedNotif.expediente_id,
+            is_pjn_favorito: selectedNotif.is_pjn_favorito,
+            has_file: true,
+            ...(transfer ? { transfer } : {}),
+          }),
+        });
+      } else {
+        res = await fetch("/api/notifications/reply", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            parent_notification_id: selectedNotif.id,
+            message: messageTrimmed,
+            expediente_id: selectedNotif.expediente_id,
+            is_pjn_favorito: selectedNotif.is_pjn_favorito,
+          }),
+        });
+      }
 
         if (res.ok) {
           const result = await res.json();
-          const messageText = replyText.trim();
+          const messageText = messageTrimmed;
           setReplyText("");
           
           // Mostrar mensaje de éxito

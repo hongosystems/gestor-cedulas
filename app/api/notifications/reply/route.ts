@@ -51,6 +51,15 @@ export async function POST(req: NextRequest) {
     let message: string;
     let expediente_id: string | undefined;
     let is_pjn_favorito: boolean | undefined;
+    let phase: string | undefined;
+    let has_file_hint = false;
+    let transfer_upload:
+      | {
+          transferId: string;
+          version: number;
+          storage_path: string;
+        }
+      | null = null;
     let file: File | null = null;
 
     if (contentType.includes("multipart/form-data")) {
@@ -69,6 +78,19 @@ export async function POST(req: NextRequest) {
     } else {
       // Es JSON sin archivo
       const body = await req.json();
+      phase = body.phase;
+      has_file_hint = body.has_file === true;
+      if (body.transfer && typeof body.transfer === "object") {
+        const t = body.transfer as any;
+        transfer_upload =
+          t.transferId && t.storage_path
+            ? {
+                transferId: String(t.transferId),
+                version: Number(t.version || 1),
+                storage_path: String(t.storage_path),
+              }
+            : null;
+      }
       parent_notification_id = body.parent_notification_id;
       message = body.message?.trim() || "";
       expediente_id = body.expediente_id;
@@ -91,9 +113,18 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
+      // Este check es solo preventivo; en Vercel igual puede cortar antes (413) si el payload es grande.
+      const MAX_DOCX_BYTES = 10 * 1024 * 1024; // 10MB
+      if (file.size > MAX_DOCX_BYTES) {
+        return NextResponse.json(
+          { error: "El archivo .docx excede el límite de 10MB" },
+          { status: 413 }
+        );
+      }
     }
 
     const svc = supabaseService();
+    const hasFile = !!file || has_file_hint;
 
     // Obtener la notificación padre para obtener el thread_id y metadata
     const { data: parentNotif, error: parentError } = await svc
@@ -194,9 +225,111 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Fase 1 (init): crear la transferencia y devolver el `storage_path`, pero SIN recibir/subir el archivo.
+    if (phase === "init_transfer") {
+      if (!hasFile || parentNotif.link !== "/app/recibidos") {
+        return NextResponse.json({ ok: true, transferNeeded: false });
+      }
+
+      // Obtener el transfer_id original del metadata (si existiera)
+      let originalTransferId: string | null = null;
+      if (parentMetadata && typeof parentMetadata === "object") {
+        originalTransferId = (parentMetadata as any)?.transfer_id || null;
+      }
+
+      // Si no hay transfer_id en metadata, buscar la transferencia más reciente entre el remitente y el destinatario
+      if (!originalTransferId) {
+        const { data: recentTransfer } = await svc
+          .from("file_transfers")
+          .select("id, doc_type")
+          .or(
+            `and(sender_user_id.eq.${recipientId},recipient_user_id.eq.${user.id}),and(sender_user_id.eq.${user.id},recipient_user_id.eq.${recipientId})`
+          )
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (recentTransfer) {
+          originalTransferId = recentTransfer.id;
+        }
+      }
+
+      // Determinar el tipo de documento (CEDULA, OFICIO u OTROS_ESCRITOS) basado en el título de la notificación padre
+      let docType: "CEDULA" | "OFICIO" | "OTROS_ESCRITOS" = "CEDULA";
+      if (parentNotif.title.toLowerCase().includes("oficio")) {
+        docType = "OFICIO";
+      } else if (parentNotif.title.toLowerCase().includes("otros escritos")) {
+        docType = "OTROS_ESCRITOS";
+      } else if (originalTransferId) {
+        // Intentar obtener el tipo del transfer original
+        const { data: originalTransfer } = await svc
+          .from("file_transfers")
+          .select("doc_type")
+          .eq("id", originalTransferId)
+          .single();
+        if (originalTransfer) {
+          docType = originalTransfer.doc_type as "CEDULA" | "OFICIO" | "OTROS_ESCRITOS";
+        }
+      }
+
+      const { data: newTransfer, error: transferError } = await svc
+        .from("file_transfers")
+        .insert({
+          sender_user_id: user.id,
+          recipient_user_id: recipientId,
+          doc_type: docType,
+          title: `Re: ${parentNotif.title}`,
+        })
+        .select("id")
+        .single();
+
+      if (transferError || !newTransfer?.id) {
+        console.error("[API reply:init_transfer] Error al crear transferencia:", transferError);
+        return NextResponse.json(
+          { error: "No se pudo crear la transferencia del archivo adjunto" },
+          { status: 500 }
+        );
+      }
+
+      const transferId = String(newTransfer.id);
+      const version = 1;
+      const storage_path = `transfers/${transferId}/v${version}.docx`;
+
+      return NextResponse.json({
+        ok: true,
+        transferNeeded: true,
+        transferId,
+        version,
+        storage_path,
+      });
+    }
+
     // Si hay un archivo adjunto y la notificación padre es de transferencia, crear una nueva transferencia
     let transferId: string | null = null;
-    if (file && parentNotif.link === "/app/recibidos") {
+    if (phase === "commit_reply") {
+      if (parentNotif.link === "/app/recibidos") {
+        if (!transfer_upload?.transferId || !transfer_upload.storage_path) {
+          return NextResponse.json(
+            { error: "Falta información de transferencia para commit" },
+            { status: 400 }
+          );
+        }
+
+        transferId = transfer_upload.transferId;
+
+        // Commit: insertar versión, pero el archivo ya fue subido directo a Storage desde el cliente.
+        const { error: vErr } = await svc.from("file_transfer_versions").insert({
+          transfer_id: transferId,
+          version: transfer_upload.version || 1,
+          storage_path: transfer_upload.storage_path,
+          created_by: user.id,
+        });
+
+        if (vErr) {
+          return NextResponse.json({ error: vErr.message }, { status: 500 });
+        }
+      }
+    } else if (file && parentNotif.link === "/app/recibidos") {
       // Obtener el transfer_id original del metadata
       let originalTransferId: string | null = null;
       
@@ -364,7 +497,7 @@ export async function POST(req: NextRequest) {
       message: messageTrimmed,
       message_length: messageTrimmed.length,
       transfer_id: transferId,
-      has_file: !!file
+      has_file: hasFile
     });
 
     const { data: replyNotif, error: replyError } = await svc
@@ -372,7 +505,7 @@ export async function POST(req: NextRequest) {
       .insert({
         user_id: recipientId, // Notificar al remitente original (quien mencionó)
         title: `Re: ${parentNotif.title}`,
-        body: file 
+        body: hasFile
           ? `${senderName} respondió con archivo adjunto: ${messageTrimmed}`
           : `${senderName} respondió: ${messageTrimmed}`,
         link: replyLink,
@@ -446,7 +579,7 @@ export async function POST(req: NextRequest) {
       .insert({
         user_id: user.id, // Notificar al usuario que responde
         title: `Re: ${parentNotif.title}`,
-        body: file 
+        body: hasFile
           ? `Respondiste con archivo adjunto: ${messageTrimmed}`
           : `Respondiste: ${messageTrimmed}`,
         link: replyLink,
