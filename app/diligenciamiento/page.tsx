@@ -46,12 +46,33 @@ function fmtDate(iso: string | null | undefined) {
   return `${dd}/${mm}/${yy} ${hh}:${min}`;
 }
 
+function Spinner({ size = 14 }: { size?: number }) {
+  return (
+    <span
+      aria-hidden
+      style={{
+        display: "inline-block",
+        width: size,
+        height: size,
+        border: "2px solid rgba(255,255,255,.22)",
+        borderTopColor: "var(--brand-blue-2)",
+        borderRadius: "50%",
+        animation: "spin 0.75s linear infinite",
+        verticalAlign: "middle",
+        flexShrink: 0,
+      }}
+    />
+  );
+}
+
 export default function DiligenciamientoPage() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
+  const [msgSuccess, setMsgSuccess] = useState(false);
   const [cedulas, setCedulas] = useState<CedulaDiligenciamiento[]>([]);
   const [modalCargarPjn, setModalCargarPjn] = useState<CedulaDiligenciamiento | null>(null);
   const [cargandoPjnId, setCargandoPjnId] = useState<string | null>(null);
+  const [modalPjnError, setModalPjnError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [currentUserName, setCurrentUserName] = useState("");
   const [isAdminMediaciones, setIsAdminMediaciones] = useState(false);
@@ -96,8 +117,10 @@ export default function DiligenciamientoPage() {
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
         if (res.status === 403) {
+          setMsgSuccess(false);
           setMsg(json?.error || "No tienes acceso a esta sección.");
         } else {
+          setMsgSuccess(false);
           setMsg(json?.error || "Error al cargar cédulas.");
         }
         setCedulas([]);
@@ -123,34 +146,154 @@ export default function DiligenciamientoPage() {
     if (!item) return;
 
     setMsg("");
+    setMsgSuccess(false);
+    setModalPjnError(null);
     setCargandoPjnId(item.id);
     try {
       const { data: sess } = await supabase.auth.getSession();
       const token = sess.session?.access_token;
       if (!token) {
-        setMsg("Sesión expirada");
+        setModalPjnError("Sesión expirada");
         return;
       }
 
-      const res = await fetch(`/api/diligenciamiento/${item.id}/cargar-pjn`, {
+      const extensionId = process.env.NEXT_PUBLIC_EXTENSION_ID?.trim();
+      if (extensionId && typeof window !== "undefined" && item.pdf_acredita_url) {
+        const chromeApi = (window as unknown as { chrome?: { runtime?: { sendMessage: (...a: unknown[]) => void; lastError?: { message: string } } } }).chrome;
+        const sendMessage = chromeApi?.runtime?.sendMessage;
+        if (sendMessage) {
+          const jurisdiccion = process.env.NEXT_PUBLIC_PJN_JURISDICCION?.trim() || "CIV";
+          const callbackUrl = `${window.location.origin}/api/cedulas/${item.id}/confirmar-pjn`;
+
+          const extensionHandled = await new Promise<boolean>((resolve) => {
+            try {
+              sendMessage(
+                extensionId,
+                {
+                  action: "cargar",
+                  payload: {
+                    cedulaId: item.id,
+                    expNro: item.ocr_exp_nro || "",
+                    jurisdiccion,
+                    pdfUrl: item.pdf_acredita_url,
+                    callbackUrl,
+                    authToken: token,
+                  },
+                },
+                (response: { ok?: boolean } | undefined) => {
+                  const lastErr = chromeApi?.runtime?.lastError;
+                  if (lastErr?.message) {
+                    console.warn("Extensión PJN no disponible:", lastErr.message);
+                    resolve(false);
+                    return;
+                  }
+                  if (response?.ok) {
+                    setModalCargarPjn(null);
+                    setMsgSuccess(true);
+                    setMsg(
+                      "Se abrió el portal PJN en una pestaña nueva. Cuando envíes el escrito con ENVIAR, se registrará la fecha en el sistema."
+                    );
+                    resolve(true);
+                    return;
+                  }
+                  resolve(false);
+                }
+              );
+            } catch {
+              resolve(false);
+            }
+          });
+
+          if (extensionHandled) return;
+        }
+      }
+
+      const res = await fetch(`/api/cedulas/${item.id}/cargar-pjn`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
 
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        extensionMode?: boolean;
+        cedulaId?: string;
+        expNro?: string;
+        jurisdiccion?: string;
+        exp_numero?: string;
+        exp_anio?: string;
+        pdfUrl?: string;
+        error?: string;
+        pruebaSinEnvio?: boolean;
+        pjn_cargado_at?: string;
+      };
+
       if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
-        setMsg(json?.error || "Error al marcar como cargada");
+        const errText = data?.error || "Error al cargar en PJN";
+        setModalPjnError(errText);
         return;
       }
 
+      // Si el backend devuelve extensionMode, usar la extensión Chrome
+      if (data.extensionMode && data.ok) {
+        const extId = process.env.NEXT_PUBLIC_EXTENSION_ID?.trim();
+        const chromeApi = (window as unknown as { chrome?: { runtime?: { sendMessage: (...a: unknown[]) => void; lastError?: { message: string } } } }).chrome;
+        const sendMessage = chromeApi?.runtime?.sendMessage;
+        if (extId && sendMessage) {
+          const callbackUrl = `${window.location.origin}/api/cedulas/${item.id}/confirmar-pjn`;
+          sendMessage(
+            extId,
+            {
+              action: "cargar",
+              payload: {
+                cedulaId: data.cedulaId,
+                expNro: data.expNro,
+                jurisdiccion: data.jurisdiccion,
+                exp_numero: data.exp_numero,
+                exp_anio: data.exp_anio,
+                pdfUrl: data.pdfUrl,
+                callbackUrl,
+                authToken: token,
+              },
+            },
+            () => {
+              const lastErr = chromeApi?.runtime?.lastError;
+              if (lastErr?.message) {
+                console.warn("Extensión no disponible:", lastErr.message);
+              }
+            }
+          );
+          setModalCargarPjn(null);
+          setMsgSuccess(true);
+          setMsg("El portal PJN se abrió. Revisá la nueva pestaña y apretá ENVIAR.");
+        } else {
+          alert("Instalá la extensión PJN Cargador para continuar.");
+        }
+        return;
+      }
+
+      if (data.pruebaSinEnvio === true) {
+        setModalPjnError(null);
+        setModalCargarPjn(null);
+        setMsgSuccess(true);
+        setMsg(
+          "Prueba OK: el flujo llegó hasta antes de enviar el escrito; no se presentó nada en PJN ni se guardó fecha en el sistema."
+        );
+        return;
+      }
+
+      const at =
+        typeof data.pjn_cargado_at === "string"
+          ? data.pjn_cargado_at
+          : new Date().toISOString();
+
       setCedulas((prev) =>
-        prev.map((c) =>
-          c.id === item.id ? { ...c, pjn_cargado_at: new Date().toISOString() } : c
-        )
+        prev.map((c) => (c.id === item.id ? { ...c, pjn_cargado_at: at } : c))
       );
+      setModalPjnError(null);
       setModalCargarPjn(null);
-    } catch (err: any) {
-      setMsg(err?.message || "Error al cargar en PJN");
+    } catch (err: unknown) {
+      const m = err instanceof Error ? err.message : "Error al cargar en PJN";
+      setModalPjnError(m);
     } finally {
       setCargandoPjnId(null);
     }
@@ -309,7 +452,9 @@ export default function DiligenciamientoPage() {
         </header>
 
         <div className="page">
-          {msg && <div className="error">{msg}</div>}
+          {msg && (
+            <div className={msgSuccess ? "success" : "error"}>{msg}</div>
+          )}
 
           <div className="tableWrap" style={{ marginTop: 10 }}>
             <table className="table" style={{ minWidth: 900 }}>
@@ -353,24 +498,49 @@ export default function DiligenciamientoPage() {
                           {item.pjn_cargado_at ? (
                             <span
                               className="badge badge--verde"
-                              style={{ fontSize: 11, padding: "4px 10px" }}
+                              style={{
+                                fontSize: 11,
+                                padding: "6px 12px",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 6,
+                                maxWidth: 280,
+                                whiteSpace: "normal",
+                                lineHeight: 1.35,
+                              }}
+                              title={fmtDate(item.pjn_cargado_at)}
                             >
-                              Cargada {fmtDate(item.pjn_cargado_at)}
+                              Enviado al PJN ✓ · {fmtDate(item.pjn_cargado_at)}
                             </span>
                           ) : (
                             <button
                               type="button"
                               className="btn"
-                              onClick={() => setModalCargarPjn(item)}
+                              onClick={() => {
+                                setModalPjnError(null);
+                                setModalCargarPjn(item);
+                              }}
+                              disabled={cargandoPjnId === item.id}
                               style={{
                                 fontSize: 12,
                                 padding: "6px 12px",
                                 borderColor: "rgba(0,169,82,.45)",
                                 background: "rgba(0,169,82,.14)",
                                 color: "rgba(235,255,240,.95)",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 8,
+                                opacity: cargandoPjnId === item.id ? 0.85 : 1,
                               }}
                             >
-                              Cargar en PJN
+                              {cargandoPjnId === item.id ? (
+                                <>
+                                  <Spinner size={13} />
+                                  Procesando…
+                                </>
+                              ) : (
+                                "Cargar en PJN"
+                              )}
                             </button>
                           )}
                         </div>
@@ -411,22 +581,34 @@ export default function DiligenciamientoPage() {
             onClick={(e) => e.stopPropagation()}
           >
             <h3 style={{ margin: "0 0 12px", fontSize: 16 }}>Cargar en PJN</h3>
+            <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 12 }}>
+              Se enviará el PDF de acreditación al portal PJN de forma automática (puede tardar entre 30
+              segundos y 2 minutos). No cierres esta ventana hasta que termine.
+            </p>
             <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 16 }}>
-              ¿Confirmas que cargaste la cédula &quot;{modalCargarPjn.caratula?.trim() || "Sin carátula"}&quot; en
-              la plataforma PJN?
+              Cédula: &quot;{modalCargarPjn.caratula?.trim() || "Sin carátula"}&quot;
             </p>
-            <p style={{ color: "var(--muted)", fontSize: 12, marginBottom: 16 }}>
-              Esta acción marcará la cédula como cargada. La integración real con PJN se implementará
-              en una fase posterior.
-            </p>
-            <div style={{ display: "flex", gap: 10 }}>
+            {modalPjnError && (
+              <div className="error" style={{ marginBottom: 14, fontSize: 13 }}>
+                {modalPjnError}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
               <button
                 type="button"
                 className="btn primary"
                 onClick={() => confirmarCargarPjn()}
                 disabled={!!cargandoPjnId}
+                style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
               >
-                {cargandoPjnId ? "Guardando…" : "Confirmar"}
+                {cargandoPjnId ? (
+                  <>
+                    <Spinner size={14} />
+                    Enviando a PJN…
+                  </>
+                ) : (
+                  "Confirmar envío"
+                )}
               </button>
               <button
                 type="button"

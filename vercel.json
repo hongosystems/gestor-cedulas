@@ -1,4 +1,9 @@
 {
+  "functions": {
+    "app/api/cedulas/[id]/cargar-pjn/route.ts": {
+      "maxDuration": 300
+    }
+  },
   "crons": [
     {
       "path": "/api/pjn/sync-favoritos",

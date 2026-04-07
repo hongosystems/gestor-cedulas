@@ -1,0 +1,14 @@
+{
+  "name": "cedula-pjn-cargar",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "postinstall": "npx playwright install chromium --with-deps || npx playwright install chromium"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.2",
+    "playwright": "^1.44.0"
+  }
+}

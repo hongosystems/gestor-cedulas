@@ -1,0 +1,15 @@
+Instalación (modo desarrollador)
+1. Chrome → chrome://extensions → Modo desarrollador ON → Cargar descomprimida → carpeta chrome-extension/
+2. Copiar el ID de la extensión y pegarlo en .env.local como NEXT_PUBLIC_EXTENSION_ID=...
+3. Reiniciar npm run dev.
+
+Credenciales PJN en la extensión
+- Opciones de la extensión (si agregás página de opciones) o consola del service worker:
+  chrome.storage.sync.set({ pjnUsuario: 'CUIT', pjnPassword: '...' })
+
+Dominio de producción
+- Si la app no está en *.vercel.app, agregar la URL exacta en manifest.json:
+  externally_connectable.matches y host_permissions (y en Vercel la misma variable NEXT_PUBLIC_EXTENSION_ID).
+
+Callback confirmar-pjn
+- Tras ENVIAR en el portal, el background llama POST a /api/cedulas/[id]/confirmar-pjn con Authorization Bearer (authToken guardado en el job).
