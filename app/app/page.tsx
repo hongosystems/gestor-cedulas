@@ -20,9 +20,79 @@ type Cedula = {
   read_by_name?: string | null;
   admin_cedulas_completada_at?: string | null;
   admin_cedulas_en_tramite_at?: string | null;
+  pjn_cargado_at?: string | null;
+  pjn_cargado_por?: string | null;
   estado_ocr?: string | null;
   ocr_error?: string | null;
 };
+
+/** Listado Mis Cédulas: columnas usadas en el cliente (principal + fallbacks encadenados). */
+const CEDULAS_SELECT_WITH_PJN =
+  "id, owner_user_id, caratula, juzgado, fecha_carga, pdf_path, tipo_documento, notas, read_by_user_id, read_by_name, admin_cedulas_completada_at, admin_cedulas_en_tramite_at, pjn_cargado_at, pjn_cargado_por, estado_ocr, ocr_error";
+
+const CEDULAS_SELECT_NO_PJN =
+  "id, owner_user_id, caratula, juzgado, fecha_carga, pdf_path, tipo_documento, notas, read_by_user_id, read_by_name, admin_cedulas_completada_at, admin_cedulas_en_tramite_at, estado_ocr, ocr_error";
+
+const CEDULAS_SELECT_READBY_ADMIN =
+  "id, owner_user_id, caratula, juzgado, fecha_carga, pdf_path, read_by_user_id, read_by_name, admin_cedulas_completada_at, admin_cedulas_en_tramite_at";
+
+const CEDULAS_SELECT_MINIMAL =
+  "id, owner_user_id, caratula, juzgado, fecha_carga, pdf_path";
+
+function cedulasErrorMentionsMissingPjn(msg: string | undefined): boolean {
+  const m = (msg || "").toLowerCase();
+  return m.includes("pjn_cargado_at") || m.includes("pjn_cargado_por");
+}
+
+function cedulasErrorSuggestsOptionalColumns(msg: string | undefined): boolean {
+  const m = msg || "";
+  return (
+    m.includes("tipo_documento") ||
+    m.includes("notas") ||
+    m.includes("read_by_user_id") ||
+    m.includes("read_by_name") ||
+    m.includes("admin_cedulas_completada_at") ||
+    m.includes("admin_cedulas_en_tramite_at") ||
+    m.includes("estado_ocr") ||
+    m.includes("ocr_error")
+  );
+}
+
+function padCedulasNoPjn(rows: unknown[] | null): Cedula[] {
+  return (rows ?? []).map((c: any) => ({
+    ...c,
+    pjn_cargado_at: c.pjn_cargado_at ?? null,
+    pjn_cargado_por: c.pjn_cargado_por ?? null,
+  })) as Cedula[];
+}
+
+function padCedulasReadbyAdmin(rows: unknown[] | null): Cedula[] {
+  return (rows ?? []).map((c: any) => ({
+    ...c,
+    tipo_documento: null,
+    notas: null,
+    estado_ocr: null,
+    ocr_error: null,
+    pjn_cargado_at: null,
+    pjn_cargado_por: null,
+  })) as Cedula[];
+}
+
+function padCedulasMinimal(rows: unknown[] | null): Cedula[] {
+  return (rows ?? []).map((c: any) => ({
+    ...c,
+    tipo_documento: null,
+    notas: null,
+    read_by_user_id: null,
+    read_by_name: null,
+    admin_cedulas_completada_at: null,
+    admin_cedulas_en_tramite_at: null,
+    estado_ocr: null,
+    ocr_error: null,
+    pjn_cargado_at: null,
+    pjn_cargado_por: null,
+  })) as Cedula[];
+}
 
 type User = {
   id: string;
@@ -101,7 +171,12 @@ function SemaforoChip({ value }: { value: Semaforo }) {
 
 type EstadoCedula = "Completa" | "En Trámite" | "Pendiente";
 
-function getEstadoCedula(c: { admin_cedulas_completada_at?: string | null; admin_cedulas_en_tramite_at?: string | null }): EstadoCedula {
+function getEstadoCedula(c: {
+  pjn_cargado_at?: string | null;
+  admin_cedulas_completada_at?: string | null;
+  admin_cedulas_en_tramite_at?: string | null;
+}): EstadoCedula {
+  if (c.pjn_cargado_at) return "Completa";
   if (c.admin_cedulas_completada_at) return "Completa";
   if (c.admin_cedulas_en_tramite_at) return "En Trámite";
   return "Pendiente";
@@ -788,6 +863,9 @@ export default function MisCedulasPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [isAdminCedulas, setIsAdminCedulas] = useState(false);
   const [isAdminMediaciones, setIsAdminMediaciones] = useState(false);
+  const [isSuperadmin, setIsSuperadmin] = useState(false);
+  const [isAbogado, setIsAbogado] = useState(false);
+  const [pjnCargadoNombres, setPjnCargadoNombres] = useState<Record<string, string>>({});
   const [popupEnTramite, setPopupEnTramite] = useState<{ cedula: Cedula; abogados: AbogadoInfo[] } | null>(null);
   const [popupCompleta, setPopupCompleta] = useState<{ cedula: Cedula; abogados: AbogadoInfo[] } | null>(null);
   const [completandoId, setCompletandoId] = useState<string | null>(null);
@@ -844,61 +922,60 @@ export default function MisCedulasPage() {
       // Verificar roles (admin_expedientes, admin_cedulas, admin_mediaciones)
       const { data: roleData, error: roleErr } = await supabase
         .from("user_roles")
-        .select("is_admin_expedientes, is_admin_cedulas, is_admin_mediaciones")
+        .select("is_admin_expedientes, is_admin_cedulas, is_admin_mediaciones, is_superadmin, is_abogado")
         .eq("user_id", uid)
         .maybeSingle();
       
       const isAdminExp = !roleErr && roleData?.is_admin_expedientes === true;
       setIsAdminCedulas(!roleErr && roleData?.is_admin_cedulas === true);
       setIsAdminMediaciones(!roleErr && roleData?.is_admin_mediaciones === true);
+      setIsSuperadmin(!roleErr && roleData?.is_superadmin === true);
+      setIsAbogado(!roleErr && roleData?.is_abogado === true);
       
       if (isAdminExp) {
         window.location.href = "/app/expedientes";
         return;
       }
 
-      // listar cédulas del usuario
-      // Intentar incluir admin_cedulas_completada_at, tipo_documento, notas, read_by_user_id, read_by_name, estado_ocr, ocr_error
-      let query = supabase
+      // listar cédulas: intento completo (PJN), luego fallbacks que conservan columnas usadas en UI
+      let cs: any[] | null = null;
+      let cErr = null as { message?: string } | null;
+
+      ({ data: cs, error: cErr } = await supabase
         .from("cedulas")
-        .select("id, owner_user_id, caratula, juzgado, fecha_carga, pdf_path, tipo_documento, notas, read_by_user_id, read_by_name, admin_cedulas_completada_at, admin_cedulas_en_tramite_at, estado_ocr, ocr_error")
+        .select(CEDULAS_SELECT_WITH_PJN)
         .eq("owner_user_id", uid)
-        .order("fecha_carga", { ascending: false });
-      
-      const { data: cs, error: cErr } = await query;
-      
-      // Si el error es porque alguna columna no existe, intentar sin ellas
-      if (cErr && (cErr.message?.includes("tipo_documento") || cErr.message?.includes("notas") || cErr.message?.includes("read_by_user_id") || cErr.message?.includes("read_by_name") || cErr.message?.includes("admin_cedulas_completada_at") || cErr.message?.includes("admin_cedulas_en_tramite_at") || cErr.message?.includes("estado_ocr") || cErr.message?.includes("ocr_error"))) {
-        const { data: cs2, error: cErr2 } = await supabase
+        .order("fecha_carga", { ascending: false }));
+
+      if (cErr && cedulasErrorMentionsMissingPjn(cErr.message)) {
+        ({ data: cs, error: cErr } = await supabase
           .from("cedulas")
-          .select("id, owner_user_id, caratula, juzgado, fecha_carga, pdf_path")
+          .select(CEDULAS_SELECT_NO_PJN)
           .eq("owner_user_id", uid)
-          .order("fecha_carga", { ascending: false });
-        
-        if (cErr2) {
-          setMsg(cErr2.message);
-          setLoading(false);
-          return;
-        }
-        // Agregar columnas opcionales como null
-        const csWithNull = (cs2 ?? []).map((c: any) => ({ 
-          ...c, 
-          tipo_documento: null, 
-          notas: null,
-          read_by_user_id: null,
-          read_by_name: null,
-          admin_cedulas_completada_at: null,
-          admin_cedulas_en_tramite_at: null,
-          estado_ocr: null,
-          ocr_error: null
-        }));
-        setCedulas(csWithNull as Cedula[]);
-        setLoading(false);
-        return;
+          .order("fecha_carga", { ascending: false }));
+        if (!cErr) cs = padCedulasNoPjn(cs as unknown[] | null);
+      }
+
+      if (cErr && cedulasErrorSuggestsOptionalColumns(cErr.message)) {
+        ({ data: cs, error: cErr } = await supabase
+          .from("cedulas")
+          .select(CEDULAS_SELECT_READBY_ADMIN)
+          .eq("owner_user_id", uid)
+          .order("fecha_carga", { ascending: false }));
+        if (!cErr) cs = padCedulasReadbyAdmin(cs as unknown[] | null);
+      }
+
+      if (cErr && cedulasErrorSuggestsOptionalColumns(cErr.message)) {
+        ({ data: cs, error: cErr } = await supabase
+          .from("cedulas")
+          .select(CEDULAS_SELECT_MINIMAL)
+          .eq("owner_user_id", uid)
+          .order("fecha_carga", { ascending: false }));
+        if (!cErr) cs = padCedulasMinimal(cs as unknown[] | null);
       }
 
       if (cErr) {
-        setMsg(cErr.message);
+        setMsg(cErr.message ?? "Error al cargar cédulas");
         setLoading(false);
         return;
       }
@@ -960,6 +1037,32 @@ export default function MisCedulasPage() {
       }
     })();
   }, [cedulas, isAdminCedulas]);
+
+  useEffect(() => {
+    const ids = Array.from(
+      new Set(
+        cedulas
+          .map((c) => c.pjn_cargado_por)
+          .filter((x): x is string => typeof x === "string" && x.length > 0)
+      )
+    );
+    if (ids.length === 0) {
+      setPjnCargadoNombres({});
+      return;
+    }
+    (async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, full_name, email")
+        .in("id", ids);
+      if (error || !data) return;
+      const m: Record<string, string> = {};
+      for (const p of data) {
+        m[p.id] = (p.full_name || "").trim() || (p.email || "").trim() || p.id;
+      }
+      setPjnCargadoNombres(m);
+    })();
+  }, [cedulas]);
 
   // Cerrar menú al hacer clic fuera
   useEffect(() => {
@@ -1060,6 +1163,14 @@ export default function MisCedulasPage() {
     return mapped;
   }, [cedulas, sortField, sortDirection, semaforoFilter, isAdminCedulas, buscarTexto]);
 
+  const showCompletaToolbarBtn = useMemo(() => {
+    const isPureAdminCedulas = isAdminCedulas && !isSuperadmin && !isAbogado;
+    if (!isPureAdminCedulas) return true;
+    const sel = rows.find((r) => r.id === selectedCedulaId);
+    const est = sel ? getEstadoCedula(sel) : null;
+    return est === "Completa";
+  }, [isAdminCedulas, isSuperadmin, isAbogado, rows, selectedCedulaId]);
+
   function handleSort(field: SortField) {
     if (sortField === field) {
       // Si ya está ordenando por esta columna, invertir la dirección
@@ -1103,7 +1214,7 @@ export default function MisCedulasPage() {
   }
 
   async function handleCompleta(c: Cedula) {
-    if (c.admin_cedulas_completada_at) {
+    if (c.pjn_cargado_at || c.admin_cedulas_completada_at) {
       setMsg("Esta cédula/oficio ya fue marcada como completa.");
       return;
     }
@@ -1676,6 +1787,7 @@ export default function MisCedulasPage() {
                 >
                   En Trámite
                 </button>
+                {showCompletaToolbarBtn && (
                 <button
                   onClick={() => {
                     const sel = rows.find(r => r.id === selectedCedulaId);
@@ -1700,6 +1812,7 @@ export default function MisCedulasPage() {
                 >
                   Completa
                 </button>
+                )}
                 </div>
               </>
             )}
@@ -1784,6 +1897,11 @@ export default function MisCedulasPage() {
                     <td>
                       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                         <EstadoChip value={getEstadoCedula(c)} />
+                        {getEstadoCedula(c) === "Completa" && c.pjn_cargado_por && (
+                          <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 500, lineHeight: 1.3 }}>
+                            Cargado por: {pjnCargadoNombres[c.pjn_cargado_por] || "—"}
+                          </span>
+                        )}
                         {isAdminCedulas && c.estado_ocr === "error" && (
                           <button
                             type="button"
@@ -1848,7 +1966,7 @@ export default function MisCedulasPage() {
                               textAlign: "right",
                               fontStyle: "italic"
                             }}>
-                              Leida por {c.read_by_name}
+                              Leída por {c.read_by_name}
                             </div>
                           )}
                         </div>

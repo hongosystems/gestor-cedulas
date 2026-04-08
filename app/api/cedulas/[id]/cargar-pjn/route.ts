@@ -280,10 +280,22 @@ export async function POST(
   }
 
   const pjn_cargado_at = new Date().toISOString();
-  const { error: updateErr } = await svc
-    .from("cedulas")
-    .update({ pjn_cargado_at })
-    .eq("id", cedulaId);
+  const pjn_cargado_por = user.id;
+
+  let updateErr = (
+    await svc
+      .from("cedulas")
+      .update({ pjn_cargado_at, pjn_cargado_por })
+      .eq("id", cedulaId)
+  ).error;
+
+  if (updateErr && updateErr.message?.includes("pjn_cargado_por")) {
+    const retry = await svc
+      .from("cedulas")
+      .update({ pjn_cargado_at })
+      .eq("id", cedulaId);
+    updateErr = retry.error;
+  }
 
   if (updateErr) {
     return NextResponse.json(
