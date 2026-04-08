@@ -65,6 +65,35 @@ function Spinner({ size = 14 }: { size?: number }) {
   );
 }
 
+// IDs de la extensión PJN Cargador en cada PC del estudio
+const EXTENSION_IDS = [
+  process.env.NEXT_PUBLIC_EXTENSION_ID,
+  process.env.NEXT_PUBLIC_EXTENSION_ID_JORGE,
+].filter(Boolean) as string[];
+
+// Intentar conectar con cada ID hasta que uno funcione
+async function enviarAExtension(payload: any): Promise<boolean> {
+  for (const id of EXTENSION_IDS) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        (window as any).chrome.runtime.sendMessage(id, payload, (response: any) => {
+          if ((window as any).chrome.runtime.lastError) {
+            reject((window as any).chrome.runtime.lastError);
+          } else if (response?.ok) {
+            resolve();
+          } else {
+            reject(new Error("Sin respuesta ok"));
+          }
+        });
+      });
+      return true;
+    } catch (_) {
+      continue;
+    }
+  }
+  return false;
+}
+
 export default function DiligenciamientoPage() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
@@ -157,54 +186,29 @@ export default function DiligenciamientoPage() {
         return;
       }
 
-      const extensionId = process.env.NEXT_PUBLIC_EXTENSION_ID?.trim();
-      if (extensionId && typeof window !== "undefined" && item.pdf_acredita_url) {
-        const chromeApi = (window as unknown as { chrome?: { runtime?: { sendMessage: (...a: unknown[]) => void; lastError?: { message: string } } } }).chrome;
-        const sendMessage = chromeApi?.runtime?.sendMessage;
-        if (sendMessage) {
-          const jurisdiccion = process.env.NEXT_PUBLIC_PJN_JURISDICCION?.trim() || "CIV";
-          const callbackUrl = `${window.location.origin}/api/cedulas/${item.id}/confirmar-pjn`;
+      if (EXTENSION_IDS.length > 0 && typeof window !== "undefined" && item.pdf_acredita_url) {
+        const jurisdiccion = process.env.NEXT_PUBLIC_PJN_JURISDICCION?.trim() || "CIV";
+        const callbackUrl = `${window.location.origin}/api/cedulas/${item.id}/confirmar-pjn`;
 
-          const extensionHandled = await new Promise<boolean>((resolve) => {
-            try {
-              sendMessage(
-                extensionId,
-                {
-                  action: "cargar",
-                  payload: {
-                    cedulaId: item.id,
-                    expNro: item.ocr_exp_nro || "",
-                    jurisdiccion,
-                    pdfUrl: item.pdf_acredita_url,
-                    callbackUrl,
-                    authToken: token,
-                  },
-                },
-                (response: { ok?: boolean } | undefined) => {
-                  const lastErr = chromeApi?.runtime?.lastError;
-                  if (lastErr?.message) {
-                    console.warn("Extensión PJN no disponible:", lastErr.message);
-                    resolve(false);
-                    return;
-                  }
-                  if (response?.ok) {
-                    setModalCargarPjn(null);
-                    setMsgSuccess(true);
-                    setMsg(
-                      "Se abrió el portal PJN en una pestaña nueva. Cuando envíes el escrito con ENVIAR, se registrará la fecha en el sistema."
-                    );
-                    resolve(true);
-                    return;
-                  }
-                  resolve(false);
-                }
-              );
-            } catch {
-              resolve(false);
-            }
-          });
+        const extensionHandled = await enviarAExtension({
+          action: "cargar",
+          payload: {
+            cedulaId: item.id,
+            expNro: item.ocr_exp_nro || "",
+            jurisdiccion,
+            pdfUrl: item.pdf_acredita_url,
+            callbackUrl,
+            authToken: token,
+          },
+        });
 
-          if (extensionHandled) return;
+        if (extensionHandled) {
+          setModalCargarPjn(null);
+          setMsgSuccess(true);
+          setMsg(
+            "Se abrió el portal PJN en una pestaña nueva. Cuando envíes el escrito con ENVIAR, se registrará la fecha en el sistema."
+          );
+          return;
         }
       }
 
@@ -235,33 +239,21 @@ export default function DiligenciamientoPage() {
 
       // Si el backend devuelve extensionMode, usar la extensión Chrome
       if (data.extensionMode && data.ok) {
-        const extId = process.env.NEXT_PUBLIC_EXTENSION_ID?.trim();
-        const chromeApi = (window as unknown as { chrome?: { runtime?: { sendMessage: (...a: unknown[]) => void; lastError?: { message: string } } } }).chrome;
-        const sendMessage = chromeApi?.runtime?.sendMessage;
-        if (extId && sendMessage) {
-          const callbackUrl = `${window.location.origin}/api/cedulas/${item.id}/confirmar-pjn`;
-          sendMessage(
-            extId,
-            {
-              action: "cargar",
-              payload: {
-                cedulaId: data.cedulaId,
-                expNro: data.expNro,
-                jurisdiccion: data.jurisdiccion,
-                exp_numero: data.exp_numero,
-                exp_anio: data.exp_anio,
-                pdfUrl: data.pdfUrl,
-                callbackUrl,
-                authToken: token,
-              },
-            },
-            () => {
-              const lastErr = chromeApi?.runtime?.lastError;
-              if (lastErr?.message) {
-                console.warn("Extensión no disponible:", lastErr.message);
-              }
-            }
-          );
+        const callbackUrl = `${window.location.origin}/api/cedulas/${item.id}/confirmar-pjn`;
+        const extensionOk = await enviarAExtension({
+          action: "cargar",
+          payload: {
+            cedulaId: data.cedulaId,
+            expNro: data.expNro,
+            jurisdiccion: data.jurisdiccion,
+            exp_numero: data.exp_numero,
+            exp_anio: data.exp_anio,
+            pdfUrl: data.pdfUrl,
+            callbackUrl,
+            authToken: token,
+          },
+        });
+        if (extensionOk) {
           setModalCargarPjn(null);
           setMsgSuccess(true);
           setMsg("El portal PJN se abrió. Revisá la nueva pestaña y apretá ENVIAR.");
