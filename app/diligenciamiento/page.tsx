@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import NotificationBell from "@/app/components/NotificationBell";
+import styles from "./page.module.css";
 
 type CedulaDiligenciamiento = {
   id: string;
@@ -478,7 +479,7 @@ export default function DiligenciamientoPage() {
                       <td>{item.juzgado?.trim() || <span className="muted">—</span>}</td>
                       <td>{fmtDate(item.ocr_procesado_at)}</td>
                       <td>
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <div className={styles.accionesRow}>
                           <button
                             type="button"
                             className="btn primary"
@@ -488,22 +489,16 @@ export default function DiligenciamientoPage() {
                             Ver PDF
                           </button>
                           {item.pjn_cargado_at ? (
-                            <span
-                              className="badge badge--verde"
-                              style={{
-                                fontSize: 11,
-                                padding: "6px 12px",
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: 6,
-                                maxWidth: 280,
-                                whiteSpace: "normal",
-                                lineHeight: 1.35,
-                              }}
-                              title={fmtDate(item.pjn_cargado_at)}
-                            >
-                              Enviado al PJN ✓ · {fmtDate(item.pjn_cargado_at)}
-                            </span>
+                            <div className={styles.accionesCompletado}>
+                              <span
+                                className={`badge badge--verde ${styles.completadoBadge}`}
+                                title={fmtDate(item.pjn_cargado_at)}
+                              >
+                                <span className="badgeDot" aria-hidden />
+                                Completado
+                              </span>
+                              <span className={styles.fechaPjn}>{fmtDate(item.pjn_cargado_at)}</span>
+                            </div>
                           ) : (
                             <button
                               type="button"
