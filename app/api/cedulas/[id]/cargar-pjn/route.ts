@@ -227,6 +227,21 @@ export async function POST(
       pruebaSinEnvio?: boolean;
     };
   } catch {
+    if (!railwayRes.ok && (railwayRes.status === 404 ||
+        text.includes('Cannot POST /cargar-pjn'))) {
+      return NextResponse.json({
+        ok: true,
+        extensionMode: true,
+        cedulaId,
+        expNro:       cedula.ocr_exp_nro ?? "",
+        pdfUrl:       cedula.pdf_acredita_url ?? "",
+        pdfBase64:    null,
+        pdfNombre:    `acredita-${cedulaId}.pdf`,
+        jurisdiccion: expData.jurisdiccion,
+        exp_numero:   expData.exp_numero,
+        exp_anio:     expData.exp_anio,
+      });
+    }
     if (!railwayRes.ok) {
       const hint =
         text.includes("Cannot POST /cargar-pjn") || text.includes("/cargar-pjn")
