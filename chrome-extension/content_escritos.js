@@ -292,21 +292,54 @@ async function run(pendingJob) {
     await sleep(3000);
 
     // ── Paso 5: Confirmación ──────────────────────────────────
-    mostrarBanner(
-      '✅ <strong>Carga completada.</strong> Revisá los datos y apretá <strong>ENVIAR</strong> para confirmar.',
-      '#1a3a5c'
-    );
+    // Mostrar banner con botón propio para confirmar el envío
+    const banner5 = document.getElementById('pjn-cargador-banner');
+    if (banner5) banner5.remove();
 
+    const bannerConfirm = document.createElement('div');
+    bannerConfirm.id = 'pjn-cargador-banner';
+    bannerConfirm.style.cssText = [
+      'position:fixed','top:0','left:0','right:0','z-index:99999',
+      'background:#1a3a5c','color:#fff','padding:14px 24px',
+      'font-family:sans-serif','font-size:14px',
+      'display:flex','align-items:center','justify-content:space-between',
+      'box-shadow:0 2px 8px rgba(0,0,0,0.3)'
+    ].join(';');
+    bannerConfirm.innerHTML = `
+      <span>✅ <strong>Revisá los datos y apretá ENVIAR en el formulario.</strong>
+      Luego confirmá acá:</span>
+      <button id="pjn-confirmar-envio"
+        style="background:#1a4a2e;border:none;color:#fff;padding:8px 20px;
+        border-radius:4px;cursor:pointer;font-size:14px;font-weight:500;margin-left:16px;
+        white-space:nowrap">
+        ✓ Ya envié — Confirmar
+      </button>
+    `;
+    document.body.prepend(bannerConfirm);
+
+    // El botón propio del banner registra la presentación
+    document.getElementById('pjn-confirmar-envio').addEventListener('click', async () => {
+      document.getElementById('pjn-confirmar-envio').disabled = true;
+      document.getElementById('pjn-confirmar-envio').textContent = 'Registrando...';
+      chrome.runtime.sendMessage({ action: 'pjn_enviado' });
+      bannerConfirm.style.background = '#1a4a2e';
+      bannerConfirm.innerHTML = '<span>✅ Presentación confirmada. Podés cerrar esta pestaña.</span>';
+      chrome.storage.local.remove('pendingJob');
+    });
+
+    // También detectar el ENVIAR automáticamente como fallback
     document.addEventListener('click', async (e) => {
       const btn = e.target.closest('button');
-      if (!btn) return;
-      if (btn.textContent.trim().toUpperCase().includes('ENVIAR')) {
-        await sleep(3000);
+      if (!btn || btn.id === 'pjn-confirmar-envio') return;
+      const txt = btn.textContent.trim().toUpperCase();
+      if (txt.includes('ENVIAR') || txt.includes('SEND') || txt.includes('SUBMIT')) {
+        await sleep(4000);
         chrome.runtime.sendMessage({ action: 'pjn_enviado' });
-        mostrarBanner('✅ Presentación enviada. Podés cerrar esta pestaña.', '#1a4a2e');
+        bannerConfirm.style.background = '#1a4a2e';
+        bannerConfirm.innerHTML = '<span>✅ Presentación enviada. Podés cerrar esta pestaña.</span>';
         chrome.storage.local.remove('pendingJob');
       }
-    }, { capture: true, once: true });
+    }, { capture: true });
 
   } catch (err) {
     console.error('[PJN Escritos]', err);

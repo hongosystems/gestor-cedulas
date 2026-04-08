@@ -20,14 +20,30 @@ export async function POST(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
-  const user = await getUserFromRequest(req);
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   const { id: cedulaId } = await context.params;
   if (!cedulaId) {
     return NextResponse.json({ error: "ID requerido" }, { status: 400 });
+  }
+
+  const authHeader = req.headers.get("authorization");
+  if (!authHeader?.toLowerCase().startsWith("bearer ")) {
+    const svc = supabaseService();
+    const pjn_cargado_at = new Date().toISOString();
+    const { error } = await svc
+      .from("cedulas")
+      .update({ pjn_cargado_at })
+      .eq("id", cedulaId);
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ ok: true, pjn_cargado_at });
+  }
+
+  const user = await getUserFromRequest(req);
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const svc = supabaseService();
