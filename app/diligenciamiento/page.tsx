@@ -106,6 +106,8 @@ export default function DiligenciamientoPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [currentUserName, setCurrentUserName] = useState("");
   const [isAdminMediaciones, setIsAdminMediaciones] = useState(false);
+  const [isAbogado, setIsAbogado] = useState(false);
+  const [isSuperadmin, setIsSuperadmin] = useState(false);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -134,10 +136,12 @@ export default function DiligenciamientoPage() {
 
       const { data: roleData } = await supabase
         .from("user_roles")
-        .select("is_admin_mediaciones")
+        .select("is_admin_mediaciones, is_abogado, is_superadmin")
         .eq("user_id", uid)
         .maybeSingle();
       setIsAdminMediaciones(roleData?.is_admin_mediaciones === true);
+      setIsAbogado(roleData?.is_abogado === true);
+      setIsSuperadmin(roleData?.is_superadmin === true);
 
       const token = sess.session.access_token;
       const res = await fetch("/api/diligenciamiento", {
@@ -187,6 +191,26 @@ export default function DiligenciamientoPage() {
         return;
       }
 
+      const confirmarRes = await fetch(`/api/cedulas/${item.id}/confirmar-pjn`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cedulaId: item.id }),
+      });
+      if (!confirmarRes.ok) {
+        const confirmarJson = await confirmarRes.json().catch(() => ({} as { error?: string }));
+        setModalPjnError(confirmarJson.error || "No se pudo marcar como cargado");
+        return;
+      }
+      const confirmarJson = await confirmarRes.json().catch(() => ({} as { pjn_cargado_at?: string }));
+      const confirmadoAt =
+        typeof confirmarJson?.pjn_cargado_at === "string"
+          ? confirmarJson.pjn_cargado_at
+          : new Date().toISOString();
+      setCedulas((prev) =>
+        prev.map((c) => (c.id === item.id ? { ...c, pjn_cargado_at: confirmadoAt } : c))
+      );
+      setModalCargarPjn(null);
+
       if (EXTENSION_IDS.length > 0 && typeof window !== "undefined" && item.pdf_acredita_url) {
         const jurisdiccion = process.env.NEXT_PUBLIC_PJN_JURISDICCION?.trim() || "CIV";
         const callbackUrl = `${window.location.origin}/api/cedulas/${item.id}/confirmar-pjn`;
@@ -204,7 +228,6 @@ export default function DiligenciamientoPage() {
         });
 
         if (extensionHandled) {
-          setModalCargarPjn(null);
           setMsgSuccess(true);
           setMsg(
             "Se abrió el portal PJN en una pestaña nueva. Cuando envíes el escrito con ENVIAR, se registrará la fecha en el sistema."
@@ -255,7 +278,6 @@ export default function DiligenciamientoPage() {
           },
         });
         if (extensionOk) {
-          setModalCargarPjn(null);
           setMsgSuccess(true);
           setMsg("El portal PJN se abrió. Revisá la nueva pestaña y apretá ENVIAR.");
         } else {
@@ -307,6 +329,31 @@ export default function DiligenciamientoPage() {
   async function logout() {
     await supabase.auth.signOut();
     window.location.href = "/login";
+  }
+
+  async function togglePjnEstado(item: CedulaDiligenciamiento) {
+    if (!(isAbogado || isSuperadmin)) return;
+    if (!item.pjn_cargado_at) {
+      setMsgSuccess(false);
+      setMsg("Estado pendiente. Usá “Cargar en PJN” para marcar como cargado.");
+      return;
+    }
+    const res = await fetch(`/api/cedulas/${item.id}/confirmar-pjn`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reset: true }),
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({} as { error?: string }));
+      setMsgSuccess(false);
+      setMsg(json.error || "No se pudo volver a Pendiente");
+      return;
+    }
+    setCedulas((prev) =>
+      prev.map((c) => (c.id === item.id ? { ...c, pjn_cargado_at: null } : c))
+    );
+    setMsgSuccess(true);
+    setMsg("Estado PJN actualizado a Pendiente.");
   }
 
   return (
@@ -458,12 +505,13 @@ export default function DiligenciamientoPage() {
                   <th style={{ width: 220 }}>Juzgado</th>
                   <th style={{ width: 140 }}>Fecha procesado</th>
                   <th style={{ width: 220 }}>Acciones</th>
+                  {(isAbogado || isSuperadmin) && <th style={{ width: 140 }}>Estado PJN</th>}
                 </tr>
               </thead>
               <tbody>
                 {cedulas.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="muted" style={{ padding: 24, textAlign: "center" }}>
+                    <td colSpan={(isAbogado || isSuperadmin) ? 6 : 5} className="muted" style={{ padding: 24, textAlign: "center" }}>
                       No hay cédulas listas para diligenciamiento.
                     </td>
                   </tr>
@@ -488,18 +536,7 @@ export default function DiligenciamientoPage() {
                           >
                             Ver PDF
                           </button>
-                          {item.pjn_cargado_at ? (
-                            <div className={styles.accionesCompletado}>
-                              <span
-                                className={`badge badge--verde ${styles.completadoBadge}`}
-                                title={fmtDate(item.pjn_cargado_at)}
-                              >
-                                <span className="badgeDot" aria-hidden />
-                                Completado
-                              </span>
-                              <span className={styles.fechaPjn}>{fmtDate(item.pjn_cargado_at)}</span>
-                            </div>
-                          ) : (
+                          {!item.pjn_cargado_at && (
                             <button
                               type="button"
                               className="btn"
@@ -532,6 +569,39 @@ export default function DiligenciamientoPage() {
                           )}
                         </div>
                       </td>
+                      {(isAbogado || isSuperadmin) && (
+                        <td>
+                          <button
+                            type="button"
+                            onClick={() => togglePjnEstado(item)}
+                            title={item.pjn_cargado_at ? `Cargado: ${fmtDate(item.pjn_cargado_at)} · Click para volver a Pendiente` : "Pendiente"}
+                            style={{
+                              border: "1px solid",
+                              borderColor: item.pjn_cargado_at ? "rgba(46, 204, 113, 0.5)" : "rgba(255,255,255,.24)",
+                              background: item.pjn_cargado_at ? "rgba(46, 204, 113, 0.22)" : "rgba(70,78,92,.7)",
+                              color: "rgba(255,255,255,.96)",
+                              borderRadius: 999,
+                              padding: "5px 11px",
+                              fontSize: 12,
+                              fontWeight: 700,
+                              letterSpacing: 0.2,
+                              cursor: item.pjn_cargado_at ? "pointer" : "default",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                            }}
+                          >
+                            {item.pjn_cargado_at ? (
+                              <>
+                                <span aria-hidden style={{ fontSize: 10 }}>●</span>
+                                Cargado
+                              </>
+                            ) : (
+                              "Pendiente"
+                            )}
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   ))
                 )}
