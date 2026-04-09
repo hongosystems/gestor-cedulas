@@ -863,8 +863,6 @@ export default function MisCedulasPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [isAdminCedulas, setIsAdminCedulas] = useState(false);
   const [isAdminMediaciones, setIsAdminMediaciones] = useState(false);
-  const [isSuperadmin, setIsSuperadmin] = useState(false);
-  const [isAbogado, setIsAbogado] = useState(false);
   const [pjnCargadoNombres, setPjnCargadoNombres] = useState<Record<string, string>>({});
   const [popupEnTramite, setPopupEnTramite] = useState<{ cedula: Cedula; abogados: AbogadoInfo[] } | null>(null);
   const [popupCompleta, setPopupCompleta] = useState<{ cedula: Cedula; abogados: AbogadoInfo[] } | null>(null);
@@ -922,15 +920,13 @@ export default function MisCedulasPage() {
       // Verificar roles (admin_expedientes, admin_cedulas, admin_mediaciones)
       const { data: roleData, error: roleErr } = await supabase
         .from("user_roles")
-        .select("is_admin_expedientes, is_admin_cedulas, is_admin_mediaciones, is_superadmin, is_abogado")
+        .select("is_admin_expedientes, is_admin_cedulas, is_admin_mediaciones")
         .eq("user_id", uid)
         .maybeSingle();
       
       const isAdminExp = !roleErr && roleData?.is_admin_expedientes === true;
       setIsAdminCedulas(!roleErr && roleData?.is_admin_cedulas === true);
       setIsAdminMediaciones(!roleErr && roleData?.is_admin_mediaciones === true);
-      setIsSuperadmin(!roleErr && roleData?.is_superadmin === true);
-      setIsAbogado(!roleErr && roleData?.is_abogado === true);
       
       if (isAdminExp) {
         window.location.href = "/app/expedientes";
@@ -1080,18 +1076,9 @@ export default function MisCedulasPage() {
   const rows = useMemo(() => {
     let mapped = cedulas.map((c) => {
       const cargaISO = c.fecha_carga || "";
-      // Si Admin Cedulas marcó como completa, congelar días en ese momento (solo para Admin Cedulas)
       let dias: number | null = null;
       if (cargaISO) {
-        if (isAdminCedulas && c.admin_cedulas_completada_at) {
-          const finISO = c.admin_cedulas_completada_at.substring(0, 10);
-          const cargaDate = new Date(cargaISO);
-          const finDate = new Date(finISO);
-          const diffMs = finDate.getTime() - cargaDate.getTime();
-          dias = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-        } else {
-          dias = daysSince(cargaISO);
-        }
+        dias = daysSince(cargaISO);
       }
       const diasValidos = dias !== null && !isNaN(dias) && dias >= 0 ? dias : null;
       const sem = diasValidos === null ? ("VERDE" as Semaforo) : semaforoByAge(diasValidos);
@@ -1162,14 +1149,6 @@ export default function MisCedulasPage() {
 
     return mapped;
   }, [cedulas, sortField, sortDirection, semaforoFilter, isAdminCedulas, buscarTexto]);
-
-  const showCompletaToolbarBtn = useMemo(() => {
-    const isPureAdminCedulas = isAdminCedulas && !isSuperadmin && !isAbogado;
-    if (!isPureAdminCedulas) return true;
-    const sel = rows.find((r) => r.id === selectedCedulaId);
-    const est = sel ? getEstadoCedula(sel) : null;
-    return est === "Completa";
-  }, [isAdminCedulas, isSuperadmin, isAbogado, rows, selectedCedulaId]);
 
   function handleSort(field: SortField) {
     if (sortField === field) {
@@ -1787,7 +1766,6 @@ export default function MisCedulasPage() {
                 >
                   En Trámite
                 </button>
-                {showCompletaToolbarBtn && (
                 <button
                   onClick={() => {
                     const sel = rows.find(r => r.id === selectedCedulaId);
@@ -1812,7 +1790,6 @@ export default function MisCedulasPage() {
                 >
                   Completa
                 </button>
-                )}
                 </div>
               </>
             )}
