@@ -3,7 +3,7 @@
 import Link from "next/link";
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { daysSince } from "@/lib/semaforo";
+import { daysBetween, daysSince } from "@/lib/semaforo";
 import NotificationBell from "@/app/components/NotificationBell";
 import ResponsableAvatars from "@/app/components/ResponsableAvatars";
 
@@ -1078,7 +1078,14 @@ export default function MisCedulasPage() {
       const cargaISO = c.fecha_carga || "";
       let dias: number | null = null;
       if (cargaISO) {
-        dias = daysSince(cargaISO);
+        // Al quedar Completa, el semáforo se congela en esa fecha.
+        if (c.pjn_cargado_at) {
+          dias = daysBetween(cargaISO, c.pjn_cargado_at);
+        } else if (c.admin_cedulas_completada_at) {
+          dias = daysBetween(cargaISO, c.admin_cedulas_completada_at);
+        } else {
+          dias = daysSince(cargaISO);
+        }
       }
       const diasValidos = dias !== null && !isNaN(dias) && dias >= 0 ? dias : null;
       const sem = diasValidos === null ? ("VERDE" as Semaforo) : semaforoByAge(diasValidos);
