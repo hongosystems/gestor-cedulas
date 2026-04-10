@@ -14,6 +14,7 @@ type CedulaDiligenciamiento = {
   ocr_procesado_at: string | null;
   pdf_acredita_url: string | null;
   pjn_cargado_at: string | null;
+  tipo_documento?: "CEDULA" | "OFICIO" | null;
 };
 
 const linkStyle: React.CSSProperties = {
@@ -160,7 +161,11 @@ export default function DiligenciamientoPage() {
         setCedulas([]);
       } else {
         const json = await res.json();
-        setCedulas(json.cedulas ?? []);
+        const soloCedulas = (json.cedulas ?? []).filter(
+          (c: CedulaDiligenciamiento) =>
+            !c.tipo_documento || c.tipo_documento === "CEDULA"
+        );
+        setCedulas(soloCedulas);
       }
       setLoading(false);
     })();
