@@ -21,10 +21,11 @@ async function requireAdminCedulas(
   return data?.is_admin_cedulas === true || data?.is_superadmin === true;
 }
 
-const RAILWAY_CARGAR_FETCH_MS = 240_000;
+const CARGAR_PJN_FETCH_MS = 300_000;
 
 function railwayCargarPjnBaseUrl(): string | null {
   const raw =
+    process.env.PJN_LOCAL_URL?.trim() ||
     process.env.RAILWAY_CARGAR_PJN_URL?.trim() ||
     process.env.RAILWAY_OCR_URL?.trim();
   if (!raw) return null;
@@ -36,12 +37,26 @@ function railwayCargarPjnBaseUrl(): string | null {
 async function invocarCargarPjnTrasOcr(
   svc: ReturnType<typeof supabaseService>,
   cedulaId: string,
-  expNro: string | null,
-  pdfPublicUrl: string,
-  pdfBuffer: Buffer
+  expNro: string | null
 ) {
   const base = railwayCargarPjnBaseUrl();
   if (!base || !expNro?.trim()) {
+    return;
+  }
+
+  const storagePath = `acredita/${cedulaId}.pdf`;
+  const { data: signedData, error: signedError } = await svc.storage
+    .from("cedulas")
+    .createSignedUrl(storagePath, 300);
+
+  if (signedError || !signedData?.signedUrl) {
+    await svc
+      .from("cedulas")
+      .update({
+        observaciones_pjn:
+          signedError?.message || "No se pudo generar URL firmada del PDF para cargar-pjn",
+      })
+      .eq("id", cedulaId);
     return;
   }
 
@@ -60,32 +75,23 @@ async function invocarCargarPjnTrasOcr(
   }
   const jurisdiccion = favoritoJurisdiccion ?? "CIV";
 
-  const formData = new FormData();
-  formData.append(
-    "pdf",
-    new Blob([new Uint8Array(pdfBuffer)], { type: "application/pdf" }),
-    `acredita-${cedulaId}.pdf`
-  );
-  formData.append("expNro", expNro.trim());
-  formData.append("jurisdiccion", jurisdiccion);
-  formData.append("cedula_id", cedulaId);
-  if (pdfPublicUrl) {
-    formData.append("pdf_acredita_url", pdfPublicUrl);
-  }
-
   const internalSecret = process.env.RAILWAY_INTERNAL_SECRET;
-  const headers: Record<string, string> = {};
-  if (internalSecret) {
-    headers["X-Internal-Secret"] = internalSecret;
-  }
 
   let railwayRes: Response;
   try {
     railwayRes = await fetch(`${base}/cargar-pjn`, {
       method: "POST",
-      body: formData,
-      signal: AbortSignal.timeout(RAILWAY_CARGAR_FETCH_MS),
-      headers,
+      headers: {
+        "Content-Type": "application/json",
+        ...(internalSecret ? { "X-Internal-Secret": internalSecret } : {}),
+      },
+      body: JSON.stringify({
+        expNro: expNro.trim(),
+        jurisdiccion,
+        cedulaId,
+        pdfUrl: signedData.signedUrl,
+      }),
+      signal: AbortSignal.timeout(CARGAR_PJN_FETCH_MS),
     });
   } catch (e: any) {
     const errMsg = e?.message || String(e);
@@ -250,15 +256,8 @@ async function procesarOcrEnBackground(cedulaId: string, svc: ReturnType<typeof 
       })
       .eq("id", cedulaId);
 
-    const pdfBuf = Buffer.from(pdfResultado);
     try {
-      await invocarCargarPjnTrasOcr(
-        svc,
-        cedulaId,
-        expNro,
-        urlData.publicUrl,
-        pdfBuf
-      );
+      await invocarCargarPjnTrasOcr(svc, cedulaId, expNro);
     } catch (e: any) {
       const errMsg = e?.message || String(e);
       await svc.from("cedulas").update({ observaciones_pjn: errMsg }).eq("id", cedulaId);
