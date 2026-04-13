@@ -9,6 +9,20 @@ export const maxDuration = 300;
 
 const RAILWAY_FETCH_MS = 240_000;
 
+async function persistPjnFallo(
+  svc: ReturnType<typeof supabaseService>,
+  cedulaId: string,
+  mensaje: string
+) {
+  const { error } = await svc
+    .from("cedulas")
+    .update({ observaciones_pjn: mensaje, pjn_cargado_at: null })
+    .eq("id", cedulaId);
+  if (error) {
+    console.error("[cargar-pjn] persistPjnFallo:", error.message);
+  }
+}
+
 async function requireAbogado(
   userId: string,
   svc: ReturnType<typeof supabaseService>
@@ -67,6 +81,11 @@ export async function POST(
   }
 
   if (cedula.estado_ocr !== "listo") {
+    await persistPjnFallo(
+      svc,
+      cedulaId,
+      "La cédula no está lista para diligenciamiento (estado OCR distinto de listo)."
+    );
     return NextResponse.json(
       { error: "La cédula no está lista para diligenciamiento" },
       { status: 400 }
@@ -103,6 +122,7 @@ export async function POST(
       ));
 
   if (!tieneAcceso) {
+    await persistPjnFallo(svc, cedulaId, "No tienes acceso al juzgado de esta cédula.");
     return NextResponse.json(
       { error: "No tienes acceso al juzgado de esta cédula" },
       { status: 403 }
@@ -133,33 +153,10 @@ export async function POST(
 
   const base = railwayBaseUrl();
   if (!base) {
-    // Descargar el PDF y pasarlo como base64 para evitar CORS en la extensión
-    let pdfBase64: string | null = null;
-    try {
-      const storagePath = `acredita/${cedulaId}.pdf`;
-      const { data: fileData } = await svc.storage
-        .from("cedulas")
-        .download(storagePath);
-      if (fileData) {
-        const buffer = Buffer.from(await fileData.arrayBuffer());
-        pdfBase64 = buffer.toString("base64");
-      }
-    } catch (_) {
-      // Si falla la descarga, la extensión intentará con pdfUrl como fallback
-    }
-
-    return NextResponse.json({
-      ok: true,
-      extensionMode: true,
-      cedulaId,
-      expNro: cedula.ocr_exp_nro ?? "",
-      pdfUrl: cedula.pdf_acredita_url ?? "",
-      pdfBase64,
-      pdfNombre: `acredita-${cedulaId}.pdf`,
-      jurisdiccion: expData.jurisdiccion,
-      exp_numero: expData.exp_numero,
-      exp_anio: expData.exp_anio,
-    });
+    const msg =
+      "No hay URL de Railway para carga PJN (definí RAILWAY_CARGAR_PJN_URL o RAILWAY_OCR_URL).";
+    await persistPjnFallo(svc, cedulaId, msg);
+    return NextResponse.json({ error: msg }, { status: 503 });
   }
 
   const storagePath = `acredita/${cedulaId}.pdf`;
@@ -168,14 +165,11 @@ export async function POST(
     .download(storagePath);
 
   if (downloadErr || !fileData) {
-    return NextResponse.json(
-      {
-        error:
-          downloadErr?.message ||
-          "No se pudo descargar el PDF de acredita desde el almacenamiento",
-      },
-      { status: 400 }
-    );
+    const msg =
+      downloadErr?.message ||
+      "No se pudo descargar el PDF de acredita desde el almacenamiento";
+    await persistPjnFallo(svc, cedulaId, msg);
+    return NextResponse.json({ error: msg }, { status: 400 });
   }
 
   const pdfBuffer = Buffer.from(await fileData.arrayBuffer());
@@ -183,7 +177,7 @@ export async function POST(
   const formData = new FormData();
   formData.append(
     "pdf",
-    new Blob([pdfBuffer], { type: "application/pdf" }),
+    new Blob([new Uint8Array(pdfBuffer)], { type: "application/pdf" }),
     `acredita-${cedulaId}.pdf`
   );
   formData.append("cedula_id", cedulaId);
@@ -212,10 +206,9 @@ export async function POST(
     });
   } catch (e: any) {
     console.error("[cargar-pjn] fetch Railway:", e?.message || e);
-    return NextResponse.json(
-      { error: e?.message || "No se pudo contactar al servicio de carga PJN" },
-      { status: 502 }
-    );
+    const msg = e?.message || "No se pudo contactar al servicio de carga PJN";
+    await persistPjnFallo(svc, cedulaId, msg);
+    return NextResponse.json({ error: msg }, { status: 502 });
   }
 
   const text = await railwayRes.text();
@@ -227,32 +220,14 @@ export async function POST(
       pruebaSinEnvio?: boolean;
     };
   } catch {
-    if (!railwayRes.ok && (railwayRes.status === 404 ||
-        text.includes('Cannot POST /cargar-pjn'))) {
-      return NextResponse.json({
-        ok: true,
-        extensionMode: true,
-        cedulaId,
-        expNro:       cedula.ocr_exp_nro ?? "",
-        pdfUrl:       cedula.pdf_acredita_url ?? "",
-        pdfBase64:    null,
-        pdfNombre:    `acredita-${cedulaId}.pdf`,
-        jurisdiccion: expData.jurisdiccion,
-        exp_numero:   expData.exp_numero,
-        exp_anio:     expData.exp_anio,
-      });
-    }
     if (!railwayRes.ok) {
       const hint =
         text.includes("Cannot POST /cargar-pjn") || text.includes("/cargar-pjn")
           ? ` El host configurado (RAILWAY_CARGAR_PJN_URL o RAILWAY_OCR_URL) no expone POST /cargar-pjn. Si el OCR está en otro servidor, definí RAILWAY_CARGAR_PJN_URL=http://localhost:PUERTO apuntando a railway-service/cargar-pjn (node server.mjs).`
           : "";
-      return NextResponse.json(
-        {
-          error: `Respuesta no JSON del servicio PJN (${railwayRes.status}).${hint}`,
-        },
-        { status: 502 }
-      );
+      const msg = `Respuesta no JSON del servicio PJN (${railwayRes.status}).${hint}`;
+      await persistPjnFallo(svc, cedulaId, msg);
+      return NextResponse.json({ error: msg }, { status: 502 });
     }
   }
 
@@ -266,6 +241,7 @@ export async function POST(
         "El microservicio configurado no tiene la ruta POST /cargar-pjn. " +
         "Levantá railway-service/cargar-pjn (node server.mjs) y usá RAILWAY_CARGAR_PJN_URL si el OCR usa otra URL.";
     }
+    await persistPjnFallo(svc, cedulaId, errMsg);
     return NextResponse.json(
       { error: errMsg },
       { status: railwayRes.status === 200 ? 502 : railwayRes.status >= 500 ? railwayRes.status : 502 }
@@ -285,23 +261,26 @@ export async function POST(
   let updateErr = (
     await svc
       .from("cedulas")
-      .update({ pjn_cargado_at, pjn_cargado_por })
+      .update({
+        pjn_cargado_at,
+        pjn_cargado_por,
+        observaciones_pjn: null,
+      })
       .eq("id", cedulaId)
   ).error;
 
   if (updateErr && updateErr.message?.includes("pjn_cargado_por")) {
     const retry = await svc
       .from("cedulas")
-      .update({ pjn_cargado_at })
+      .update({ pjn_cargado_at, observaciones_pjn: null })
       .eq("id", cedulaId);
     updateErr = retry.error;
   }
 
   if (updateErr) {
-    return NextResponse.json(
-      { error: updateErr.message || "PJN OK pero falló actualizar la base de datos" },
-      { status: 500 }
-    );
+    const msg = updateErr.message || "PJN OK pero falló actualizar la base de datos";
+    await persistPjnFallo(svc, cedulaId, msg);
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true, pjn_cargado_at });

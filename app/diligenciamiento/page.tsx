@@ -69,7 +69,13 @@ function Spinner({ size = 14 }: { size?: number }) {
   );
 }
 
-function EstadoProcesoAutomaticoBubble({ item }: { item: CedulaDiligenciamiento }) {
+function EstadoProcesoAutomaticoBubble({
+  item,
+  pjnCargaEnCursoId,
+}: {
+  item: CedulaDiligenciamiento;
+  pjnCargaEnCursoId: string | null;
+}) {
   const bubbleBase: React.CSSProperties = {
     fontSize: 11,
     fontWeight: 700,
@@ -81,6 +87,21 @@ function EstadoProcesoAutomaticoBubble({ item }: { item: CedulaDiligenciamiento 
     lineHeight: 1.25,
     maxWidth: 240,
   };
+
+  if (pjnCargaEnCursoId === item.id) {
+    return (
+      <span
+        style={{
+          ...bubbleBase,
+          background: "rgba(59,130,246,.25)",
+          border: "1px solid rgba(59,130,246,.5)",
+          color: "rgba(219,234,254,.95)",
+        }}
+      >
+        {"⏳ Procesando"}
+      </span>
+    );
+  }
 
   if (item.estado_ocr === "procesando") {
     return (
@@ -149,35 +170,6 @@ function EstadoProcesoAutomaticoBubble({ item }: { item: CedulaDiligenciamiento 
     );
   }
   return null;
-}
-
-// IDs de la extensión PJN Cargador en cada PC del estudio
-const EXTENSION_IDS = [
-  process.env.NEXT_PUBLIC_EXTENSION_ID,
-  process.env.NEXT_PUBLIC_EXTENSION_ID_JORGE,
-].filter(Boolean) as string[];
-
-// Intentar conectar con cada ID hasta que uno funcione
-async function enviarAExtension(payload: any): Promise<boolean> {
-  for (const id of EXTENSION_IDS) {
-    try {
-      await new Promise<void>((resolve, reject) => {
-        (window as any).chrome.runtime.sendMessage(id, payload, (response: any) => {
-          if ((window as any).chrome.runtime.lastError) {
-            reject((window as any).chrome.runtime.lastError);
-          } else if (response?.ok) {
-            resolve();
-          } else {
-            reject(new Error("Sin respuesta ok"));
-          }
-        });
-      });
-      return true;
-    } catch (_) {
-      continue;
-    }
-  }
-  return false;
 }
 
 export default function DiligenciamientoPage() {
@@ -323,117 +315,57 @@ export default function DiligenciamientoPage() {
     setMsg("");
     setMsgSuccess(false);
     setModalPjnError(null);
-    setCargandoPjnId(item.id);
+
+    const { data: sess } = await supabase.auth.getSession();
+    const token = sess.session?.access_token;
+    if (!token) {
+      setModalPjnError("Sesión expirada");
+      return;
+    }
+
+    const itemId = item.id;
+    setModalCargarPjn(null);
+    setCargandoPjnId(itemId);
+
     try {
-      const { data: sess } = await supabase.auth.getSession();
-      const token = sess.session?.access_token;
-      if (!token) {
-        setModalPjnError("Sesión expirada");
-        return;
-      }
-
-      const confirmarRes = await fetch(`/api/cedulas/${item.id}/confirmar-pjn`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cedulaId: item.id }),
-      });
-      if (!confirmarRes.ok) {
-        const confirmarJson = await confirmarRes.json().catch(() => ({} as { error?: string }));
-        setModalPjnError(confirmarJson.error || "No se pudo marcar como cargado");
-        return;
-      }
-      const confirmarJson = await confirmarRes.json().catch(() => ({} as { pjn_cargado_at?: string }));
-      const confirmadoAt =
-        typeof confirmarJson?.pjn_cargado_at === "string"
-          ? confirmarJson.pjn_cargado_at
-          : new Date().toISOString();
-      setCedulas((prev) =>
-        prev.map((c) =>
-          c.id === item.id
-            ? { ...c, pjn_cargado_at: confirmadoAt, observaciones_pjn: null }
-            : c
-        )
-      );
-      setModalCargarPjn(null);
-
-      if (EXTENSION_IDS.length > 0 && typeof window !== "undefined" && item.pdf_acredita_url) {
-        const jurisdiccion = process.env.NEXT_PUBLIC_PJN_JURISDICCION?.trim() || "CIV";
-        const callbackUrl = `${window.location.origin}/api/cedulas/${item.id}/confirmar-pjn`;
-
-        const extensionHandled = await enviarAExtension({
-          action: "cargar",
-          payload: {
-            cedulaId: item.id,
-            expNro: item.ocr_exp_nro || "",
-            jurisdiccion,
-            pdfUrl: item.pdf_acredita_url,
-            callbackUrl,
-            authToken: token,
-          },
-        });
-
-        if (extensionHandled) {
-          setMsgSuccess(true);
-          setMsg(
-            "Se abrió el portal PJN en una pestaña nueva. Cuando envíes el escrito con ENVIAR, se registrará la fecha en el sistema."
-          );
-          return;
-        }
-      }
-
-      const res = await fetch(`/api/cedulas/${item.id}/cargar-pjn`, {
+      const res = await fetch(`/api/cedulas/${itemId}/cargar-pjn`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
 
       const data = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
-        extensionMode?: boolean;
-        cedulaId?: string;
-        expNro?: string;
-        jurisdiccion?: string;
-        exp_numero?: string;
-        exp_anio?: string;
-        pdfUrl?: string;
         error?: string;
         pruebaSinEnvio?: boolean;
         pjn_cargado_at?: string;
       };
 
-      if (!res.ok) {
+      if (!res.ok || data.ok !== true) {
         const errText = data?.error || "Error al cargar en PJN";
-        setModalPjnError(errText);
-        return;
-      }
-
-      // Si el backend devuelve extensionMode, usar la extensión Chrome
-      if (data.extensionMode && data.ok) {
-        const callbackUrl = `${window.location.origin}/api/cedulas/${item.id}/confirmar-pjn`;
-        const extensionOk = await enviarAExtension({
-          action: "cargar",
-          payload: {
-            cedulaId: data.cedulaId,
-            expNro: data.expNro,
-            jurisdiccion: data.jurisdiccion,
-            exp_numero: data.exp_numero,
-            exp_anio: data.exp_anio,
-            pdfUrl: data.pdfUrl,
-            callbackUrl,
-            authToken: token,
-          },
-        });
-        if (extensionOk) {
-          setMsgSuccess(true);
-          setMsg("El portal PJN se abrió. Revisá la nueva pestaña y apretá ENVIAR.");
-        } else {
-          alert("Instalá la extensión PJN Cargador para continuar.");
-        }
+        setCedulas((prev) =>
+          prev.map((c) =>
+            c.id === itemId
+              ? { ...c, pjn_cargado_at: null, observaciones_pjn: errText }
+              : c
+          )
+        );
+        setMsgSuccess(false);
+        setMsg(errText);
         return;
       }
 
       if (data.pruebaSinEnvio === true) {
-        setModalPjnError(null);
-        setModalCargarPjn(null);
+        setCedulas((prev) =>
+          prev.map((c) =>
+            c.id === itemId
+              ? {
+                  ...c,
+                  pjn_cargado_at: null,
+                  observaciones_pjn: null,
+                }
+              : c
+          )
+        );
         setMsgSuccess(true);
         setMsg(
           "Prueba OK: el flujo llegó hasta antes de enviar el escrito; no se presentó nada en PJN ni se guardó fecha en el sistema."
@@ -448,14 +380,22 @@ export default function DiligenciamientoPage() {
 
       setCedulas((prev) =>
         prev.map((c) =>
-          c.id === item.id ? { ...c, pjn_cargado_at: at, observaciones_pjn: null } : c
+          c.id === itemId
+            ? { ...c, pjn_cargado_at: at, observaciones_pjn: null }
+            : c
         )
       );
-      setModalPjnError(null);
-      setModalCargarPjn(null);
+      setMsgSuccess(true);
+      setMsg("Carga en PJN completada.");
     } catch (err: unknown) {
       const m = err instanceof Error ? err.message : "Error al cargar en PJN";
-      setModalPjnError(m);
+      setCedulas((prev) =>
+        prev.map((c) =>
+          c.id === itemId ? { ...c, pjn_cargado_at: null, observaciones_pjn: m } : c
+        )
+      );
+      setMsgSuccess(false);
+      setMsg(m);
     } finally {
       setCargandoPjnId(null);
     }
@@ -677,7 +617,10 @@ export default function DiligenciamientoPage() {
                       <td>{fmtDate(item.ocr_procesado_at)}</td>
                       <td>
                         <div className={styles.accionesRow}>
-                          <EstadoProcesoAutomaticoBubble item={item} />
+                          <EstadoProcesoAutomaticoBubble
+                            item={item}
+                            pjnCargaEnCursoId={cargandoPjnId}
+                          />
                           <button
                             type="button"
                             className="btn primary"
