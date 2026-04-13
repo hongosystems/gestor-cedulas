@@ -36,9 +36,8 @@ async function requireAbogado(
 }
 
 function railwayBaseUrl(): string | null {
-  // RAILWAY_CARGAR_PJN_URL tiene prioridad: permite dejar RAILWAY_OCR_URL apuntando
-  // al servicio solo-OCR (nube) y probar cargar-pjn en localhost.
   const raw =
+    process.env.PJN_LOCAL_URL?.trim() ||
     process.env.RAILWAY_CARGAR_PJN_URL?.trim() ||
     process.env.RAILWAY_OCR_URL?.trim();
   if (!raw) return null;
