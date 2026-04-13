@@ -21,6 +21,115 @@ async function requireAdminCedulas(
   return data?.is_admin_cedulas === true || data?.is_superadmin === true;
 }
 
+const RAILWAY_CARGAR_FETCH_MS = 240_000;
+
+function railwayCargarPjnBaseUrl(): string | null {
+  const raw =
+    process.env.RAILWAY_CARGAR_PJN_URL?.trim() ||
+    process.env.RAILWAY_OCR_URL?.trim();
+  if (!raw) return null;
+  let u = raw.replace(/\/$/, "");
+  u = u.replace(/\/cargar-pjn\/?$/i, "");
+  return u;
+}
+
+async function invocarCargarPjnTrasOcr(
+  svc: ReturnType<typeof supabaseService>,
+  cedulaId: string,
+  expNro: string | null,
+  pdfPublicUrl: string,
+  pdfBuffer: Buffer
+) {
+  const base = railwayCargarPjnBaseUrl();
+  if (!base || !expNro?.trim()) {
+    return;
+  }
+
+  const [expNumero, expAnioStr] = expNro.split("/");
+  const expAnio = expAnioStr ? parseInt(expAnioStr, 10) : NaN;
+
+  let favoritoJurisdiccion: string | null = null;
+  if (expNumero && !Number.isNaN(expAnio)) {
+    const { data: fav } = await svc
+      .from("pjn_favoritos")
+      .select("jurisdiccion")
+      .eq("numero", expNumero)
+      .eq("anio", expAnio)
+      .maybeSingle();
+    favoritoJurisdiccion = fav?.jurisdiccion ?? null;
+  }
+  const jurisdiccion = favoritoJurisdiccion ?? "CIV";
+
+  const formData = new FormData();
+  formData.append(
+    "pdf",
+    new Blob([pdfBuffer], { type: "application/pdf" }),
+    `acredita-${cedulaId}.pdf`
+  );
+  formData.append("expNro", expNro.trim());
+  formData.append("jurisdiccion", jurisdiccion);
+  formData.append("cedula_id", cedulaId);
+  if (pdfPublicUrl) {
+    formData.append("pdf_acredita_url", pdfPublicUrl);
+  }
+
+  const internalSecret = process.env.RAILWAY_INTERNAL_SECRET;
+  const headers: Record<string, string> = {};
+  if (internalSecret) {
+    headers["X-Internal-Secret"] = internalSecret;
+  }
+
+  let railwayRes: Response;
+  try {
+    railwayRes = await fetch(`${base}/cargar-pjn`, {
+      method: "POST",
+      body: formData,
+      signal: AbortSignal.timeout(RAILWAY_CARGAR_FETCH_MS),
+      headers,
+    });
+  } catch (e: any) {
+    const errMsg = e?.message || String(e);
+    await svc.from("cedulas").update({ observaciones_pjn: errMsg }).eq("id", cedulaId);
+    return;
+  }
+
+  const text = await railwayRes.text();
+  let payload: { ok?: boolean; error?: string; pruebaSinEnvio?: boolean } = {};
+  try {
+    payload = JSON.parse(text) as typeof payload;
+  } catch {
+    await svc
+      .from("cedulas")
+      .update({
+        observaciones_pjn: `Respuesta no JSON (${railwayRes.status}): ${text.slice(0, 500)}`,
+      })
+      .eq("id", cedulaId);
+    return;
+  }
+
+  if (payload.ok === true && payload.pruebaSinEnvio !== true) {
+    await svc
+      .from("cedulas")
+      .update({
+        pjn_cargado_at: new Date().toISOString(),
+        observaciones_pjn: null,
+      })
+      .eq("id", cedulaId);
+    return;
+  }
+
+  if (payload.ok === true && payload.pruebaSinEnvio === true) {
+    return;
+  }
+
+  const errMsg =
+    payload.error ||
+    text ||
+    railwayRes.statusText ||
+    `Error cargar-pjn (${railwayRes.status})`;
+  await svc.from("cedulas").update({ observaciones_pjn: errMsg }).eq("id", cedulaId);
+}
+
 async function procesarOcrEnBackground(cedulaId: string, svc: ReturnType<typeof supabaseService>) {
   const railwayUrl = process.env.RAILWAY_OCR_URL;
   if (!railwayUrl) {
@@ -140,6 +249,20 @@ async function procesarOcrEnBackground(cedulaId: string, svc: ReturnType<typeof 
         ocr_error: null,
       })
       .eq("id", cedulaId);
+
+    const pdfBuf = Buffer.from(pdfResultado);
+    try {
+      await invocarCargarPjnTrasOcr(
+        svc,
+        cedulaId,
+        expNro,
+        urlData.publicUrl,
+        pdfBuf
+      );
+    } catch (e: any) {
+      const errMsg = e?.message || String(e);
+      await svc.from("cedulas").update({ observaciones_pjn: errMsg }).eq("id", cedulaId);
+    }
   } catch (e: any) {
     const errMsg = e?.message || "Error inesperado en OCR";
     const errCause = e?.cause ? ` (causa: ${String(e.cause)})` : "";
