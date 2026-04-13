@@ -174,6 +174,26 @@ export async function POST(
 
   const pdfBuffer = Buffer.from(await fileData.arrayBuffer());
 
+  if (cedula.ocr_exp_nro == null || cedula.ocr_exp_nro === "") {
+    console.error("[cargar-pjn] expNro ausente (cedula.ocr_exp_nro) antes de enviar a Railway");
+  }
+  if (cedula.pdf_acredita_url == null || cedula.pdf_acredita_url === "") {
+    console.error("[cargar-pjn] pdfUrl ausente (cedula.pdf_acredita_url) antes de enviar a Railway");
+  }
+  if (cedulaId == null || cedulaId === "") {
+    console.error("[cargar-pjn] cedula_id ausente antes de enviar a Railway");
+  }
+  if (expData.jurisdiccion == null || expData.jurisdiccion === "") {
+    console.error("[cargar-pjn] jurisdiccion ausente antes de enviar a Railway");
+  }
+
+  console.log("[cargar-pjn] enviando a Railway:", {
+    expNro: cedula.ocr_exp_nro,
+    jurisdiccion: expData.jurisdiccion,
+    cedulaId,
+    pdfUrl: cedula.pdf_acredita_url,
+  });
+
   const formData = new FormData();
   formData.append(
     "pdf",
@@ -181,12 +201,15 @@ export async function POST(
     `acredita-${cedulaId}.pdf`
   );
   formData.append("cedula_id", cedulaId);
+  formData.append("expNro", (cedula.ocr_exp_nro ?? "").trim());
+  formData.append("jurisdiccion", expData.jurisdiccion);
+  const pdfUrlVal = cedula.pdf_acredita_url ?? "";
+  formData.append("pdfUrl", pdfUrlVal);
+  if (pdfUrlVal) {
+    formData.append("pdf_acredita_url", pdfUrlVal);
+  }
   formData.append("ocr_exp_nro", cedula.ocr_exp_nro ?? "");
   formData.append("ocr_caratula", cedula.ocr_caratula ?? "");
-  if (cedula.pdf_acredita_url) {
-    formData.append("pdf_acredita_url", cedula.pdf_acredita_url);
-  }
-  formData.append("jurisdiccion", expData.jurisdiccion);
   formData.append("exp_numero", expData.exp_numero);
   formData.append("exp_anio", expData.exp_anio);
 
