@@ -63,7 +63,7 @@ async function invocarCargarPjnTrasOcr(
   const formData = new FormData();
   formData.append(
     "pdf",
-    new Blob([pdfBuffer], { type: "application/pdf" }),
+    new Blob([new Uint8Array(pdfBuffer)], { type: "application/pdf" }),
     `acredita-${cedulaId}.pdf`
   );
   formData.append("expNro", expNro.trim());
