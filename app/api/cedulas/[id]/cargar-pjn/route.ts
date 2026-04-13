@@ -159,21 +159,6 @@ export async function POST(
     return NextResponse.json({ error: msg }, { status: 503 });
   }
 
-  const storagePath = `acredita/${cedulaId}.pdf`;
-  const { data: fileData, error: downloadErr } = await svc.storage
-    .from("cedulas")
-    .download(storagePath);
-
-  if (downloadErr || !fileData) {
-    const msg =
-      downloadErr?.message ||
-      "No se pudo descargar el PDF de acredita desde el almacenamiento";
-    await persistPjnFallo(svc, cedulaId, msg);
-    return NextResponse.json({ error: msg }, { status: 400 });
-  }
-
-  const pdfBuffer = Buffer.from(await fileData.arrayBuffer());
-
   if (cedula.ocr_exp_nro == null || cedula.ocr_exp_nro === "") {
     console.error("[cargar-pjn] expNro ausente (cedula.ocr_exp_nro) antes de enviar a Railway");
   }
@@ -194,38 +179,23 @@ export async function POST(
     pdfUrl: cedula.pdf_acredita_url,
   });
 
-  const formData = new FormData();
-  formData.append(
-    "pdf",
-    new Blob([new Uint8Array(pdfBuffer)], { type: "application/pdf" }),
-    `acredita-${cedulaId}.pdf`
-  );
-  formData.append("cedula_id", cedulaId);
-  formData.append("expNro", (cedula.ocr_exp_nro ?? "").trim());
-  formData.append("jurisdiccion", expData.jurisdiccion);
-  const pdfUrlVal = cedula.pdf_acredita_url ?? "";
-  formData.append("pdfUrl", pdfUrlVal);
-  if (pdfUrlVal) {
-    formData.append("pdf_acredita_url", pdfUrlVal);
-  }
-  formData.append("ocr_exp_nro", cedula.ocr_exp_nro ?? "");
-  formData.append("ocr_caratula", cedula.ocr_caratula ?? "");
-  formData.append("exp_numero", expData.exp_numero);
-  formData.append("exp_anio", expData.exp_anio);
-
   const internalSecret = process.env.RAILWAY_INTERNAL_SECRET;
-  const headers: Record<string, string> = {};
-  if (internalSecret) {
-    headers["X-Internal-Secret"] = internalSecret;
-  }
 
   let railwayRes: Response;
   try {
     railwayRes = await fetch(`${base}/cargar-pjn`, {
       method: "POST",
-      body: formData,
+      headers: {
+        "Content-Type": "application/json",
+        ...(internalSecret ? { "X-Internal-Secret": internalSecret } : {}),
+      },
+      body: JSON.stringify({
+        expNro: cedula.ocr_exp_nro,
+        jurisdiccion: expData.jurisdiccion,
+        cedulaId,
+        pdfUrl: cedula.pdf_acredita_url,
+      }),
       signal: AbortSignal.timeout(RAILWAY_FETCH_MS),
-      headers,
     });
   } catch (e: any) {
     console.error("[cargar-pjn] fetch Railway:", e?.message || e);
