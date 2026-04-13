@@ -13,6 +13,13 @@ Adjunto los seis formularios.
 
 Saludos Cordiales.`;
 
+const DEFAULT_DESTINATARIOS =
+  "oliverarodrigo86@gmail.com, gfhisi@gmail.com, mf.magaliflores@gmail.com, audiencias@estudiobustinduy.com";
+
+const DEFAULT_DESTINATARIOS_LIST = DEFAULT_DESTINATARIOS.split(/[,;]/)
+  .map((d) => d.trim())
+  .filter(Boolean);
+
 type Lote = {
   id: string;
   numero_lote: number;
@@ -62,7 +69,7 @@ export default function MediacionLotesPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [sending, setSending] = useState(false);
 
-  const [destinatarios, setDestinatarios] = useState("oliverarodrigo86@gmail.com, gfhisi@gmail.com");
+  const [destinatarios, setDestinatarios] = useState(DEFAULT_DESTINATARIOS);
   const [umbral, setUmbral] = useState(56);
   const [envioAutomatico, setEnvioAutomatico] = useState(false);
 
@@ -124,7 +131,7 @@ export default function MediacionLotesPage() {
     setMsg("");
     const token = session.access_token;
     const destArray = destinatarios.split(/[,;]/).map((d) => d.trim()).filter(Boolean);
-    const dest = destArray.length > 0 ? destArray : ["oliverarodrigo86@gmail.com", "gfhisi@gmail.com"];
+    const dest = destArray.length > 0 ? destArray : DEFAULT_DESTINATARIOS_LIST;
 
     const createRes = await fetch("/api/mediaciones/lotes", {
       method: "POST",
@@ -222,7 +229,7 @@ export default function MediacionLotesPage() {
             <h3 style={{ marginBottom: 12 }}>Configuración</h3>
             <div className="field" style={{ marginBottom: 12 }}>
               <label className="label">Destinatarios (emails separados por coma)</label>
-              <input className="input" value={destinatarios} onChange={(e) => setDestinatarios(e.target.value)} placeholder="oliverarodrigo86@gmail.com, gfhisi@gmail.com" />
+              <input className="input" value={destinatarios} onChange={(e) => setDestinatarios(e.target.value)} placeholder={DEFAULT_DESTINATARIOS} />
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
               <div className="field" style={{ width: 100 }}>

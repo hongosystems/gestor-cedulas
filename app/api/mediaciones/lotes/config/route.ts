@@ -6,7 +6,12 @@ export const runtime = "nodejs";
 
 const DEFAULT_CONFIG = {
   umbral: 56,
-  destinatarios: ["oliverarodrigo86@gmail.com", "gfhisi@gmail.com"],
+  destinatarios: [
+    "oliverarodrigo86@gmail.com",
+    "gfhisi@gmail.com",
+    "mf.magaliflores@gmail.com",
+    "audiencias@estudiobustinduy.com",
+  ],
   texto_mail: `¿Como estan? Solicito fecha de mediacion . 
 
 Tratar con Magaly Flores (mf.magaliflores@gmail.com) que es quien asiste a las audiencias.  

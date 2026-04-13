@@ -73,7 +73,12 @@ export async function POST(req: NextRequest) {
     const umbral = body.umbral ?? 56;
     const destinatarios = Array.isArray(body.destinatarios) && body.destinatarios.length > 0
       ? body.destinatarios
-      : ["oliverarodrigo86@gmail.com", "gfhisi@gmail.com"];
+      : [
+          "oliverarodrigo86@gmail.com",
+          "gfhisi@gmail.com",
+          "mf.magaliflores@gmail.com",
+          "audiencias@estudiobustinduy.com",
+        ];
     const texto_mail = body.texto_mail ?? `¿Como estan? Solicito fecha de mediacion . 
 
 Tratar con Magaly Flores (mf.magaliflores@gmail.com) que es quien asiste a las audiencias.  

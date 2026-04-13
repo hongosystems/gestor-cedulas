@@ -158,7 +158,12 @@ export async function POST(req: NextRequest) {
 
     const to = Array.isArray(lote!.destinatarios) && lote!.destinatarios.length > 0
       ? lote!.destinatarios
-      : ["oliverarodrigo86@gmail.com", "gfhisi@gmail.com"];
+      : [
+          "oliverarodrigo86@gmail.com",
+          "gfhisi@gmail.com",
+          "mf.magaliflores@gmail.com",
+          "audiencias@estudiobustinduy.com",
+        ];
     const subject = "SOLICITA FECHAS DE MEDIACION";
     const DEFAULT_BODY = `¿Como estan? Solicito fecha de mediacion . 
 
