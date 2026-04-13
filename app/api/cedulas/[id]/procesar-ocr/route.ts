@@ -321,6 +321,18 @@ export async function POST(
     );
   }
 
+  const { error: marcarProcesandoErr } = await svc
+    .from("cedulas")
+    .update({ estado_ocr: "procesando" })
+    .eq("id", cedulaId);
+
+  if (marcarProcesandoErr) {
+    return NextResponse.json(
+      { error: marcarProcesandoErr.message || "No se pudo marcar como procesando" },
+      { status: 500 }
+    );
+  }
+
   // Fire and forget: responder de inmediato, procesar en background
   after(() => procesarOcrEnBackground(cedulaId, svc));
 

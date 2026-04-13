@@ -32,8 +32,10 @@ export async function GET(req: NextRequest) {
 
   const { data: cedulas, error } = await svc
     .from("cedulas")
-    .select("id, caratula, juzgado, ocr_exp_nro, ocr_procesado_at, pdf_acredita_url, pjn_cargado_at, tipo_documento")
-    .eq("estado_ocr", "listo")
+    .select(
+      "id, caratula, juzgado, ocr_exp_nro, ocr_procesado_at, pdf_acredita_url, pjn_cargado_at, tipo_documento, estado_ocr, observaciones_pjn"
+    )
+    .in("estado_ocr", ["listo", "procesando"])
     .eq("tipo_documento", "CEDULA")
     .order("ocr_procesado_at", { ascending: false });
 

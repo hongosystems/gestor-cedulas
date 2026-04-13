@@ -15,6 +15,8 @@ type CedulaDiligenciamiento = {
   pdf_acredita_url: string | null;
   pjn_cargado_at: string | null;
   tipo_documento?: "CEDULA" | "OFICIO" | null;
+  estado_ocr?: string | null;
+  observaciones_pjn?: string | null;
 };
 
 const linkStyle: React.CSSProperties = {
@@ -65,6 +67,88 @@ function Spinner({ size = 14 }: { size?: number }) {
       }}
     />
   );
+}
+
+function EstadoProcesoAutomaticoBubble({ item }: { item: CedulaDiligenciamiento }) {
+  const bubbleBase: React.CSSProperties = {
+    fontSize: 11,
+    fontWeight: 700,
+    padding: "4px 10px",
+    borderRadius: 999,
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 4,
+    lineHeight: 1.25,
+    maxWidth: 240,
+  };
+
+  if (item.estado_ocr === "procesando") {
+    return (
+      <span
+        style={{
+          ...bubbleBase,
+          background: "rgba(59,130,246,.25)",
+          border: "1px solid rgba(59,130,246,.5)",
+          color: "rgba(219,234,254,.95)",
+        }}
+      >
+        {"⏳ Procesando"}
+      </span>
+    );
+  }
+  if (item.pjn_cargado_at) {
+    return (
+      <span
+        style={{
+          ...bubbleBase,
+          background: "rgba(46,204,113,.22)",
+          border: "1px solid rgba(46,204,113,.5)",
+          color: "rgba(220,255,230,.96)",
+        }}
+      >
+        {"\u2705 Cargado"}
+      </span>
+    );
+  }
+  if (item.observaciones_pjn) {
+    const obs = item.observaciones_pjn;
+    const short = obs.length > 90 ? `${obs.slice(0, 90)}…` : obs;
+    return (
+      <span
+        style={{
+          display: "inline-flex",
+          flexDirection: "column",
+          alignItems: "flex-start",
+          gap: 2,
+          maxWidth: 260,
+        }}
+      >
+        <span
+          title={obs}
+          style={{
+            ...bubbleBase,
+            background: "rgba(231,76,60,.2)",
+            border: "1px solid rgba(231,76,60,.45)",
+            color: "rgba(255,220,216,.96)",
+          }}
+        >
+          {"\u26A0\uFE0F Reintentar"}
+        </span>
+        <span
+          title={obs}
+          style={{
+            fontSize: 10,
+            color: "rgba(234,243,255,.65)",
+            lineHeight: 1.35,
+            wordBreak: "break-word",
+          }}
+        >
+          {short}
+        </span>
+      </span>
+    );
+  }
+  return null;
 }
 
 // IDs de la extensión PJN Cargador en cada PC del estudio
@@ -180,6 +264,58 @@ export default function DiligenciamientoPage() {
     });
   }
 
+  async function prepararYAbrirCargarPjn(item: CedulaDiligenciamiento) {
+    if (item.estado_ocr === "procesando") return;
+    setModalPjnError(null);
+
+    if (item.pjn_cargado_at) {
+      if (!window.confirm("La carga ya fue realizada. ¿Desea reintentar?")) return;
+      const res = await fetch(`/api/cedulas/${item.id}/confirmar-pjn`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reset: true }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({} as { error?: string }));
+        setMsgSuccess(false);
+        setMsg(json?.error || "No se pudo reiniciar el estado de carga");
+        return;
+      }
+      const cleared: CedulaDiligenciamiento = {
+        ...item,
+        pjn_cargado_at: null,
+        observaciones_pjn: null,
+      };
+      setCedulas((prev) => prev.map((c) => (c.id === item.id ? cleared : c)));
+      setModalCargarPjn(cleared);
+      return;
+    }
+
+    if (item.observaciones_pjn) {
+      const res = await fetch(`/api/cedulas/${item.id}/confirmar-pjn`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reset: true }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({} as { error?: string }));
+        setMsgSuccess(false);
+        setMsg(json?.error || "No se pudo limpiar el error para reintentar");
+        return;
+      }
+      const cleared: CedulaDiligenciamiento = {
+        ...item,
+        pjn_cargado_at: null,
+        observaciones_pjn: null,
+      };
+      setCedulas((prev) => prev.map((c) => (c.id === item.id ? cleared : c)));
+      setModalCargarPjn(cleared);
+      return;
+    }
+
+    setModalCargarPjn(item);
+  }
+
   async function confirmarCargarPjn() {
     const item = modalCargarPjn;
     if (!item) return;
@@ -212,7 +348,11 @@ export default function DiligenciamientoPage() {
           ? confirmarJson.pjn_cargado_at
           : new Date().toISOString();
       setCedulas((prev) =>
-        prev.map((c) => (c.id === item.id ? { ...c, pjn_cargado_at: confirmadoAt } : c))
+        prev.map((c) =>
+          c.id === item.id
+            ? { ...c, pjn_cargado_at: confirmadoAt, observaciones_pjn: null }
+            : c
+        )
       );
       setModalCargarPjn(null);
 
@@ -307,7 +447,9 @@ export default function DiligenciamientoPage() {
           : new Date().toISOString();
 
       setCedulas((prev) =>
-        prev.map((c) => (c.id === item.id ? { ...c, pjn_cargado_at: at } : c))
+        prev.map((c) =>
+          c.id === item.id ? { ...c, pjn_cargado_at: at, observaciones_pjn: null } : c
+        )
       );
       setModalPjnError(null);
       setModalCargarPjn(null);
@@ -355,7 +497,9 @@ export default function DiligenciamientoPage() {
       return;
     }
     setCedulas((prev) =>
-      prev.map((c) => (c.id === item.id ? { ...c, pjn_cargado_at: null } : c))
+      prev.map((c) =>
+        c.id === item.id ? { ...c, pjn_cargado_at: null, observaciones_pjn: null } : c
+      )
     );
     setMsgSuccess(true);
     setMsg("Estado PJN actualizado a Pendiente.");
@@ -533,6 +677,7 @@ export default function DiligenciamientoPage() {
                       <td>{fmtDate(item.ocr_procesado_at)}</td>
                       <td>
                         <div className={styles.accionesRow}>
+                          <EstadoProcesoAutomaticoBubble item={item} />
                           <button
                             type="button"
                             className="btn primary"
@@ -541,37 +686,37 @@ export default function DiligenciamientoPage() {
                           >
                             Ver PDF
                           </button>
-                          {!item.pjn_cargado_at && (
-                            <button
-                              type="button"
-                              className="btn"
-                              onClick={() => {
-                                setModalPjnError(null);
-                                setModalCargarPjn(item);
-                              }}
-                              disabled={cargandoPjnId === item.id}
-                              style={{
-                                fontSize: 12,
-                                padding: "6px 12px",
-                                borderColor: "rgba(0,169,82,.45)",
-                                background: "rgba(0,169,82,.14)",
-                                color: "rgba(235,255,240,.95)",
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: 8,
-                                opacity: cargandoPjnId === item.id ? 0.85 : 1,
-                              }}
-                            >
-                              {cargandoPjnId === item.id ? (
-                                <>
-                                  <Spinner size={13} />
-                                  Procesando…
-                                </>
-                              ) : (
-                                "Cargar en PJN"
-                              )}
-                            </button>
-                          )}
+                          {item.estado_ocr !== "procesando" &&
+                            (item.estado_ocr === "listo" || !!item.observaciones_pjn) && (
+                              <button
+                                type="button"
+                                className="btn"
+                                onClick={() => void prepararYAbrirCargarPjn(item)}
+                                disabled={cargandoPjnId === item.id}
+                                style={{
+                                  fontSize: 12,
+                                  padding: "6px 12px",
+                                  borderColor: "rgba(0,169,82,.45)",
+                                  background: "rgba(0,169,82,.14)",
+                                  color: "rgba(235,255,240,.95)",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 8,
+                                  opacity: cargandoPjnId === item.id ? 0.85 : 1,
+                                }}
+                              >
+                                {cargandoPjnId === item.id ? (
+                                  <>
+                                    <Spinner size={13} />
+                                    Procesando…
+                                  </>
+                                ) : item.observaciones_pjn ? (
+                                  "Reintentar"
+                                ) : (
+                                  "Cargar en PJN"
+                                )}
+                              </button>
+                            )}
                         </div>
                       </td>
                       {(isAbogado || isSuperadmin) && (
