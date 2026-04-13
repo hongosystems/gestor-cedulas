@@ -159,6 +159,18 @@ export async function POST(
     return NextResponse.json({ error: msg }, { status: 503 });
   }
 
+  const storagePath = `acredita/${cedulaId}.pdf`;
+  const { data: signedData, error: signedError } = await svc.storage
+    .from("cedulas")
+    .createSignedUrl(storagePath, 300);
+
+  if (signedError || !signedData?.signedUrl) {
+    return NextResponse.json(
+      { ok: false, error: "No se pudo generar URL firmada del PDF" },
+      { status: 500 }
+    );
+  }
+
   if (cedula.ocr_exp_nro == null || cedula.ocr_exp_nro === "") {
     console.error("[cargar-pjn] expNro ausente (cedula.ocr_exp_nro) antes de enviar a Railway");
   }
@@ -176,7 +188,7 @@ export async function POST(
     expNro: cedula.ocr_exp_nro,
     jurisdiccion: expData.jurisdiccion,
     cedulaId,
-    pdfUrl: cedula.pdf_acredita_url,
+    pdfUrl: signedData.signedUrl,
   });
 
   const internalSecret = process.env.RAILWAY_INTERNAL_SECRET;
@@ -193,7 +205,7 @@ export async function POST(
         expNro: cedula.ocr_exp_nro,
         jurisdiccion: expData.jurisdiccion,
         cedulaId,
-        pdfUrl: cedula.pdf_acredita_url,
+        pdfUrl: signedData.signedUrl,
       }),
       signal: AbortSignal.timeout(RAILWAY_FETCH_MS),
     });
