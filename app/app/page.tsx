@@ -169,15 +169,15 @@ function SemaforoChip({ value }: { value: Semaforo }) {
   );
 }
 
-type EstadoCedula = "Completa" | "En Trámite" | "Pendiente";
+type EstadoCedula = "Completa" | "En Diligenciamiento" | "En Trámite" | "Pendiente";
 
 function getEstadoCedula(c: {
   pjn_cargado_at?: string | null;
   admin_cedulas_completada_at?: string | null;
   admin_cedulas_en_tramite_at?: string | null;
 }): EstadoCedula {
-  if (c.pjn_cargado_at) return "Completa";
   if (c.admin_cedulas_completada_at) return "Completa";
+  if (c.pjn_cargado_at) return "En Diligenciamiento";
   if (c.admin_cedulas_en_tramite_at) return "En Trámite";
   return "Pendiente";
 }
@@ -189,6 +189,12 @@ function EstadoChip({ value }: { value: EstadoCedula }) {
           background: "rgba(46, 204, 113, 0.16)",
           border: "1px solid rgba(46, 204, 113, 0.35)",
           color: "rgba(210, 255, 226, 0.95)",
+        }
+      : value === "En Diligenciamiento"
+      ? {
+          background: "rgba(52, 152, 219, 0.2)",
+          border: "1px solid rgba(52, 152, 219, 0.45)",
+          color: "rgba(225, 241, 255, 0.96)",
         }
       : value === "En Trámite"
       ? {
