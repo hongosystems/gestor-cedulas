@@ -71,7 +71,7 @@ export async function POST(
 
   const { data: cedula, error: fetchErr } = await svc
     .from("cedulas")
-    .select("id, estado_ocr, juzgado, ocr_exp_nro, ocr_caratula, pdf_acredita_url")
+    .select("id, estado_ocr, juzgado, ocr_exp_nro, ocr_caratula, pdf_acredita_url, tipo_documento")
     .eq("id", cedulaId)
     .single();
 
@@ -191,6 +191,10 @@ export async function POST(
   });
 
   const internalSecret = process.env.RAILWAY_INTERNAL_SECRET;
+  const descripcionAdjunto =
+    cedula.tipo_documento === "OFICIO"
+      ? "Acredita Diligenciamiento Oficio"
+      : "Acredita Diligenciamiento Cedula";
 
   let railwayRes: Response;
   try {
@@ -205,6 +209,7 @@ export async function POST(
         jurisdiccion: expData.jurisdiccion,
         cedulaId,
         pdfUrl: signedData.signedUrl,
+        descripcion: descripcionAdjunto,
       }),
       signal: AbortSignal.timeout(RAILWAY_FETCH_MS),
     });

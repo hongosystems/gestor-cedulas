@@ -185,10 +185,12 @@ async function procesarOcrEnBackground(cedulaId: string, svc: ReturnType<typeof 
     }
 
     const pdfBuffer = Buffer.from(await fileData.arrayBuffer());
+    const pdfFilename =
+      cedula.tipo_documento === "OFICIO" ? "oficio.pdf" : "cedula.pdf";
 
     // 3. Llamar al microservicio Railway
     const formData = new FormData();
-    formData.append("pdf", new Blob([pdfBuffer], { type: "application/pdf" }), "cedula.pdf");
+    formData.append("pdf", new Blob([pdfBuffer], { type: "application/pdf" }), pdfFilename);
 
     const ocrEndpoint =
       cedula.tipo_documento === "OFICIO" ? "/procesar-oficio" : "/procesar";
