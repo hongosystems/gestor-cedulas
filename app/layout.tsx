@@ -5,11 +5,6 @@ import ChatWidget from "./components/ChatWidget";
 export const metadata = {
   title: "Gestor de Cédulas",
   description: "Gestión de cédulas y alertas",
-  icons: {
-    icon: "/favicon.ico",
-    shortcut: "/favicon.ico",
-    apple: "/logo.png",
-  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
