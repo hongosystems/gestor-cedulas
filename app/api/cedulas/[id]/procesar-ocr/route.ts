@@ -153,7 +153,7 @@ async function procesarOcrEnBackground(cedulaId: string, svc: ReturnType<typeof 
     // 1. Obtener cédula y pdf_path
     const { data: cedula, error: cedulaErr } = await svc
       .from("cedulas")
-      .select("id, pdf_path")
+      .select("id, pdf_path, tipo_documento")
       .eq("id", cedulaId)
       .single();
 
@@ -190,7 +190,10 @@ async function procesarOcrEnBackground(cedulaId: string, svc: ReturnType<typeof 
     const formData = new FormData();
     formData.append("pdf", new Blob([pdfBuffer], { type: "application/pdf" }), "cedula.pdf");
 
-    const railwayRes = await fetch(`${railwayUrl.replace(/\/$/, "")}/procesar`, {
+    const ocrEndpoint =
+      cedula.tipo_documento === "OFICIO" ? "/procesar-oficio" : "/procesar";
+
+    const railwayRes = await fetch(`${railwayUrl.replace(/\/$/, "")}${ocrEndpoint}`, {
       method: "POST",
       body: formData,
     });
@@ -302,7 +305,7 @@ export async function POST(
   // Verificar que la cédula existe y tiene pdf_path
   const { data: cedula, error: fetchErr } = await svc
     .from("cedulas")
-    .select("id, pdf_path")
+    .select("id, pdf_path, tipo_documento")
     .eq("id", cedulaId)
     .single();
 

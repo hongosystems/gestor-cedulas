@@ -50,6 +50,10 @@ function fmtDate(iso: string | null | undefined) {
   return `${dd}/${mm}/${yy} ${hh}:${min}`;
 }
 
+function getTipoLabel(tipo: CedulaDiligenciamiento["tipo_documento"]) {
+  return tipo === "OFICIO" ? "OFICIO" : "CEDULA";
+}
+
 function Spinner({ size = 14 }: { size?: number }) {
   return (
     <span
@@ -237,11 +241,7 @@ export default function DiligenciamientoPage() {
         setCedulas([]);
       } else {
         const json = await res.json();
-        const soloCedulas = (json.cedulas ?? []).filter(
-          (c: CedulaDiligenciamiento) =>
-            !c.tipo_documento || c.tipo_documento === "CEDULA"
-        );
-        setCedulas(soloCedulas);
+        setCedulas(json.cedulas ?? []);
       }
       setLoading(false);
     })();
@@ -589,6 +589,7 @@ export default function DiligenciamientoPage() {
             <table className="table" style={{ minWidth: 900 }}>
               <thead>
                 <tr>
+                  <th style={{ width: 110 }}>Tipo</th>
                   <th style={{ width: 180 }}>Carátula</th>
                   <th style={{ width: 120 }}>Exp. Nro</th>
                   <th style={{ width: 220 }}>Juzgado</th>
@@ -600,13 +601,42 @@ export default function DiligenciamientoPage() {
               <tbody>
                 {cedulas.length === 0 ? (
                   <tr>
-                    <td colSpan={(isAbogado || isSuperadmin) ? 6 : 5} className="muted" style={{ padding: 24, textAlign: "center" }}>
-                      No hay cédulas listas para diligenciamiento.
+                    <td colSpan={(isAbogado || isSuperadmin) ? 7 : 6} className="muted" style={{ padding: 24, textAlign: "center" }}>
+                      No hay cédulas ni oficios listos para diligenciamiento.
                     </td>
                   </tr>
                 ) : (
                   cedulas.map((item) => (
                     <tr key={item.id}>
+                      <td>
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            minWidth: 74,
+                            padding: "5px 10px",
+                            borderRadius: 999,
+                            border:
+                              item.tipo_documento === "OFICIO"
+                                ? "1px solid rgba(168,85,247,.45)"
+                                : "1px solid rgba(59,130,246,.45)",
+                            background:
+                              item.tipo_documento === "OFICIO"
+                                ? "rgba(168,85,247,.18)"
+                                : "rgba(59,130,246,.18)",
+                            color:
+                              item.tipo_documento === "OFICIO"
+                                ? "rgba(243,232,255,.96)"
+                                : "rgba(219,234,254,.96)",
+                            fontSize: 11,
+                            fontWeight: 700,
+                            letterSpacing: 0.3,
+                          }}
+                        >
+                          {getTipoLabel(item.tipo_documento)}
+                        </span>
+                      </td>
                       <td style={{ fontWeight: 600 }}>
                         {item.caratula?.trim() || <span className="muted">Sin carátula</span>}
                       </td>
