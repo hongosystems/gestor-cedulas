@@ -6,8 +6,8 @@ export const metadata = {
   title: "Gestor de Cédulas",
   description: "Gestión de cédulas y alertas",
   icons: {
-    icon: "/logo.png",
-    shortcut: "/logo.png",
+    icon: "/favicon.ico",
+    shortcut: "/favicon.ico",
     apple: "/logo.png",
   },
 };
