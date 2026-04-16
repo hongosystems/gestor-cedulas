@@ -368,7 +368,6 @@ gestor-cedulas/
 ├── scripts/                        # Scripts de utilidad
 │   ├── create_users.mjs           # Crear usuarios iniciales
 │   └── pjn-scraper.ts              # Scripts de PJN
-├── chrome-extension/               # Extensión de Chrome (PJN Sync)
 ├── pdf-extractor-service/          # Servicio de extracción de PDFs
 ├── package.json                    # Dependencias y scripts
 ├── tsconfig.json                   # Configuración TypeScript
@@ -471,7 +470,6 @@ El proyecto está configurado para deployment automático en Vercel:
 
 - ✅ Autocompletado de expedientes desde pjn-scraper
 - ✅ Extracción de carátula, juzgado, fecha y observaciones
-- ✅ Extensión de Chrome para sincronización
 
 ---
 
