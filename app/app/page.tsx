@@ -175,8 +175,10 @@ function getEstadoCedula(c: {
   pjn_cargado_at?: string | null;
   admin_cedulas_completada_at?: string | null;
   admin_cedulas_en_tramite_at?: string | null;
+  tipo_documento?: DocumentType;
 }): EstadoCedula {
   if (c.admin_cedulas_completada_at) return "Completa";
+  if (c.tipo_documento === "OFICIO" && c.pjn_cargado_at) return "Completa";
   if (c.pjn_cargado_at) return "En Diligenciamiento";
   if (c.admin_cedulas_en_tramite_at) return "En Trámite";
   return "Pendiente";
@@ -239,6 +241,8 @@ async function requireSessionOrRedirect() {
 
 type SortField = "dias" | "semaforo" | "fecha_carga" | "juzgado" | null;
 type SortDirection = "asc" | "desc";
+type HeaderFilterKey = "semaforo" | "estado" | "juzgado" | "tipo_documento";
+type TipoDocumentoFilter = "CEDULA" | "OFICIO" | "OTROS_ESCRITOS" | "SIN_DATO" | null;
 
 // Componente NotasTextarea simplificado para cédulas
 function NotasTextareaCedula({
@@ -862,6 +866,10 @@ export default function MisCedulasPage() {
   const [sortField, setSortField] = useState<SortField>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [semaforoFilter, setSemaforoFilter] = useState<Semaforo | null>(null);
+  const [estadoFilter, setEstadoFilter] = useState<EstadoCedula | null>(null);
+  const [juzgadoFilter, setJuzgadoFilter] = useState<string | null>(null);
+  const [tipoDocumentoFilter, setTipoDocumentoFilter] = useState<TipoDocumentoFilter>(null);
+  const [headerFilterOpen, setHeaderFilterOpen] = useState<HeaderFilterKey | null>(null);
   const [buscarTexto, setBuscarTexto] = useState("");
   const [currentUserName, setCurrentUserName] = useState<string>("");
   const [notasEditables, setNotasEditables] = useState<Record<string, string>>({});
@@ -1079,6 +1087,24 @@ export default function MisCedulasPage() {
     };
   }, [menuOpen]);
 
+  useEffect(() => {
+    if (!headerFilterOpen) return;
+    const close = () => setHeaderFilterOpen(null);
+    setTimeout(() => {
+      document.addEventListener("click", close);
+    }, 0);
+    return () => document.removeEventListener("click", close);
+  }, [headerFilterOpen]);
+
+  const juzgadoOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of cedulas) {
+      const val = (c.juzgado || "").trim();
+      if (val) set.add(val);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
+  }, [cedulas]);
+
   const rows = useMemo(() => {
     let mapped = cedulas.map((c) => {
       const cargaISO = c.fecha_carga || "";
@@ -1101,6 +1127,21 @@ export default function MisCedulasPage() {
     // Aplicar filtro de semáforo
     if (semaforoFilter) {
       mapped = mapped.filter((c) => c.sem === semaforoFilter);
+    }
+
+    if (estadoFilter) {
+      mapped = mapped.filter((c) => getEstadoCedula(c) === estadoFilter);
+    }
+
+    if (juzgadoFilter) {
+      mapped = mapped.filter((c) => (c.juzgado || "").trim() === juzgadoFilter);
+    }
+
+    if (tipoDocumentoFilter) {
+      mapped = mapped.filter((c) => {
+        if (tipoDocumentoFilter === "SIN_DATO") return !c.tipo_documento;
+        return c.tipo_documento === tipoDocumentoFilter;
+      });
     }
 
     // Aplicar búsqueda por expediente/carátula (solo Admin Cedulas)
@@ -1161,7 +1202,17 @@ export default function MisCedulasPage() {
     }
 
     return mapped;
-  }, [cedulas, sortField, sortDirection, semaforoFilter, isAdminCedulas, buscarTexto]);
+  }, [
+    cedulas,
+    sortField,
+    sortDirection,
+    semaforoFilter,
+    estadoFilter,
+    juzgadoFilter,
+    tipoDocumentoFilter,
+    isAdminCedulas,
+    buscarTexto,
+  ]);
 
   function handleSort(field: SortField) {
     if (sortField === field) {
@@ -1716,9 +1767,14 @@ export default function MisCedulasPage() {
               ROJO
             </button>
             <span style={{ color: "var(--muted)", fontSize: 13 }}>60+ días</span>
-            {semaforoFilter && (
+            {(semaforoFilter || estadoFilter || juzgadoFilter || tipoDocumentoFilter) && (
               <button
-                onClick={() => setSemaforoFilter(null)}
+                onClick={() => {
+                  setSemaforoFilter(null);
+                  setEstadoFilter(null);
+                  setJuzgadoFilter(null);
+                  setTipoDocumentoFilter(null);
+                }}
                 style={{
                   cursor: "pointer",
                   border: "1px solid rgba(255,255,255,.3)",
@@ -1814,28 +1870,205 @@ export default function MisCedulasPage() {
             <table className="table">
               <thead>
                 <tr>
-                  <th 
-                    className="sortable"
-                    style={{ width: 130 }}
-                    onClick={() => handleSort("semaforo")}
-                    title="Haz clic para ordenar"
-                  >
-                    Semáforo{" "}
-                    <span style={{ opacity: sortField === "semaforo" ? 1 : 0.4 }}>
-                      {sortField === "semaforo" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
-                    </span>
+                  <th style={{ width: 130, position: "relative" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setHeaderFilterOpen((prev) => (prev === "semaforo" ? null : "semaforo"));
+                        }}
+                        style={{ background: "transparent", border: "none", color: "inherit", cursor: "pointer", fontWeight: 700, padding: 0 }}
+                        title="Filtrar por Semáforo"
+                      >
+                        Semáforo {semaforoFilter ? "●" : ""} ▾
+                      </button>
+                      <button
+                        type="button"
+                        className="sortable"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSort("semaforo");
+                        }}
+                        title="Ordenar por semáforo"
+                        style={{ background: "transparent", border: "none", color: "inherit", cursor: "pointer", padding: 0 }}
+                      >
+                        <span style={{ opacity: sortField === "semaforo" ? 1 : 0.4 }}>
+                          {sortField === "semaforo" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
+                        </span>
+                      </button>
+                    </div>
+                    {headerFilterOpen === "semaforo" && (
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          position: "absolute",
+                          top: "calc(100% + 6px)",
+                          left: 0,
+                          zIndex: 50,
+                          minWidth: 170,
+                          background: "linear-gradient(180deg, rgba(11,47,85,.98), rgba(7,28,46,.98))",
+                          border: "1px solid rgba(255,255,255,.18)",
+                          borderRadius: 10,
+                          padding: 10,
+                          boxShadow: "0 10px 24px rgba(0,0,0,.45)",
+                        }}
+                      >
+                        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8 }}>Filtrar por</div>
+                        {(["VERDE", "AMARILLO", "ROJO"] as Semaforo[]).map((opt) => (
+                          <button
+                            key={opt}
+                            type="button"
+                            onClick={() => {
+                              setSemaforoFilter(opt);
+                              setHeaderFilterOpen(null);
+                            }}
+                            style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 6, background: semaforoFilter === opt ? "rgba(96,141,186,.25)" : "transparent", border: "1px solid rgba(255,255,255,.14)", borderRadius: 7, color: "var(--text)", cursor: "pointer", padding: "6px 8px" }}
+                          >
+                            {opt}
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSemaforoFilter(null);
+                            setHeaderFilterOpen(null);
+                          }}
+                          style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "1px solid rgba(255,255,255,.14)", borderRadius: 7, color: "var(--muted)", cursor: "pointer", padding: "6px 8px" }}
+                        >
+                          Limpiar filtro
+                        </button>
+                      </div>
+                    )}
                   </th>
-                  <th style={{ width: 110 }}>Estado</th>
+                  <th style={{ width: 110, position: "relative" }}>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setHeaderFilterOpen((prev) => (prev === "estado" ? null : "estado"));
+                      }}
+                      style={{ background: "transparent", border: "none", color: "inherit", cursor: "pointer", fontWeight: 700, padding: 0 }}
+                      title="Filtrar por Estado"
+                    >
+                      Estado {estadoFilter ? "●" : ""} ▾
+                    </button>
+                    {headerFilterOpen === "estado" && (
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          position: "absolute",
+                          top: "calc(100% + 6px)",
+                          left: 0,
+                          zIndex: 50,
+                          minWidth: 190,
+                          background: "linear-gradient(180deg, rgba(11,47,85,.98), rgba(7,28,46,.98))",
+                          border: "1px solid rgba(255,255,255,.18)",
+                          borderRadius: 10,
+                          padding: 10,
+                          boxShadow: "0 10px 24px rgba(0,0,0,.45)",
+                        }}
+                      >
+                        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8 }}>Filtrar por</div>
+                        {(["Pendiente", "En Trámite", "En Diligenciamiento", "Completa"] as EstadoCedula[]).map((opt) => (
+                          <button
+                            key={opt}
+                            type="button"
+                            onClick={() => {
+                              setEstadoFilter(opt);
+                              setHeaderFilterOpen(null);
+                            }}
+                            style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 6, background: estadoFilter === opt ? "rgba(96,141,186,.25)" : "transparent", border: "1px solid rgba(255,255,255,.14)", borderRadius: 7, color: "var(--text)", cursor: "pointer", padding: "6px 8px" }}
+                          >
+                            {opt}
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEstadoFilter(null);
+                            setHeaderFilterOpen(null);
+                          }}
+                          style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "1px solid rgba(255,255,255,.14)", borderRadius: 7, color: "var(--muted)", cursor: "pointer", padding: "6px 8px" }}
+                        >
+                          Limpiar filtro
+                        </button>
+                      </div>
+                    )}
+                  </th>
                   <th>Carátula</th>
-                  <th 
-                    className="sortable"
-                    onClick={() => handleSort("juzgado")}
-                    title="Haz clic para ordenar"
-                  >
-                    Juzgado{" "}
-                    <span style={{ opacity: sortField === "juzgado" ? 1 : 0.4 }}>
-                      {sortField === "juzgado" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
-                    </span>
+                  <th style={{ position: "relative" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setHeaderFilterOpen((prev) => (prev === "juzgado" ? null : "juzgado"));
+                        }}
+                        style={{ background: "transparent", border: "none", color: "inherit", cursor: "pointer", fontWeight: 700, padding: 0 }}
+                        title="Filtrar por Juzgado"
+                      >
+                        Juzgado {juzgadoFilter ? "●" : ""} ▾
+                      </button>
+                      <button
+                        type="button"
+                        className="sortable"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSort("juzgado");
+                        }}
+                        title="Ordenar por juzgado"
+                        style={{ background: "transparent", border: "none", color: "inherit", cursor: "pointer", padding: 0 }}
+                      >
+                        <span style={{ opacity: sortField === "juzgado" ? 1 : 0.4 }}>
+                          {sortField === "juzgado" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
+                        </span>
+                      </button>
+                    </div>
+                    {headerFilterOpen === "juzgado" && (
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          position: "absolute",
+                          top: "calc(100% + 6px)",
+                          left: 0,
+                          zIndex: 50,
+                          minWidth: 250,
+                          maxHeight: 280,
+                          overflowY: "auto",
+                          background: "linear-gradient(180deg, rgba(11,47,85,.98), rgba(7,28,46,.98))",
+                          border: "1px solid rgba(255,255,255,.18)",
+                          borderRadius: 10,
+                          padding: 10,
+                          boxShadow: "0 10px 24px rgba(0,0,0,.45)",
+                        }}
+                      >
+                        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8 }}>Filtrar por</div>
+                        {juzgadoOptions.map((opt) => (
+                          <button
+                            key={opt}
+                            type="button"
+                            onClick={() => {
+                              setJuzgadoFilter(opt);
+                              setHeaderFilterOpen(null);
+                            }}
+                            style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 6, background: juzgadoFilter === opt ? "rgba(96,141,186,.25)" : "transparent", border: "1px solid rgba(255,255,255,.14)", borderRadius: 7, color: "var(--text)", cursor: "pointer", padding: "6px 8px", whiteSpace: "normal" }}
+                          >
+                            {opt}
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setJuzgadoFilter(null);
+                            setHeaderFilterOpen(null);
+                          }}
+                          style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "1px solid rgba(255,255,255,.14)", borderRadius: 7, color: "var(--muted)", cursor: "pointer", padding: "6px 8px" }}
+                        >
+                          Limpiar filtro
+                        </button>
+                      </div>
+                    )}
                   </th>
                   {isAdminCedulas && (
                     <th style={{ width: 80, textAlign: "center" }} title="Responsable según juzgado asignado">
@@ -1864,7 +2097,71 @@ export default function MisCedulasPage() {
                       {sortField === "dias" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
                     </span>
                   </th>
-                  <th style={{ width: 170, textAlign: "right" }}>Cédula/Oficio</th>
+                  <th style={{ width: 170, textAlign: "right", position: "relative" }}>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setHeaderFilterOpen((prev) => (prev === "tipo_documento" ? null : "tipo_documento"));
+                      }}
+                      style={{ background: "transparent", border: "none", color: "inherit", cursor: "pointer", fontWeight: 700, padding: 0 }}
+                      title="Filtrar por Cédula/Oficio"
+                    >
+                      Cédula/Oficio {tipoDocumentoFilter ? "●" : ""} ▾
+                    </button>
+                    {headerFilterOpen === "tipo_documento" && (
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          position: "absolute",
+                          top: "calc(100% + 6px)",
+                          right: 0,
+                          zIndex: 50,
+                          minWidth: 180,
+                          background: "linear-gradient(180deg, rgba(11,47,85,.98), rgba(7,28,46,.98))",
+                          border: "1px solid rgba(255,255,255,.18)",
+                          borderRadius: 10,
+                          padding: 10,
+                          boxShadow: "0 10px 24px rgba(0,0,0,.45)",
+                        }}
+                      >
+                        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8, textAlign: "left" }}>Filtrar por</div>
+                        {(["CEDULA", "OFICIO", "OTROS_ESCRITOS"] as const).map((opt) => (
+                          <button
+                            key={opt}
+                            type="button"
+                            onClick={() => {
+                              setTipoDocumentoFilter(opt);
+                              setHeaderFilterOpen(null);
+                            }}
+                            style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 6, background: tipoDocumentoFilter === opt ? "rgba(96,141,186,.25)" : "transparent", border: "1px solid rgba(255,255,255,.14)", borderRadius: 7, color: "var(--text)", cursor: "pointer", padding: "6px 8px" }}
+                          >
+                            {opt}
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTipoDocumentoFilter("SIN_DATO");
+                            setHeaderFilterOpen(null);
+                          }}
+                          style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 6, background: tipoDocumentoFilter === "SIN_DATO" ? "rgba(96,141,186,.25)" : "transparent", border: "1px solid rgba(255,255,255,.14)", borderRadius: 7, color: "var(--text)", cursor: "pointer", padding: "6px 8px" }}
+                        >
+                          Sin dato
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTipoDocumentoFilter(null);
+                            setHeaderFilterOpen(null);
+                          }}
+                          style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "1px solid rgba(255,255,255,.14)", borderRadius: 7, color: "var(--muted)", cursor: "pointer", padding: "6px 8px" }}
+                        >
+                          Limpiar filtro
+                        </button>
+                      </div>
+                    )}
+                  </th>
                   <th style={{ width: 250, minWidth: 200 }}>Notas</th>
                 </tr>
               </thead>
