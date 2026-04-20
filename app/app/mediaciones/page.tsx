@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { FilterableTh } from "@/app/components/FilterableTh";
 import NotificationBell from "@/app/components/NotificationBell";
+import { useColumnFilters } from "@/app/hooks/useColumnFilters";
 
 type MediacionRow = {
   id: string;
@@ -23,6 +25,8 @@ type MediacionRow = {
 };
 
 const ESTADOS = ["pendiente_rta", "devuelto", "reenviado", "aceptado", "doc_generado", "enviado", "borrador"];
+
+type MediacionesFilterKey = "estado";
 
 function formatDate(iso: string | null): string {
   if (!iso) return "—";
@@ -64,7 +68,10 @@ export default function MediacionesPage() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
   const [rows, setRows] = useState<MediacionRow[]>([]);
-  const [estadoFilter, setEstadoFilter] = useState<string>("");
+  const { filters, setFilter, clearAll, hasActiveFilters, openFilter, setOpenFilter } =
+    useColumnFilters<MediacionesFilterKey>({
+      estado: null as string | null,
+    });
   const [search, setSearch] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [isAdminMediaciones, setIsAdminMediaciones] = useState(false);
@@ -115,18 +122,20 @@ export default function MediacionesPage() {
     return () => document.removeEventListener("click", close);
   }, [menuOpen]);
 
-  const filteredRows = rows.filter((r) => {
-    if (estadoFilter && r.estado !== estadoFilter) return false;
-    if (!search.trim()) return true;
-    const q = search.trim().toLowerCase();
-    return (
-      (r.numero_tramite || "").toLowerCase().includes(q) ||
-      (r.req_nombre || "").toLowerCase().includes(q) ||
-      (r.req_email || "").toLowerCase().includes(q) ||
-      (r.id || "").toLowerCase().includes(q) ||
-      (r.mediacion_requeridos || []).some((req) => (req.nombre || "").toLowerCase().includes(q))
-    );
-  });
+  const filteredRows = useMemo(() => {
+    return rows.filter((r) => {
+      if (filters.estado && r.estado !== filters.estado) return false;
+      if (!search.trim()) return true;
+      const q = search.trim().toLowerCase();
+      return (
+        (r.numero_tramite || "").toLowerCase().includes(q) ||
+        (r.req_nombre || "").toLowerCase().includes(q) ||
+        (r.req_email || "").toLowerCase().includes(q) ||
+        (r.id || "").toLowerCase().includes(q) ||
+        (r.mediacion_requeridos || []).some((req) => (req.nombre || "").toLowerCase().includes(q))
+      );
+    });
+  }, [rows, filters.estado, search]);
 
   const total = rows.length;
   const pendientes = rows.filter((r) => r.estado === "pendiente_rta").length;
@@ -267,17 +276,19 @@ export default function MediacionesPage() {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
             <button
               className="btn"
-              onClick={() => setEstadoFilter("")}
-              style={estadoFilter === "" ? { borderColor: "var(--brand-blue-2)", background: "rgba(96,141,186,.2)" } : {}}
+              type="button"
+              onClick={() => setFilter("estado", null)}
+              style={!filters.estado ? { borderColor: "var(--brand-blue-2)", background: "rgba(96,141,186,.2)" } : {}}
             >
               Todos
             </button>
             {ESTADOS.map((e) => (
               <button
                 key={e}
+                type="button"
                 className="btn"
-                onClick={() => setEstadoFilter(e)}
-                style={estadoFilter === e ? { borderColor: "var(--brand-blue-2)", background: "rgba(96,141,186,.2)" } : {}}
+                onClick={() => setFilter("estado", e)}
+                style={filters.estado === e ? { borderColor: "var(--brand-blue-2)", background: "rgba(96,141,186,.2)" } : {}}
               >
                 {e.replace(/_/g, " ")}
               </button>
@@ -285,7 +296,7 @@ export default function MediacionesPage() {
           </div>
 
           {/* Búsqueda */}
-          <div style={{ marginBottom: 16 }}>
+          <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <input
               className="input"
               type="text"
@@ -294,6 +305,11 @@ export default function MediacionesPage() {
               onChange={(e) => setSearch(e.target.value)}
               style={{ maxWidth: 360 }}
             />
+            {hasActiveFilters && (
+              <button type="button" className="btn" onClick={() => clearAll()} style={{ fontSize: 12 }}>
+                Limpiar filtros
+              </button>
+            )}
           </div>
 
           {msg && <div className="error">{msg}</div>}
@@ -305,7 +321,16 @@ export default function MediacionesPage() {
                   <th>N° Trámite</th>
                   <th>Requirente</th>
                   <th>Tipo</th>
-                  <th>Estado</th>
+                  <FilterableTh
+                    label="Estado"
+                    filterKey="estado"
+                    options={ESTADOS.map((e) => ({ value: e, label: e.replace(/_/g, " ") }))}
+                    activeFilter={filters.estado}
+                    onFilter={(v) => setFilter("estado", v)}
+                    isOpen={openFilter === "estado"}
+                    onToggle={() => setOpenFilter((p) => (p === "estado" ? null : "estado"))}
+                    menuMinWidth={200}
+                  />
                   <th>Fecha</th>
                   <th style={{ width: 44 }}></th>
                 </tr>

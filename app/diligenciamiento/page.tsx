@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { FilterableTh } from "@/app/components/FilterableTh";
 import NotificationBell from "@/app/components/NotificationBell";
+import { useColumnFilters, uniqueOptionsFromField } from "@/app/hooks/useColumnFilters";
 import styles from "./page.module.css";
 
 type CedulaDiligenciamiento = {
@@ -176,6 +178,8 @@ function EstadoProcesoAutomaticoBubble({
   return null;
 }
 
+type DiligenciamientoFilterKey = "tipo_documento" | "juzgado";
+
 export default function DiligenciamientoPage() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
@@ -189,6 +193,36 @@ export default function DiligenciamientoPage() {
   const [isAdminMediaciones, setIsAdminMediaciones] = useState(false);
   const [isAbogado, setIsAbogado] = useState(false);
   const [isSuperadmin, setIsSuperadmin] = useState(false);
+  const { filters, setFilter, clearAll, hasActiveFilters, openFilter, setOpenFilter } =
+    useColumnFilters<DiligenciamientoFilterKey>({
+      tipo_documento: null as string | null,
+      juzgado: null as string | null,
+    });
+
+  const juzgadoOptions = useMemo(
+    () =>
+      uniqueOptionsFromField(
+        cedulas as unknown as readonly Record<string, unknown>[],
+        "juzgado"
+      ),
+    [cedulas]
+  );
+
+  const filteredCedulas = useMemo(() => {
+    let r = [...cedulas];
+    if (filters.tipo_documento) {
+      if (filters.tipo_documento === "CEDULA") {
+        r = r.filter((c) => !c.tipo_documento || c.tipo_documento === "CEDULA");
+      } else if (filters.tipo_documento === "OFICIO") {
+        r = r.filter((c) => c.tipo_documento === "OFICIO");
+      }
+    }
+    if (filters.juzgado) {
+      const jf = filters.juzgado;
+      r = r.filter((c) => (c.juzgado || "").trim() === jf);
+    }
+    return r;
+  }, [cedulas, filters]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -585,14 +619,47 @@ export default function DiligenciamientoPage() {
             <div className={msgSuccess ? "success" : "error"}>{msg}</div>
           )}
 
+          {hasActiveFilters && (
+            <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10 }}>
+              <button type="button" className="btn" onClick={() => clearAll()} style={{ fontSize: 12 }}>
+                Limpiar filtros
+              </button>
+            </div>
+          )}
+
           <div className="tableWrap" style={{ marginTop: 10 }}>
             <table className="table" style={{ minWidth: 900 }}>
               <thead>
                 <tr>
-                  <th style={{ width: 110 }}>Tipo</th>
+                  <FilterableTh
+                    label="Tipo"
+                    filterKey="tipo_documento"
+                    options={[
+                      { value: "CEDULA", label: "CEDULA" },
+                      { value: "OFICIO", label: "OFICIO" },
+                    ]}
+                    activeFilter={filters.tipo_documento}
+                    onFilter={(v) => setFilter("tipo_documento", v)}
+                    isOpen={openFilter === "tipo_documento"}
+                    onToggle={() => setOpenFilter((p) => (p === "tipo_documento" ? null : "tipo_documento"))}
+                    width={110}
+                    menuMinWidth={160}
+                  />
                   <th style={{ width: 180 }}>Carátula</th>
                   <th style={{ width: 120 }}>Exp. Nro</th>
-                  <th style={{ width: 220 }}>Juzgado</th>
+                  <FilterableTh
+                    label="Juzgado"
+                    filterKey="juzgado"
+                    options={juzgadoOptions}
+                    activeFilter={filters.juzgado}
+                    onFilter={(v) => setFilter("juzgado", v)}
+                    isOpen={openFilter === "juzgado"}
+                    onToggle={() => setOpenFilter((p) => (p === "juzgado" ? null : "juzgado"))}
+                    width={220}
+                    menuMinWidth={250}
+                    menuScrollable
+                    optionWhiteSpaceNormal
+                  />
                   <th style={{ width: 140 }}>Fecha procesado</th>
                   <th style={{ width: 220 }}>Acciones</th>
                   {(isAbogado || isSuperadmin) && <th style={{ width: 140 }}>Estado PJN</th>}
@@ -605,8 +672,14 @@ export default function DiligenciamientoPage() {
                       No hay cédulas ni oficios listos para diligenciamiento.
                     </td>
                   </tr>
+                ) : filteredCedulas.length === 0 ? (
+                  <tr>
+                    <td colSpan={(isAbogado || isSuperadmin) ? 7 : 6} className="muted" style={{ padding: 24, textAlign: "center" }}>
+                      Ningún resultado con los filtros seleccionados.
+                    </td>
+                  </tr>
                 ) : (
-                  cedulas.map((item) => (
+                  filteredCedulas.map((item) => (
                     <tr key={item.id}>
                       <td>
                         <span

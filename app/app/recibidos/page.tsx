@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { FilterableTh } from "@/app/components/FilterableTh";
+import { useColumnFilters } from "@/app/hooks/useColumnFilters";
 
 type Transfer = {
   id: string;
@@ -22,6 +24,8 @@ function displayName(p?: Profile) {
   if (email) return email;
   return "Sin nombre";
 }
+
+type RecibidosFilterKey = "rec_doc" | "sent_doc";
 
 function fmtDate(iso: string) {
   const d = new Date(iso);
@@ -43,6 +47,11 @@ export default function RecibidosPage() {
   const [selectedTransfer, setSelectedTransfer] = useState<Transfer | null>(null);
   const [redirectRecipient, setRedirectRecipient] = useState<string>("");
   const [redirectMessage, setRedirectMessage] = useState<string>("");
+  const { filters, setFilter, clearAll, hasActiveFilters, openFilter, setOpenFilter } =
+    useColumnFilters<RecibidosFilterKey>({
+      rec_doc: null as string | null,
+      sent_doc: null as string | null,
+    });
 
   useEffect(() => {
     (async () => {
@@ -78,6 +87,16 @@ export default function RecibidosPage() {
 
   const received = useMemo(() => items.filter((t) => t.recipient_user_id === uid), [items, uid]);
   const sent = useMemo(() => items.filter((t) => t.sender_user_id === uid), [items, uid]);
+
+  const receivedFiltered = useMemo(() => {
+    if (!filters.rec_doc) return received;
+    return received.filter((t) => t.doc_type === filters.rec_doc);
+  }, [received, filters.rec_doc]);
+
+  const sentFiltered = useMemo(() => {
+    if (!filters.sent_doc) return sent;
+    return sent.filter((t) => t.doc_type === filters.sent_doc);
+  }, [sent, filters.sent_doc]);
 
   async function download(transferId: string) {
     setMsg("");
@@ -225,11 +244,31 @@ export default function RecibidosPage() {
           {msg && <div className={msg.includes("✅") ? "success" : "error"}>{msg}</div>}
 
           <h2 style={{ marginTop: 6 }}>Recibidos</h2>
+          {hasActiveFilters && (
+            <div style={{ marginBottom: 8 }}>
+              <button type="button" className="btn" onClick={() => clearAll()} style={{ fontSize: 12 }}>
+                Limpiar filtros
+              </button>
+            </div>
+          )}
           <div className="tableWrap">
             <table className="table">
               <thead>
                 <tr>
-                  <th>Tipo</th>
+                  <FilterableTh
+                    label="Tipo"
+                    filterKey="rec_doc"
+                    options={[
+                      { value: "CEDULA", label: "Cédula" },
+                      { value: "OFICIO", label: "Oficio" },
+                      { value: "OTROS_ESCRITOS", label: "Otros Escritos" },
+                    ]}
+                    activeFilter={filters.rec_doc}
+                    onFilter={(v) => setFilter("rec_doc", v)}
+                    isOpen={openFilter === "rec_doc"}
+                    onToggle={() => setOpenFilter((p) => (p === "rec_doc" ? null : "rec_doc"))}
+                    menuMinWidth={200}
+                  />
                   <th>Enviado por</th>
                   <th>Título</th>
                   <th>Fecha</th>
@@ -237,7 +276,7 @@ export default function RecibidosPage() {
                 </tr>
               </thead>
               <tbody>
-                {received.map((t) => (
+                {receivedFiltered.map((t) => (
                   <tr key={t.id}>
                     <td>{t.doc_type === "CEDULA" ? "Cédula" : t.doc_type === "OFICIO" ? "Oficio" : "Otros Escritos"}</td>
                     <td>{displayName(profiles[t.sender_user_id])}</td>
@@ -269,6 +308,13 @@ export default function RecibidosPage() {
                     </td>
                   </tr>
                 )}
+                {received.length > 0 && receivedFiltered.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="muted">
+                      Ningún resultado con los filtros seleccionados.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -278,7 +324,20 @@ export default function RecibidosPage() {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Tipo</th>
+                  <FilterableTh
+                    label="Tipo"
+                    filterKey="sent_doc"
+                    options={[
+                      { value: "CEDULA", label: "Cédula" },
+                      { value: "OFICIO", label: "Oficio" },
+                      { value: "OTROS_ESCRITOS", label: "Otros Escritos" },
+                    ]}
+                    activeFilter={filters.sent_doc}
+                    onFilter={(v) => setFilter("sent_doc", v)}
+                    isOpen={openFilter === "sent_doc"}
+                    onToggle={() => setOpenFilter((p) => (p === "sent_doc" ? null : "sent_doc"))}
+                    menuMinWidth={200}
+                  />
                   <th>Para</th>
                   <th>Título</th>
                   <th>Fecha</th>
@@ -286,7 +345,7 @@ export default function RecibidosPage() {
                 </tr>
               </thead>
               <tbody>
-                {sent.map((t) => (
+                {sentFiltered.map((t) => (
                   <tr key={t.id}>
                     <td>{t.doc_type === "CEDULA" ? "Cédula" : t.doc_type === "OFICIO" ? "Oficio" : "Otros Escritos"}</td>
                     <td>{displayName(profiles[t.recipient_user_id])}</td>
@@ -303,6 +362,13 @@ export default function RecibidosPage() {
                   <tr>
                     <td colSpan={5} className="muted">
                       No enviaste archivos aún.
+                    </td>
+                  </tr>
+                )}
+                {sent.length > 0 && sentFiltered.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="muted">
+                      Ningún resultado con los filtros seleccionados.
                     </td>
                   </tr>
                 )}

@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { FilterableTh } from "@/app/components/FilterableTh";
+import { useColumnFilters } from "@/app/hooks/useColumnFilters";
 import { supabase } from "@/lib/supabase";
 
 type User = {
@@ -17,6 +19,17 @@ type User = {
   juzgados: string[];
 };
 
+type WebmasterColFilter = "rol" | "juzgado_asignado";
+
+const ROL_TABLA_OPTIONS = [
+  { value: "superadmin", label: "SuperAdmin" },
+  { value: "admin_expedientes", label: "Admin Expedientes" },
+  { value: "admin_cedulas", label: "Admin Cédulas" },
+  { value: "admin_mediaciones", label: "Admin Mediaciones" },
+  { value: "abogado", label: "Abogado" },
+  { value: "sin_rol", label: "Sin roles" },
+] as const;
+
 export default function WebMasterPage() {
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState<User[]>([]);
@@ -24,6 +37,11 @@ export default function WebMasterPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const { filters, setFilter, clearAll, hasActiveFilters, openFilter, setOpenFilter } =
+    useColumnFilters<WebmasterColFilter>({
+      rol: null as string | null,
+      juzgado_asignado: null as string | null,
+    });
 
   // Formulario
   const [formEmail, setFormEmail] = useState("");
@@ -292,13 +310,52 @@ export default function WebMasterPage() {
     });
   }
 
-  const filteredUsers = users.filter(u => {
-    const search = searchTerm.toLowerCase();
-    return (
-      u.email.toLowerCase().includes(search) ||
-      u.full_name.toLowerCase().includes(search)
-    );
-  });
+  const juzgadoTablaOptions = useMemo(() => {
+    const s = new Set<string>();
+    for (const u of users) {
+      for (const j of u.juzgados || []) {
+        const t = j.trim();
+        if (t) s.add(t);
+      }
+    }
+    return [...s]
+      .sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }))
+      .map((value) => ({ value, label: value }));
+  }, [users]);
+
+  const filteredUsers = useMemo(() => {
+    return users.filter((u) => {
+      const search = searchTerm.toLowerCase();
+      if (
+        !u.email.toLowerCase().includes(search) &&
+        !u.full_name.toLowerCase().includes(search)
+      ) {
+        return false;
+      }
+
+      if (filters.rol) {
+        const hasAnyRole =
+          u.is_superadmin ||
+          u.is_admin_expedientes ||
+          u.is_admin_cedulas ||
+          u.is_admin_mediaciones ||
+          u.is_abogado;
+        if (filters.rol === "sin_rol") {
+          if (hasAnyRole) return false;
+        } else if (filters.rol === "superadmin" && !u.is_superadmin) return false;
+        else if (filters.rol === "admin_expedientes" && !u.is_admin_expedientes) return false;
+        else if (filters.rol === "admin_cedulas" && !u.is_admin_cedulas) return false;
+        else if (filters.rol === "admin_mediaciones" && !u.is_admin_mediaciones) return false;
+        else if (filters.rol === "abogado" && !u.is_abogado) return false;
+      }
+
+      if (filters.juzgado_asignado) {
+        if (!u.juzgados?.includes(filters.juzgado_asignado)) return false;
+      }
+
+      return true;
+    });
+  }, [users, searchTerm, filters]);
 
   if (loading) {
     return (
@@ -363,6 +420,11 @@ export default function WebMasterPage() {
               onChange={(e) => setSearchTerm(e.target.value)}
               style={{ flex: "1 1 300px", minWidth: 200 }}
             />
+            {hasActiveFilters && (
+              <button type="button" className="btn" onClick={() => clearAll()} style={{ fontSize: 12 }}>
+                Limpiar filtros
+              </button>
+            )}
             <button className="btn primary" onClick={() => openModal()}>
               ➕ Crear Usuario
             </button>
@@ -374,8 +436,32 @@ export default function WebMasterPage() {
                 <tr>
                   <th>Email</th>
                   <th>Nombre</th>
-                  <th>Roles</th>
-                  <th>Juzgados</th>
+                  <FilterableTh
+                    label="Roles"
+                    filterKey="rol"
+                    options={[...ROL_TABLA_OPTIONS]}
+                    activeFilter={filters.rol}
+                    onFilter={(v) => setFilter("rol", v)}
+                    isOpen={openFilter === "rol"}
+                    onToggle={() => setOpenFilter((p) => (p === "rol" ? null : "rol"))}
+                    menuMinWidth={220}
+                    menuScrollable
+                    optionWhiteSpaceNormal
+                  />
+                  <FilterableTh
+                    label="Juzgados"
+                    filterKey="juzgado_asignado"
+                    options={juzgadoTablaOptions}
+                    activeFilter={filters.juzgado_asignado}
+                    onFilter={(v) => setFilter("juzgado_asignado", v)}
+                    isOpen={openFilter === "juzgado_asignado"}
+                    onToggle={() =>
+                      setOpenFilter((p) => (p === "juzgado_asignado" ? null : "juzgado_asignado"))
+                    }
+                    menuMinWidth={250}
+                    menuScrollable
+                    optionWhiteSpaceNormal
+                  />
                   <th>Fecha Creación</th>
                   <th style={{ width: 120 }}>Acciones</th>
                 </tr>

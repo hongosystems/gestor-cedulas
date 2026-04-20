@@ -4,8 +4,10 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { daysSince } from "@/lib/semaforo";
+import { FilterableTh } from "@/app/components/FilterableTh";
 import NotificationBell from "@/app/components/NotificationBell";
 import ResponsableAvatars from "@/app/components/ResponsableAvatars";
+import { useColumnFilters, uniqueOptionsFromField } from "@/app/hooks/useColumnFilters";
 
 type Expediente = {
   id: string;
@@ -85,8 +87,10 @@ async function requireSessionOrRedirect() {
   return data.session;
 }
 
-type SortField = "dias" | "semaforo" | "fecha_ultima_modificacion" | null;
+type SortField = "dias" | "semaforo" | "fecha_ultima_modificacion" | "juzgado" | null;
 type SortDirection = "asc" | "desc";
+
+type AbogadoTableFilterKey = "semaforo" | "tablaJuzgado";
 
 export default function AbogadoHomePage() {
   const [loading, setLoading] = useState(true);
@@ -94,7 +98,11 @@ export default function AbogadoHomePage() {
   const [expedientes, setExpedientes] = useState<Expediente[]>([]);
   const [sortField, setSortField] = useState<SortField>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const [semaforoFilter, setSemaforoFilter] = useState<Semaforo | null>(null);
+  const { filters, setFilter, clearAll, hasActiveFilters, openFilter, setOpenFilter } =
+    useColumnFilters<AbogadoTableFilterKey>({
+      semaforo: null as string | null,
+      tablaJuzgado: null as string | null,
+    });
   const [createdByFilter, setCreatedByFilter] = useState<string>("all"); // "all" o user_id
   const [userRoles, setUserRoles] = useState<{
     isSuperadmin: boolean;
@@ -345,6 +353,15 @@ export default function AbogadoHomePage() {
       .sort((a, b) => a.name.localeCompare(b.name, "es", { sensitivity: "base" }));
   }, [expedientes]);
 
+  const juzgadoOptions = useMemo(
+    () =>
+      uniqueOptionsFromField(
+        expedientes as unknown as readonly Record<string, unknown>[],
+        "juzgado"
+      ),
+    [expedientes]
+  );
+
   const rows = useMemo(() => {
     let mapped = expedientes;
 
@@ -362,8 +379,13 @@ export default function AbogadoHomePage() {
     });
 
     // Aplicar filtro de semáforo
-    if (semaforoFilter) {
-      mappedWithMeta = mappedWithMeta.filter((e) => e.sem === semaforoFilter);
+    if (filters.semaforo) {
+      mappedWithMeta = mappedWithMeta.filter((e) => e.sem === filters.semaforo);
+    }
+
+    if (filters.tablaJuzgado) {
+      const jf = filters.tablaJuzgado;
+      mappedWithMeta = mappedWithMeta.filter((e) => (e.juzgado || "").trim() === jf);
     }
 
     // Aplicar ordenamiento
@@ -385,6 +407,15 @@ export default function AbogadoHomePage() {
           if (!b.fechaModISO) return -1;
           compareA = new Date(a.fechaModISO).getTime();
           compareB = new Date(b.fechaModISO).getTime();
+        } else if (sortField === "juzgado") {
+          const juzgadoA = (a.juzgado || "").trim().toUpperCase();
+          const juzgadoB = (b.juzgado || "").trim().toUpperCase();
+          if (!juzgadoA && !juzgadoB) return 0;
+          if (!juzgadoA) return 1;
+          if (!juzgadoB) return -1;
+          if (juzgadoA < juzgadoB) return sortDirection === "asc" ? -1 : 1;
+          if (juzgadoA > juzgadoB) return sortDirection === "asc" ? 1 : -1;
+          return 0;
         } else {
           return 0;
         }
@@ -396,14 +427,14 @@ export default function AbogadoHomePage() {
     }
 
     return mappedWithMeta;
-  }, [expedientes, sortField, sortDirection, semaforoFilter, createdByFilter]);
+  }, [expedientes, sortField, sortDirection, filters, createdByFilter]);
 
   function handleSort(field: SortField) {
     if (sortField === field) {
       setSortDirection(sortDirection === "asc" ? "desc" : "asc");
     } else {
       setSortField(field);
-      setSortDirection("desc");
+      setSortDirection(field === "juzgado" ? "asc" : "desc");
     }
   }
 
@@ -753,11 +784,11 @@ export default function AbogadoHomePage() {
               Semáforo automático por antigüedad desde la última modificación:
             </span>
             <button
-              onClick={() => setSemaforoFilter(semaforoFilter === "VERDE" ? null : "VERDE")}
+              onClick={() => setFilter("semaforo", filters.semaforo === "VERDE" ? null : "VERDE")}
               style={{
                 cursor: "pointer",
-                border: semaforoFilter === "VERDE" ? "2px solid rgba(46, 204, 113, 0.8)" : "1px solid rgba(46, 204, 113, 0.35)",
-                background: semaforoFilter === "VERDE" ? "rgba(46, 204, 113, 0.25)" : "rgba(46, 204, 113, 0.16)",
+                border: filters.semaforo === "VERDE" ? "2px solid rgba(46, 204, 113, 0.8)" : "1px solid rgba(46, 204, 113, 0.35)",
+                background: filters.semaforo === "VERDE" ? "rgba(46, 204, 113, 0.25)" : "rgba(46, 204, 113, 0.16)",
                 color: "rgba(210, 255, 226, 0.95)",
                 padding: "6px 12px",
                 borderRadius: 999,
@@ -775,11 +806,11 @@ export default function AbogadoHomePage() {
             </button>
             <span style={{ color: "var(--muted)", fontSize: 13 }}>0–29</span>
             <button
-              onClick={() => setSemaforoFilter(semaforoFilter === "AMARILLO" ? null : "AMARILLO")}
+              onClick={() => setFilter("semaforo", filters.semaforo === "AMARILLO" ? null : "AMARILLO")}
               style={{
                 cursor: "pointer",
-                border: semaforoFilter === "AMARILLO" ? "2px solid rgba(241, 196, 15, 0.8)" : "1px solid rgba(241, 196, 15, 0.35)",
-                background: semaforoFilter === "AMARILLO" ? "rgba(241, 196, 15, 0.25)" : "rgba(241, 196, 15, 0.14)",
+                border: filters.semaforo === "AMARILLO" ? "2px solid rgba(241, 196, 15, 0.8)" : "1px solid rgba(241, 196, 15, 0.35)",
+                background: filters.semaforo === "AMARILLO" ? "rgba(241, 196, 15, 0.25)" : "rgba(241, 196, 15, 0.14)",
                 color: "rgba(255, 246, 205, 0.95)",
                 padding: "6px 12px",
                 borderRadius: 999,
@@ -797,11 +828,11 @@ export default function AbogadoHomePage() {
             </button>
             <span style={{ color: "var(--muted)", fontSize: 13 }}>30–59</span>
             <button
-              onClick={() => setSemaforoFilter(semaforoFilter === "ROJO" ? null : "ROJO")}
+              onClick={() => setFilter("semaforo", filters.semaforo === "ROJO" ? null : "ROJO")}
               style={{
                 cursor: "pointer",
-                border: semaforoFilter === "ROJO" ? "2px solid rgba(231, 76, 60, 0.8)" : "1px solid rgba(231, 76, 60, 0.35)",
-                background: semaforoFilter === "ROJO" ? "rgba(231, 76, 60, 0.25)" : "rgba(231, 76, 60, 0.14)",
+                border: filters.semaforo === "ROJO" ? "2px solid rgba(231, 76, 60, 0.8)" : "1px solid rgba(231, 76, 60, 0.35)",
+                background: filters.semaforo === "ROJO" ? "rgba(231, 76, 60, 0.25)" : "rgba(231, 76, 60, 0.14)",
                 color: "rgba(255, 220, 216, 0.95)",
                 padding: "6px 12px",
                 borderRadius: 999,
@@ -818,22 +849,14 @@ export default function AbogadoHomePage() {
               ROJO
             </button>
             <span style={{ color: "var(--muted)", fontSize: 13 }}>60+ días</span>
-            {semaforoFilter && (
+            {hasActiveFilters && (
               <button
-                onClick={() => setSemaforoFilter(null)}
-                style={{
-                  cursor: "pointer",
-                  border: "1px solid rgba(255,255,255,.3)",
-                  background: "rgba(255,255,255,.1)",
-                  color: "var(--text)",
-                  padding: "6px 12px",
-                  borderRadius: 999,
-                  fontWeight: 600,
-                  fontSize: 12,
-                  transition: "all 0.2s ease",
-                }}
+                type="button"
+                className="btn"
+                onClick={() => clearAll()}
+                style={{ fontSize: 12 }}
               >
-                Limpiar filtro
+                Limpiar filtros
               </button>
             )}
 
@@ -874,19 +897,42 @@ export default function AbogadoHomePage() {
             <table className="table">
               <thead>
                 <tr>
-                  <th 
-                    className="sortable"
-                    style={{ width: 130 }}
-                    onClick={() => handleSort("semaforo")}
-                    title="Haz clic para ordenar"
-                  >
-                    Semáforo{" "}
-                    <span style={{ opacity: sortField === "semaforo" ? 1 : 0.4 }}>
-                      {sortField === "semaforo" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
-                    </span>
-                  </th>
+                  <FilterableTh
+                    label="Semáforo"
+                    filterKey="semaforo"
+                    options={[
+                      { value: "VERDE", label: "VERDE" },
+                      { value: "AMARILLO", label: "AMARILLO" },
+                      { value: "ROJO", label: "ROJO" },
+                    ]}
+                    activeFilter={filters.semaforo}
+                    onFilter={(v) => setFilter("semaforo", v)}
+                    isOpen={openFilter === "semaforo"}
+                    onToggle={() => setOpenFilter((p) => (p === "semaforo" ? null : "semaforo"))}
+                    sortable
+                    sortField={sortField}
+                    sortDirection={sortDirection}
+                    onSort={() => handleSort("semaforo")}
+                    width={130}
+                  />
                   <th>Carátula</th>
-                  <th>Juzgado</th>
+                  <FilterableTh
+                    label="Juzgado"
+                    filterKey="tablaJuzgado"
+                    options={juzgadoOptions}
+                    activeFilter={filters.tablaJuzgado}
+                    onFilter={(v) => setFilter("tablaJuzgado", v)}
+                    isOpen={openFilter === "tablaJuzgado"}
+                    onToggle={() => setOpenFilter((p) => (p === "tablaJuzgado" ? null : "tablaJuzgado"))}
+                    sortable
+                    sortField={sortField}
+                    sortDirection={sortDirection}
+                    onSort={() => handleSort("juzgado")}
+                    sortColumnId="juzgado"
+                    menuMinWidth={250}
+                    menuScrollable
+                    optionWhiteSpaceNormal
+                  />
                   <th style={{ width: 80, textAlign: "center" }} title="Responsable según juzgado asignado">
                     <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 500 }}>Responsable</span>
                   </th>

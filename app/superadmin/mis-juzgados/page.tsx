@@ -5,8 +5,10 @@ import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { pjnScraperSupabase } from "@/lib/pjn-scraper-supabase";
 import { daysSince } from "@/lib/semaforo";
+import { FilterableTh } from "@/app/components/FilterableTh";
 import NotificationBell from "@/app/components/NotificationBell";
 import ResponsableAvatars from "@/app/components/ResponsableAvatars";
+import { useColumnFilters, uniqueOptionsFromField } from "@/app/hooks/useColumnFilters";
 
 // Estilos globales para mejorar contraste del dropdown
 if (typeof document !== 'undefined') {
@@ -1197,6 +1199,8 @@ async function requireSessionOrRedirect() {
 type SortField = "semaforo" | "fecha" | "dias" | "juzgado" | null;
 type SortDirection = "asc" | "desc";
 
+type MisJuzgadosTableFilterKey = "semaforo" | "tablaJuzgado" | "estado";
+
 export default function MisJuzgadosPage() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
@@ -1206,7 +1210,12 @@ export default function MisJuzgadosPage() {
   const [activeTab, setActiveTab] = useState<"expedientes" | "cedulas" | "oficios">("expedientes");
   const [sortField, setSortField] = useState<SortField>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc"); // Por defecto: más viejo primero
-  const [semaforoFilter, setSemaforoFilter] = useState<Semaforo | null>(null);
+  const { filters, setFilter, clearAll, hasActiveFilters, openFilter, setOpenFilter } =
+    useColumnFilters<MisJuzgadosTableFilterKey>({
+      semaforo: null as string | null,
+      tablaJuzgado: null as string | null,
+      estado: null as string | null,
+    });
   const [notasEditables, setNotasEditables] = useState<Record<string, string>>({});
   const [notasGuardando, setNotasGuardando] = useState<Record<string, boolean>>({});
   const [juzgadoFilter, setJuzgadoFilter] = useState<"mis_juzgados" | "todos" | "beneficio" | "prueba_pericia" | string>("mis_juzgados");
@@ -2463,6 +2472,14 @@ export default function MisJuzgadosPage() {
     return cedulas.filter(c => c.tipo_documento === "OFICIO");
   }, [cedulas]);
 
+  const tablaJuzgadoFilterOptions = useMemo(() => {
+    const rows: Record<string, unknown>[] = [
+      ...expedientes.map((e) => ({ juzgado: e.juzgado })),
+      ...cedulas.map((c) => ({ juzgado: c.juzgado })),
+    ];
+    return uniqueOptionsFromField(rows, "juzgado");
+  }, [expedientes, cedulas]);
+
   // Obtener juzgados únicos de los juzgados asignados, ordenados ascendente
   const juzgadosAsignadosOrdenados = useMemo(() => {
     if (userJuzgados.length === 0) return [];
@@ -2787,8 +2804,17 @@ export default function MisJuzgadosPage() {
 
     // Aplicar filtro de semáforo
     let filtered = filteredByCreator;
-    if (semaforoFilter) {
-      filtered = filteredByCreator.filter((item) => item.semaforo === semaforoFilter);
+    if (filters.semaforo) {
+      filtered = filtered.filter((item) => item.semaforo === filters.semaforo);
+    }
+
+    if (filters.tablaJuzgado) {
+      const jf = filters.tablaJuzgado;
+      filtered = filtered.filter((item: any) => (item.juzgado || "").trim() === jf);
+    }
+
+    if (filters.estado && (activeTab === "cedulas" || activeTab === "oficios")) {
+      filtered = filtered.filter((item: any) => item.estado === filters.estado);
     }
 
     // Aplicar filtro de búsqueda (busca en número de expediente y carátula)
@@ -2848,7 +2874,17 @@ export default function MisJuzgadosPage() {
     });
 
     return sorted;
-  }, [activeTab, expedientes, cedulasFiltered, oficiosFiltered, sortField, sortDirection, semaforoFilter, createdByFilter, searchTerm]);
+  }, [
+    activeTab,
+    expedientes,
+    cedulasFiltered,
+    oficiosFiltered,
+    sortField,
+    sortDirection,
+    filters,
+    createdByFilter,
+    searchTerm,
+  ]);
 
   // Paginación: solo para expedientes
   const paginatedItems = useMemo(() => {
@@ -2868,7 +2904,7 @@ export default function MisJuzgadosPage() {
   // Resetear a página 1 cuando cambia el filtro o el tab
   useEffect(() => {
     setCurrentPage(1);
-  }, [juzgadoFilter, createdByFilter, semaforoFilter, activeTab, searchTerm]);
+  }, [juzgadoFilter, createdByFilter, filters, activeTab, searchTerm]);
 
   async function logout() {
     await supabase.auth.signOut();
@@ -3295,11 +3331,11 @@ export default function MisJuzgadosPage() {
               Semáforo automático por antigüedad:
             </span>
             <button
-              onClick={() => setSemaforoFilter(semaforoFilter === "VERDE" ? null : "VERDE")}
+              onClick={() => setFilter("semaforo", filters.semaforo === "VERDE" ? null : "VERDE")}
               style={{
                 cursor: "pointer",
-                border: semaforoFilter === "VERDE" ? "2px solid rgba(46, 204, 113, 0.8)" : "1px solid rgba(46, 204, 113, 0.35)",
-                background: semaforoFilter === "VERDE" ? "rgba(46, 204, 113, 0.25)" : "rgba(46, 204, 113, 0.16)",
+                border: filters.semaforo === "VERDE" ? "2px solid rgba(46, 204, 113, 0.8)" : "1px solid rgba(46, 204, 113, 0.35)",
+                background: filters.semaforo === "VERDE" ? "rgba(46, 204, 113, 0.25)" : "rgba(46, 204, 113, 0.16)",
                 color: "rgba(210, 255, 226, 0.95)",
                 padding: "6px 12px",
                 borderRadius: 999,
@@ -3317,11 +3353,11 @@ export default function MisJuzgadosPage() {
             </button>
             <span style={{ color: "var(--muted)", fontSize: 13 }}>0–29</span>
             <button
-              onClick={() => setSemaforoFilter(semaforoFilter === "AMARILLO" ? null : "AMARILLO")}
+              onClick={() => setFilter("semaforo", filters.semaforo === "AMARILLO" ? null : "AMARILLO")}
               style={{
                 cursor: "pointer",
-                border: semaforoFilter === "AMARILLO" ? "2px solid rgba(241, 196, 15, 0.8)" : "1px solid rgba(241, 196, 15, 0.35)",
-                background: semaforoFilter === "AMARILLO" ? "rgba(241, 196, 15, 0.25)" : "rgba(241, 196, 15, 0.14)",
+                border: filters.semaforo === "AMARILLO" ? "2px solid rgba(241, 196, 15, 0.8)" : "1px solid rgba(241, 196, 15, 0.35)",
+                background: filters.semaforo === "AMARILLO" ? "rgba(241, 196, 15, 0.25)" : "rgba(241, 196, 15, 0.14)",
                 color: "rgba(255, 246, 205, 0.95)",
                 padding: "6px 12px",
                 borderRadius: 999,
@@ -3339,11 +3375,11 @@ export default function MisJuzgadosPage() {
             </button>
             <span style={{ color: "var(--muted)", fontSize: 13 }}>30–59</span>
             <button
-              onClick={() => setSemaforoFilter(semaforoFilter === "ROJO" ? null : "ROJO")}
+              onClick={() => setFilter("semaforo", filters.semaforo === "ROJO" ? null : "ROJO")}
               style={{
                 cursor: "pointer",
-                border: semaforoFilter === "ROJO" ? "2px solid rgba(231, 76, 60, 0.8)" : "1px solid rgba(231, 76, 60, 0.35)",
-                background: semaforoFilter === "ROJO" ? "rgba(231, 76, 60, 0.25)" : "rgba(231, 76, 60, 0.14)",
+                border: filters.semaforo === "ROJO" ? "2px solid rgba(231, 76, 60, 0.8)" : "1px solid rgba(231, 76, 60, 0.35)",
+                background: filters.semaforo === "ROJO" ? "rgba(231, 76, 60, 0.25)" : "rgba(231, 76, 60, 0.14)",
                 color: "rgba(255, 220, 216, 0.95)",
                 padding: "6px 12px",
                 borderRadius: 999,
@@ -3360,22 +3396,14 @@ export default function MisJuzgadosPage() {
               ROJO
             </button>
             <span style={{ color: "var(--muted)", fontSize: 13 }}>60+ días</span>
-            {semaforoFilter && (
+            {hasActiveFilters && (
               <button
-                onClick={() => setSemaforoFilter(null)}
-                style={{
-                  cursor: "pointer",
-                  border: "1px solid rgba(255,255,255,.3)",
-                  background: "rgba(255,255,255,.1)",
-                  color: "var(--text)",
-                  padding: "6px 12px",
-                  borderRadius: 999,
-                  fontWeight: 600,
-                  fontSize: 12,
-                  transition: "all 0.2s ease",
-                }}
+                type="button"
+                className="btn"
+                onClick={() => clearAll()}
+                style={{ fontSize: 12 }}
               >
-                Limpiar filtro
+                Limpiar filtros
               </button>
             )}
 
@@ -3575,28 +3603,42 @@ export default function MisJuzgadosPage() {
             <table className="table" style={{ minWidth: '1800px' }}>
               <thead>
                 <tr>
-                  <th 
-                    style={{ width: 130, cursor: "pointer" }}
-                    onClick={() => handleSort("semaforo")}
-                    title="Haz clic para ordenar"
-                  >
-                    Semáforo{" "}
-                    <span style={{ opacity: sortField === "semaforo" ? 1 : 0.4 }}>
-                      {sortField === "semaforo" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
-                    </span>
-                  </th>
+                  <FilterableTh
+                    label="Semáforo"
+                    filterKey="semaforo"
+                    options={[
+                      { value: "VERDE", label: "VERDE" },
+                      { value: "AMARILLO", label: "AMARILLO" },
+                      { value: "ROJO", label: "ROJO" },
+                    ]}
+                    activeFilter={filters.semaforo}
+                    onFilter={(v) => setFilter("semaforo", v)}
+                    isOpen={openFilter === "semaforo"}
+                    onToggle={() => setOpenFilter((p) => (p === "semaforo" ? null : "semaforo"))}
+                    sortable
+                    sortField={sortField}
+                    sortDirection={sortDirection}
+                    onSort={() => handleSort("semaforo")}
+                    width={130}
+                  />
                   <th>Carátula</th>
-                  <th 
-                    className="sortable"
-                    style={{ cursor: "pointer" }}
-                    onClick={() => handleSort("juzgado")}
-                    title="Haz clic para ordenar"
-                  >
-                    Juzgado{" "}
-                    <span style={{ opacity: sortField === "juzgado" ? 1 : 0.4 }}>
-                      {sortField === "juzgado" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
-                    </span>
-                  </th>
+                  <FilterableTh
+                    label="Juzgado"
+                    filterKey="tablaJuzgado"
+                    options={tablaJuzgadoFilterOptions}
+                    activeFilter={filters.tablaJuzgado}
+                    onFilter={(v) => setFilter("tablaJuzgado", v)}
+                    isOpen={openFilter === "tablaJuzgado"}
+                    onToggle={() => setOpenFilter((p) => (p === "tablaJuzgado" ? null : "tablaJuzgado"))}
+                    sortable
+                    sortField={sortField}
+                    sortDirection={sortDirection}
+                    onSort={() => handleSort("juzgado")}
+                    sortColumnId="juzgado"
+                    menuMinWidth={250}
+                    menuScrollable
+                    optionWhiteSpaceNormal
+                  />
                   <th style={{ width: 80, textAlign: "center" }} title="Responsable según juzgado asignado">
                     <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 500 }}>Responsable</span>
                   </th>
@@ -3621,7 +3663,22 @@ export default function MisJuzgadosPage() {
                     </span>
                   </th>
                   {(activeTab === "cedulas" || activeTab === "oficios") && (
-                    <th style={{ width: 110 }}>Estado</th>
+                    <FilterableTh
+                      label="Estado"
+                      filterKey="estado"
+                      options={[
+                        { value: "Pendiente", label: "Pendiente" },
+                        { value: "En Trámite", label: "En Trámite" },
+                        { value: "En Diligenciamiento", label: "En Diligenciamiento" },
+                        { value: "Completa", label: "Completa" },
+                      ]}
+                      activeFilter={filters.estado}
+                      onFilter={(v) => setFilter("estado", v)}
+                      isOpen={openFilter === "estado"}
+                      onToggle={() => setOpenFilter((p) => (p === "estado" ? null : "estado"))}
+                      width={110}
+                      menuMinWidth={190}
+                    />
                   )}
                   {activeTab === "expedientes" && (
                     <th style={{ width: 200 }}>Expediente</th>

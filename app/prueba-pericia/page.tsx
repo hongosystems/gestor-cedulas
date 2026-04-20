@@ -5,7 +5,9 @@ import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { pjnScraperSupabase } from "@/lib/pjn-scraper-supabase";
 import { daysSince } from "@/lib/semaforo";
+import { FilterableTh } from "@/app/components/FilterableTh";
 import NotificationBell from "@/app/components/NotificationBell";
+import { useColumnFilters } from "@/app/hooks/useColumnFilters";
 
 // Estilos globales para mejorar contraste del dropdown
 if (typeof document !== 'undefined') {
@@ -1187,6 +1189,9 @@ async function requireSessionOrRedirect() {
 type SortField = "semaforo" | "fecha" | "dias" | "juzgado" | null;
 type SortDirection = "asc" | "desc";
 
+type PruebaDeteccionColFilter = "semaforo" | "tablaJuzgado";
+type PruebaOrdenesColFilter = "semaforo" | "estado_gestion" | "centro_medico";
+
 // Feature flag para órdenes y seguimiento
 // IMPORTANTE: Para activar, crear .env.local con: NEXT_PUBLIC_FEATURE_ORDENES_SEGUIMIENTO=true
 // y reiniciar el servidor de desarrollo
@@ -1199,7 +1204,10 @@ export default function PruebaPericiaPage() {
   const [pjnFavoritos, setPjnFavoritos] = useState<PjnFavorito[]>([]);
   const [sortField, setSortField] = useState<SortField>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
-  const [semaforoFilter, setSemaforoFilter] = useState<Semaforo | null>(null);
+  const deteccionCol = useColumnFilters<PruebaDeteccionColFilter>({
+    semaforo: null as string | null,
+    tablaJuzgado: null as string | null,
+  });
   const [notasEditables, setNotasEditables] = useState<Record<string, string>>({});
   const [notasGuardando, setNotasGuardando] = useState<Record<string, boolean>>({});
   const [createdByFilter, setCreatedByFilter] = useState<string>("all");
@@ -1235,7 +1243,11 @@ export default function PruebaPericiaPage() {
   const [ordenesExistentes, setOrdenesExistentes] = useState<Record<string, boolean>>({}); // case_ref -> tiene orden
   
   // Filtros para órdenes/seguimiento
-  const [semaforoFilterOrdenes, setSemaforoFilterOrdenes] = useState<Semaforo | null>(null);
+  const ordenesCol = useColumnFilters<PruebaOrdenesColFilter>({
+    semaforo: null as string | null,
+    estado_gestion: null as string | null,
+    centro_medico: null as string | null,
+  });
   const [searchTermOrdenes, setSearchTermOrdenes] = useState<string>("");
   const [createdByFilterOrdenes, setCreatedByFilterOrdenes] = useState<string>("all");
   const [createdByOptionsOrdenes, setCreatedByOptionsOrdenes] = useState<Array<{ id: string; name: string }>>([]);
@@ -1834,75 +1846,105 @@ export default function PruebaPericiaPage() {
     });
   }, [expedientesFiltrados]);
 
-  // Aplicar filtros
-  let filtered = itemsToShow;
-  
-  if (createdByFilter !== "all") {
-    filtered = filtered.filter((item: any) => {
-      if (createdByFilter === "pjn") {
-        return item.is_pjn_favorito === true || item.created_by === "PJN Favoritos";
-      }
-      return item.created_by_user_id === createdByFilter;
-    });
-  }
+  const juzgadoTablaOptions = useMemo(() => {
+    const s = new Set<string>();
+    for (const item of itemsToShow) {
+      const d = limpiarJuzgadoParaMostrar((item as { juzgado?: string | null }).juzgado ?? null);
+      if (d) s.add(d);
+    }
+    return [...s]
+      .sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }))
+      .map((value) => ({ value, label: value }));
+  }, [itemsToShow]);
 
-  if (semaforoFilter) {
-    filtered = filtered.filter((item) => item.semaforo === semaforoFilter);
-  }
+  const { sorted, totalPages, paginatedItems } = useMemo(() => {
+    let filtered = [...itemsToShow];
 
-  if (searchTerm.trim()) {
-    const searchLower = searchTerm.trim().toLowerCase();
-    filtered = filtered.filter((item: any) => {
-      const numeroExpediente = (item.numero || "").toLowerCase();
-      const caratula = (item.caratula || "").toLowerCase();
-      return numeroExpediente.includes(searchLower) || caratula.includes(searchLower);
-    });
-  }
-
-  // Ordenar
-  const sorted = [...filtered];
-  sorted.sort((a, b) => {
-    let compareA: number;
-    let compareB: number;
-
-    const currentSortField = sortField || "fecha";
-    const currentSortDirection = sortField ? sortDirection : "asc";
-
-    if (currentSortField === "dias") {
-      compareA = a.dias ?? -1;
-      compareB = b.dias ?? -1;
-    } else if (currentSortField === "semaforo") {
-      const semOrder: Record<Semaforo, number> = { ROJO: 2, AMARILLO: 1, VERDE: 0 };
-      compareA = semOrder[a.semaforo as Semaforo] ?? 0;
-      compareB = semOrder[b.semaforo as Semaforo] ?? 0;
-    } else if (currentSortField === "fecha") {
-      if (!a.fecha && !b.fecha) return 0;
-      if (!a.fecha) return 1;
-      if (!b.fecha) return -1;
-      compareA = new Date(a.fecha).getTime();
-      compareB = new Date(b.fecha).getTime();
-    } else if (currentSortField === "juzgado") {
-      const juzgadoA = (a.juzgado || "").trim().toUpperCase();
-      const juzgadoB = (b.juzgado || "").trim().toUpperCase();
-      if (!juzgadoA && !juzgadoB) return 0;
-      if (!juzgadoA) return 1;
-      if (!juzgadoB) return -1;
-      if (juzgadoA < juzgadoB) return currentSortDirection === "asc" ? -1 : 1;
-      if (juzgadoA > juzgadoB) return currentSortDirection === "asc" ? 1 : -1;
-      return 0;
-    } else {
-      return 0;
+    if (createdByFilter !== "all") {
+      filtered = filtered.filter((item: any) => {
+        if (createdByFilter === "pjn") {
+          return item.is_pjn_favorito === true || item.created_by === "PJN Favoritos";
+        }
+        return item.created_by_user_id === createdByFilter;
+      });
     }
 
-    if (compareA === compareB) return 0;
-    return currentSortDirection === "asc" 
-      ? (compareA < compareB ? -1 : 1)
-      : (compareA > compareB ? -1 : 1);
-  });
+    if (deteccionCol.filters.semaforo) {
+      filtered = filtered.filter((item) => item.semaforo === deteccionCol.filters.semaforo);
+    }
 
-  // Paginación
-  const totalPages = Math.ceil(sorted.length / itemsPerPage);
-  const paginatedItems = sorted.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+    if (deteccionCol.filters.tablaJuzgado) {
+      const jf = deteccionCol.filters.tablaJuzgado;
+      filtered = filtered.filter(
+        (item) => limpiarJuzgadoParaMostrar((item as { juzgado?: string | null }).juzgado ?? null) === jf
+      );
+    }
+
+    if (searchTerm.trim()) {
+      const searchLower = searchTerm.trim().toLowerCase();
+      filtered = filtered.filter((item: any) => {
+        const numeroExpediente = (item.numero || "").toLowerCase();
+        const caratula = (item.caratula || "").toLowerCase();
+        return numeroExpediente.includes(searchLower) || caratula.includes(searchLower);
+      });
+    }
+
+    const sortedLocal = [...filtered];
+    sortedLocal.sort((a, b) => {
+      let compareA: number;
+      let compareB: number;
+
+      const currentSortField = sortField || "fecha";
+      const currentSortDirection = sortField ? sortDirection : "asc";
+
+      if (currentSortField === "dias") {
+        compareA = a.dias ?? -1;
+        compareB = b.dias ?? -1;
+      } else if (currentSortField === "semaforo") {
+        const semOrder: Record<Semaforo, number> = { ROJO: 2, AMARILLO: 1, VERDE: 0 };
+        compareA = semOrder[a.semaforo as Semaforo] ?? 0;
+        compareB = semOrder[b.semaforo as Semaforo] ?? 0;
+      } else if (currentSortField === "fecha") {
+        if (!a.fecha && !b.fecha) return 0;
+        if (!a.fecha) return 1;
+        if (!b.fecha) return -1;
+        compareA = new Date(a.fecha).getTime();
+        compareB = new Date(b.fecha).getTime();
+      } else if (currentSortField === "juzgado") {
+        const juzgadoA = (a.juzgado || "").trim().toUpperCase();
+        const juzgadoB = (b.juzgado || "").trim().toUpperCase();
+        if (!juzgadoA && !juzgadoB) return 0;
+        if (!juzgadoA) return 1;
+        if (!juzgadoB) return -1;
+        if (juzgadoA < juzgadoB) return currentSortDirection === "asc" ? -1 : 1;
+        if (juzgadoA > juzgadoB) return currentSortDirection === "asc" ? 1 : -1;
+        return 0;
+      } else {
+        return 0;
+      }
+
+      if (compareA === compareB) return 0;
+      return currentSortDirection === "asc"
+        ? compareA < compareB
+          ? -1
+          : 1
+        : compareA > compareB
+          ? -1
+          : 1;
+    });
+
+    const totalPagesLocal = Math.ceil(sortedLocal.length / itemsPerPage);
+    const paginatedItemsLocal = sortedLocal.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+    return { sorted: sortedLocal, totalPages: totalPagesLocal, paginatedItems: paginatedItemsLocal };
+  }, [
+    itemsToShow,
+    createdByFilter,
+    deteccionCol.filters,
+    searchTerm,
+    sortField,
+    sortDirection,
+    currentPage,
+  ]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -1912,6 +1954,64 @@ export default function PruebaPericiaPage() {
       setSortDirection("asc");
     }
   };
+
+  const ordenesEstadoOptions = useMemo(() => {
+    const seen = new Set<string>();
+    for (const o of ordenesData) {
+      const e = o?.gestion?.estado;
+      if (typeof e === "string" && e.trim()) seen.add(e.trim());
+    }
+    const opts = [...seen]
+      .sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }))
+      .map((v) => ({ value: v, label: ESTADO_GESTION_LABELS[v] ?? v }));
+    return [{ value: "__SIN_GESTION__", label: "Sin gestión" }, ...opts];
+  }, [ordenesData]);
+
+  const ordenesCentroOptions = useMemo(() => {
+    const s = new Set<string>();
+    for (const o of ordenesData) {
+      const c = (o?.gestion?.centro_medico || "").trim();
+      if (c) s.add(c);
+    }
+    return [...s]
+      .sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }))
+      .map((value) => ({ value, label: value }));
+  }, [ordenesData]);
+
+  const ordenesFiltered = useMemo(() => {
+    let ordenesFiltradas = [...ordenesData];
+    if (ordenesCol.filters.semaforo) {
+      ordenesFiltradas = ordenesFiltradas.filter((orden: any) => orden.semaforo === ordenesCol.filters.semaforo);
+    }
+    if (ordenesCol.filters.estado_gestion) {
+      const key = ordenesCol.filters.estado_gestion;
+      if (key === "__SIN_GESTION__") {
+        ordenesFiltradas = ordenesFiltradas.filter((orden: any) => !orden.gestion?.estado);
+      } else {
+        ordenesFiltradas = ordenesFiltradas.filter((orden: any) => orden.gestion?.estado === key);
+      }
+    }
+    if (ordenesCol.filters.centro_medico) {
+      const cm = ordenesCol.filters.centro_medico;
+      ordenesFiltradas = ordenesFiltradas.filter(
+        (orden: any) => (orden.gestion?.centro_medico || "").trim() === cm
+      );
+    }
+    if (searchTermOrdenes.trim()) {
+      const searchLower = searchTermOrdenes.trim().toLowerCase();
+      ordenesFiltradas = ordenesFiltradas.filter((orden: any) => {
+        const caseRef = (orden.case_ref || "").toLowerCase();
+        const filename = (orden.filename || "").toLowerCase();
+        return caseRef.includes(searchLower) || filename.includes(searchLower);
+      });
+    }
+    if (createdByFilterOrdenes !== "all") {
+      ordenesFiltradas = ordenesFiltradas.filter(
+        (orden: any) => orden.emitida_por_user_id === createdByFilterOrdenes
+      );
+    }
+    return ordenesFiltradas;
+  }, [ordenesData, ordenesCol.filters, searchTermOrdenes, createdByFilterOrdenes]);
 
   if (loading) {
     return (
@@ -2367,11 +2467,23 @@ export default function PruebaPericiaPage() {
                     Semáforo automático por horas:
                   </span>
                   <button
-                    onClick={() => setSemaforoFilterOrdenes(semaforoFilterOrdenes === "VERDE" ? null : "VERDE")}
+                    type="button"
+                    onClick={() =>
+                      ordenesCol.setFilter(
+                        "semaforo",
+                        ordenesCol.filters.semaforo === "VERDE" ? null : "VERDE"
+                      )
+                    }
                     style={{
                       cursor: "pointer",
-                      border: semaforoFilterOrdenes === "VERDE" ? "2px solid rgba(46, 204, 113, 0.8)" : "1px solid rgba(46, 204, 113, 0.35)",
-                      background: semaforoFilterOrdenes === "VERDE" ? "rgba(46, 204, 113, 0.25)" : "rgba(46, 204, 113, 0.16)",
+                      border:
+                        ordenesCol.filters.semaforo === "VERDE"
+                          ? "2px solid rgba(46, 204, 113, 0.8)"
+                          : "1px solid rgba(46, 204, 113, 0.35)",
+                      background:
+                        ordenesCol.filters.semaforo === "VERDE"
+                          ? "rgba(46, 204, 113, 0.25)"
+                          : "rgba(46, 204, 113, 0.16)",
                       color: "rgba(210, 255, 226, 0.95)",
                       padding: "6px 12px",
                       borderRadius: 999,
@@ -2385,11 +2497,23 @@ export default function PruebaPericiaPage() {
                   </button>
                   <span style={{ color: "var(--muted)", fontSize: 12 }}>0-24hrs</span>
                   <button
-                    onClick={() => setSemaforoFilterOrdenes(semaforoFilterOrdenes === "AMARILLO" ? null : "AMARILLO")}
+                    type="button"
+                    onClick={() =>
+                      ordenesCol.setFilter(
+                        "semaforo",
+                        ordenesCol.filters.semaforo === "AMARILLO" ? null : "AMARILLO"
+                      )
+                    }
                     style={{
                       cursor: "pointer",
-                      border: semaforoFilterOrdenes === "AMARILLO" ? "2px solid rgba(241, 196, 15, 0.8)" : "1px solid rgba(241, 196, 15, 0.35)",
-                      background: semaforoFilterOrdenes === "AMARILLO" ? "rgba(241, 196, 15, 0.25)" : "rgba(241, 196, 15, 0.14)",
+                      border:
+                        ordenesCol.filters.semaforo === "AMARILLO"
+                          ? "2px solid rgba(241, 196, 15, 0.8)"
+                          : "1px solid rgba(241, 196, 15, 0.35)",
+                      background:
+                        ordenesCol.filters.semaforo === "AMARILLO"
+                          ? "rgba(241, 196, 15, 0.25)"
+                          : "rgba(241, 196, 15, 0.14)",
                       color: "rgba(255, 246, 205, 0.95)",
                       padding: "6px 12px",
                       borderRadius: 999,
@@ -2403,11 +2527,23 @@ export default function PruebaPericiaPage() {
                   </button>
                   <span style={{ color: "var(--muted)", fontSize: 12 }}>24-48hrs</span>
                   <button
-                    onClick={() => setSemaforoFilterOrdenes(semaforoFilterOrdenes === "ROJO" ? null : "ROJO")}
+                    type="button"
+                    onClick={() =>
+                      ordenesCol.setFilter(
+                        "semaforo",
+                        ordenesCol.filters.semaforo === "ROJO" ? null : "ROJO"
+                      )
+                    }
                     style={{
                       cursor: "pointer",
-                      border: semaforoFilterOrdenes === "ROJO" ? "2px solid rgba(231, 76, 60, 0.8)" : "1px solid rgba(231, 76, 60, 0.35)",
-                      background: semaforoFilterOrdenes === "ROJO" ? "rgba(231, 76, 60, 0.25)" : "rgba(231, 76, 60, 0.14)",
+                      border:
+                        ordenesCol.filters.semaforo === "ROJO"
+                          ? "2px solid rgba(231, 76, 60, 0.8)"
+                          : "1px solid rgba(231, 76, 60, 0.35)",
+                      background:
+                        ordenesCol.filters.semaforo === "ROJO"
+                          ? "rgba(231, 76, 60, 0.25)"
+                          : "rgba(231, 76, 60, 0.14)",
                       color: "rgba(255, 220, 216, 0.95)",
                       padding: "6px 12px",
                       borderRadius: 999,
@@ -2420,21 +2556,14 @@ export default function PruebaPericiaPage() {
                     ROJO
                   </button>
                   <span style={{ color: "var(--muted)", fontSize: 12 }}>48-72hrs+</span>
-                  {semaforoFilterOrdenes && (
+                  {ordenesCol.hasActiveFilters && (
                     <button
-                      onClick={() => setSemaforoFilterOrdenes(null)}
-                      style={{
-                        cursor: "pointer",
-                        padding: "4px 8px",
-                        background: "rgba(255,255,255,.08)",
-                        border: "1px solid rgba(255,255,255,.16)",
-                        borderRadius: 6,
-                        color: "var(--text)",
-                        fontSize: 11,
-                        fontWeight: 600
-                      }}
+                      type="button"
+                      className="btn"
+                      onClick={() => ordenesCol.clearAll()}
+                      style={{ fontSize: 12 }}
                     >
-                      ✕ Limpiar
+                      Limpiar filtros
                     </button>
                   )}
                 </div>
@@ -2487,40 +2616,57 @@ export default function PruebaPericiaPage() {
                 </div>
               </div>
 
-              {/* Tabla de órdenes filtradas */}
-              {(() => {
-                let ordenesFiltradas = [...ordenesData];
-
-                // Filtrar por semáforo
-                if (semaforoFilterOrdenes) {
-                  ordenesFiltradas = ordenesFiltradas.filter((orden: any) => orden.semaforo === semaforoFilterOrdenes);
-                }
-
-                // Filtrar por búsqueda
-                if (searchTermOrdenes.trim()) {
-                  const searchLower = searchTermOrdenes.trim().toLowerCase();
-                  ordenesFiltradas = ordenesFiltradas.filter((orden: any) => {
-                    const caseRef = (orden.case_ref || "").toLowerCase();
-                    const filename = (orden.filename || "").toLowerCase();
-                    return caseRef.includes(searchLower) || filename.includes(searchLower);
-                  });
-                }
-
-                // Filtrar por "Cargado por"
-                if (createdByFilterOrdenes !== "all") {
-                  ordenesFiltradas = ordenesFiltradas.filter((orden: any) => orden.emitida_por_user_id === createdByFilterOrdenes);
-                }
-
-                return (
-                  <div className="tableWrap" style={{ marginTop: 10 }}>
+              <div className="tableWrap" style={{ marginTop: 10 }}>
               <table className="table" style={{ minWidth: '1400px' }}>
                 <thead>
                   <tr>
-                    <th style={{ width: 130 }}>Semáforo SLA</th>
+                    <FilterableTh
+                      style={{ width: 130 }}
+                      label="Semáforo SLA"
+                      filterKey="semaforo"
+                      options={[
+                        { value: "VERDE", label: "VERDE" },
+                        { value: "AMARILLO", label: "AMARILLO" },
+                        { value: "ROJO", label: "ROJO" },
+                      ]}
+                      activeFilter={ordenesCol.filters.semaforo}
+                      onFilter={(v) => ordenesCol.setFilter("semaforo", v)}
+                      isOpen={ordenesCol.openFilter === "semaforo"}
+                      onToggle={() =>
+                        ordenesCol.setOpenFilter((p) => (p === "semaforo" ? null : "semaforo"))
+                      }
+                      menuMinWidth={170}
+                    />
                     <th>Case Ref</th>
                     <th>Archivo</th>
-                    <th>Estado Gestión</th>
-                    <th>Centro Médico</th>
+                    <FilterableTh
+                      label="Estado Gestión"
+                      filterKey="estado_gestion"
+                      options={ordenesEstadoOptions}
+                      activeFilter={ordenesCol.filters.estado_gestion}
+                      onFilter={(v) => ordenesCol.setFilter("estado_gestion", v)}
+                      isOpen={ordenesCol.openFilter === "estado_gestion"}
+                      onToggle={() =>
+                        ordenesCol.setOpenFilter((p) => (p === "estado_gestion" ? null : "estado_gestion"))
+                      }
+                      menuMinWidth={220}
+                      menuScrollable
+                      optionWhiteSpaceNormal
+                    />
+                    <FilterableTh
+                      label="Centro Médico"
+                      filterKey="centro_medico"
+                      options={ordenesCentroOptions}
+                      activeFilter={ordenesCol.filters.centro_medico}
+                      onFilter={(v) => ordenesCol.setFilter("centro_medico", v)}
+                      isOpen={ordenesCol.openFilter === "centro_medico"}
+                      onToggle={() =>
+                        ordenesCol.setOpenFilter((p) => (p === "centro_medico" ? null : "centro_medico"))
+                      }
+                      menuMinWidth={250}
+                      menuScrollable
+                      optionWhiteSpaceNormal
+                    />
                     <th>Turno</th>
                     <th>Responsable</th>
                     <th style={{ textAlign: "center" }}>Días sin contacto</th>
@@ -2528,7 +2674,7 @@ export default function PruebaPericiaPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {ordenesFiltradas.map((orden: any) => (
+                  {ordenesFiltered.map((orden: any) => (
                     <tr key={orden.id} style={{ verticalAlign: "top" }}>
                       <td>
                         <SemaforoChip value={orden.semaforo as Semaforo} />
@@ -2586,7 +2732,7 @@ export default function PruebaPericiaPage() {
                       </td>
                     </tr>
                   ))}
-                  {ordenesFiltradas.length === 0 && (
+                  {ordenesFiltered.length === 0 && (
                     <tr>
                       <td colSpan={9} className="muted">
                         No hay órdenes médicas cargadas.
@@ -2596,8 +2742,6 @@ export default function PruebaPericiaPage() {
                 </tbody>
               </table>
             </div>
-                );
-              })()}
             </>
           )}
         </div>
@@ -2622,11 +2766,23 @@ export default function PruebaPericiaPage() {
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <span style={{ color: "var(--muted)", fontSize: 13 }}>Semáforo automático por antigüedad:</span>
           <button
-            onClick={() => setSemaforoFilter(semaforoFilter === "VERDE" ? null : "VERDE")}
+            type="button"
+            onClick={() =>
+              deteccionCol.setFilter(
+                "semaforo",
+                deteccionCol.filters.semaforo === "VERDE" ? null : "VERDE"
+              )
+            }
             style={{
               cursor: "pointer",
-              border: semaforoFilter === "VERDE" ? "2px solid rgba(46, 204, 113, 0.8)" : "1px solid rgba(46, 204, 113, 0.35)",
-              background: semaforoFilter === "VERDE" ? "rgba(46, 204, 113, 0.25)" : "rgba(46, 204, 113, 0.16)",
+              border:
+                deteccionCol.filters.semaforo === "VERDE"
+                  ? "2px solid rgba(46, 204, 113, 0.8)"
+                  : "1px solid rgba(46, 204, 113, 0.35)",
+              background:
+                deteccionCol.filters.semaforo === "VERDE"
+                  ? "rgba(46, 204, 113, 0.25)"
+                  : "rgba(46, 204, 113, 0.16)",
               color: "rgba(210, 255, 226, 0.95)",
               padding: "6px 12px",
               borderRadius: 999,
@@ -2644,11 +2800,23 @@ export default function PruebaPericiaPage() {
           </button>
           <span style={{ color: "var(--muted)", fontSize: 13 }}>0–19</span>
           <button
-            onClick={() => setSemaforoFilter(semaforoFilter === "AMARILLO" ? null : "AMARILLO")}
+            type="button"
+            onClick={() =>
+              deteccionCol.setFilter(
+                "semaforo",
+                deteccionCol.filters.semaforo === "AMARILLO" ? null : "AMARILLO"
+              )
+            }
             style={{
               cursor: "pointer",
-              border: semaforoFilter === "AMARILLO" ? "2px solid rgba(241, 196, 15, 0.8)" : "1px solid rgba(241, 196, 15, 0.35)",
-              background: semaforoFilter === "AMARILLO" ? "rgba(241, 196, 15, 0.25)" : "rgba(241, 196, 15, 0.14)",
+              border:
+                deteccionCol.filters.semaforo === "AMARILLO"
+                  ? "2px solid rgba(241, 196, 15, 0.8)"
+                  : "1px solid rgba(241, 196, 15, 0.35)",
+              background:
+                deteccionCol.filters.semaforo === "AMARILLO"
+                  ? "rgba(241, 196, 15, 0.25)"
+                  : "rgba(241, 196, 15, 0.14)",
               color: "rgba(255, 246, 205, 0.95)",
               padding: "6px 12px",
               borderRadius: 999,
@@ -2666,11 +2834,23 @@ export default function PruebaPericiaPage() {
           </button>
           <span style={{ color: "var(--muted)", fontSize: 13 }}>20–49</span>
           <button
-            onClick={() => setSemaforoFilter(semaforoFilter === "ROJO" ? null : "ROJO")}
+            type="button"
+            onClick={() =>
+              deteccionCol.setFilter(
+                "semaforo",
+                deteccionCol.filters.semaforo === "ROJO" ? null : "ROJO"
+              )
+            }
             style={{
               cursor: "pointer",
-              border: semaforoFilter === "ROJO" ? "2px solid rgba(231, 76, 60, 0.8)" : "1px solid rgba(231, 76, 60, 0.35)",
-              background: semaforoFilter === "ROJO" ? "rgba(231, 76, 60, 0.25)" : "rgba(231, 76, 60, 0.14)",
+              border:
+                deteccionCol.filters.semaforo === "ROJO"
+                  ? "2px solid rgba(231, 76, 60, 0.8)"
+                  : "1px solid rgba(231, 76, 60, 0.35)",
+              background:
+                deteccionCol.filters.semaforo === "ROJO"
+                  ? "rgba(231, 76, 60, 0.25)"
+                  : "rgba(231, 76, 60, 0.14)",
               color: "rgba(255, 220, 216, 0.95)",
               padding: "6px 12px",
               borderRadius: 999,
@@ -2687,22 +2867,14 @@ export default function PruebaPericiaPage() {
             ROJO
           </button>
           <span style={{ color: "var(--muted)", fontSize: 13 }}>50+ días</span>
-          {semaforoFilter && (
+          {deteccionCol.hasActiveFilters && (
             <button
-              onClick={() => setSemaforoFilter(null)}
-              style={{
-                cursor: "pointer",
-                border: "1px solid rgba(255,255,255,.3)",
-                background: "rgba(255,255,255,.1)",
-                color: "var(--text)",
-                padding: "6px 12px",
-                borderRadius: 999,
-                fontWeight: 600,
-                fontSize: 12,
-                transition: "all 0.2s ease",
-              }}
+              type="button"
+              className="btn"
+              onClick={() => deteccionCol.clearAll()}
+              style={{ fontSize: 12 }}
             >
-              Limpiar filtro
+              Limpiar filtros
             </button>
           )}
         </div>
@@ -2834,28 +3006,50 @@ export default function PruebaPericiaPage() {
         <table className="table" style={{ minWidth: '1800px' }}>
           <thead>
             <tr>
-              <th 
+              <FilterableTh
                 style={{ width: 130, cursor: "pointer" }}
-                onClick={() => handleSort("semaforo")}
-                title="Haz clic para ordenar"
-              >
-                Semáforo{" "}
-                <span style={{ opacity: sortField === "semaforo" ? 1 : 0.4 }}>
-                  {sortField === "semaforo" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
-                </span>
-              </th>
+                label="Semáforo"
+                filterKey="semaforo"
+                options={[
+                  { value: "VERDE", label: "VERDE" },
+                  { value: "AMARILLO", label: "AMARILLO" },
+                  { value: "ROJO", label: "ROJO" },
+                ]}
+                activeFilter={deteccionCol.filters.semaforo}
+                onFilter={(v) => deteccionCol.setFilter("semaforo", v)}
+                isOpen={deteccionCol.openFilter === "semaforo"}
+                onToggle={() =>
+                  deteccionCol.setOpenFilter((p) => (p === "semaforo" ? null : "semaforo"))
+                }
+                sortable
+                sortField={sortField}
+                sortDirection={sortDirection}
+                onSort={() => handleSort("semaforo")}
+                sortColumnId="semaforo"
+                menuMinWidth={170}
+              />
               <th>Carátula</th>
-              <th 
+              <FilterableTh
                 className="sortable"
                 style={{ cursor: "pointer" }}
-                onClick={() => handleSort("juzgado")}
-                title="Haz clic para ordenar"
-              >
-                Juzgado{" "}
-                <span style={{ opacity: sortField === "juzgado" ? 1 : 0.4 }}>
-                  {sortField === "juzgado" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
-                </span>
-              </th>
+                label="Juzgado"
+                filterKey="tablaJuzgado"
+                options={juzgadoTablaOptions}
+                activeFilter={deteccionCol.filters.tablaJuzgado}
+                onFilter={(v) => deteccionCol.setFilter("tablaJuzgado", v)}
+                isOpen={deteccionCol.openFilter === "tablaJuzgado"}
+                onToggle={() =>
+                  deteccionCol.setOpenFilter((p) => (p === "tablaJuzgado" ? null : "tablaJuzgado"))
+                }
+                sortable
+                sortField={sortField}
+                sortDirection={sortDirection}
+                onSort={() => handleSort("juzgado")}
+                sortColumnId="juzgado"
+                menuMinWidth={250}
+                menuScrollable
+                optionWhiteSpaceNormal
+              />
               <th 
                 style={{ width: 220, cursor: "pointer" }}
                 onClick={() => handleSort("fecha")}
