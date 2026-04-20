@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { pjnScraperSupabase } from "@/lib/pjn-scraper-supabase";
 import { daysSince } from "@/lib/semaforo";
+import { stripAutoNotasTimestamp, withAutoNotasTimestamp } from "@/lib/notas-timestamp";
 import { FilterableTh } from "@/app/components/FilterableTh";
 import NotificationBell from "@/app/components/NotificationBell";
 import { useColumnFilters } from "@/app/hooks/useColumnFilters";
@@ -462,8 +463,9 @@ function NotasTextarea({
     selectedIndex: number;
   } | null>(null);
   const [users, setUsers] = React.useState<User[]>([]);
-  const value = notasEditables[itemId] !== undefined ? notasEditables[itemId] : initialValue;
-  const trimmedValue = value?.trim() || "";
+  const editableInitialValue = stripAutoNotasTimestamp(initialValue);
+  const value = notasEditables[itemId] !== undefined ? notasEditables[itemId] : editableInitialValue;
+  const displayValue = (initialValue || "").trim();
 
   React.useEffect(() => {
     (async () => {
@@ -642,7 +644,7 @@ function NotasTextarea({
         if (isUuid(rawId)) {
           let { error } = await supabase
             .from("pjn_favoritos")
-            .update({ notas: newValue.trim() || null })
+            .update({ notas: withAutoNotasTimestamp(newValue) })
             .eq("id", rawId);
           
           if (error) {
@@ -665,7 +667,7 @@ function NotasTextarea({
         // Intento 1: número tal cual (con ceros)
         let { data, error } = await supabase
           .from("pjn_favoritos")
-          .update({ notas: newValue.trim() || null })
+          .update({ notas: withAutoNotasTimestamp(newValue) })
           .eq("jurisdiccion", parsed.jurisdiccion)
           .eq("anio", parsed.anio)
           .eq("numero", parsed.numero)
@@ -675,7 +677,7 @@ function NotasTextarea({
         if (!error && (!data || data.length === 0) && numeroSinCeros !== parsed.numero) {
           const retry = await supabase
             .from("pjn_favoritos")
-            .update({ notas: newValue.trim() || null })
+            .update({ notas: withAutoNotasTimestamp(newValue) })
             .eq("jurisdiccion", parsed.jurisdiccion)
             .eq("anio", parsed.anio)
             .eq("numero", numeroSinCeros)
@@ -710,7 +712,7 @@ function NotasTextarea({
               if (isUuid(rawId)) {
                 const res = await pjnScraperSupabase
                   .from("pjn_favoritos")
-                  .update({ notas: newValue.trim() || null })
+                  .update({ notas: withAutoNotasTimestamp(newValue) })
                   .eq("id", rawId);
                 pjnError = res.error;
               } else {
@@ -722,7 +724,7 @@ function NotasTextarea({
                 const numeroSinCeros2 = parsed2.numero.replace(/^0+/, "") || "0";
                 let res = await pjnScraperSupabase
                   .from("pjn_favoritos")
-                  .update({ notas: newValue.trim() || null })
+                  .update({ notas: withAutoNotasTimestamp(newValue) })
                   .eq("jurisdiccion", parsed2.jurisdiccion)
                   .eq("anio", parsed2.anio)
                   .eq("numero", parsed2.numero)
@@ -731,7 +733,7 @@ function NotasTextarea({
                 if (!res.error && (!res.data || res.data.length === 0) && numeroSinCeros2 !== parsed2.numero) {
                   res = await pjnScraperSupabase
                     .from("pjn_favoritos")
-                    .update({ notas: newValue.trim() || null })
+                    .update({ notas: withAutoNotasTimestamp(newValue) })
                     .eq("jurisdiccion", parsed2.jurisdiccion)
                     .eq("anio", parsed2.anio)
                     .eq("numero", numeroSinCeros2)
@@ -760,7 +762,7 @@ function NotasTextarea({
       } else {
         const { error } = await supabase
           .from("expedientes")
-          .update({ notas: newValue.trim() || null })
+          .update({ notas: withAutoNotasTimestamp(newValue) })
           .eq("id", itemId);
         
         if (error) {
@@ -925,6 +927,10 @@ function NotasTextarea({
   };
 
   const handleClick = () => {
+    setNotasEditables(prev => {
+      if (prev[itemId] !== undefined) return prev;
+      return { ...prev, [itemId]: editableInitialValue };
+    });
     setIsEditing(true);
     setTimeout(() => {
       textareaRef.current?.focus();
@@ -1088,7 +1094,7 @@ function NotasTextarea({
     );
   }
 
-  if (!trimmedValue) {
+  if (!displayValue) {
     return (
       <div
         onClick={handleClick}
@@ -1161,7 +1167,7 @@ function NotasTextarea({
       }}
       title="Haz clic para editar"
     >
-      {trimmedValue}
+      {displayValue}
       {notasGuardando[itemId] && (
         <div style={{ 
           fontSize: 9.5, 

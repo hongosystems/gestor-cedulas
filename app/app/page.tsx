@@ -4,8 +4,11 @@ import Link from "next/link";
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { daysBetween, daysSince } from "@/lib/semaforo";
+import { stripAutoNotasTimestamp, withAutoNotasTimestamp } from "@/lib/notas-timestamp";
+import { FilterableTh } from "@/app/components/FilterableTh";
 import NotificationBell from "@/app/components/NotificationBell";
 import ResponsableAvatars from "@/app/components/ResponsableAvatars";
+import { useColumnFilters, uniqueOptionsFromField } from "@/app/hooks/useColumnFilters";
 
 type Cedula = {
   id: string;
@@ -241,8 +244,8 @@ async function requireSessionOrRedirect() {
 
 type SortField = "dias" | "semaforo" | "fecha_carga" | "juzgado" | null;
 type SortDirection = "asc" | "desc";
-type HeaderFilterKey = "semaforo" | "estado" | "juzgado" | "tipo_documento";
-type TipoDocumentoFilter = "CEDULA" | "OFICIO" | "OTROS_ESCRITOS" | "SIN_DATO" | null;
+
+type ColumnFilterKey = "semaforo" | "estado" | "juzgado" | "tipo_documento";
 
 // Componente NotasTextarea simplificado para cédulas
 function NotasTextareaCedula({
@@ -278,8 +281,9 @@ function NotasTextareaCedula({
     selectedIndex: number;
   } | null>(null);
   const [users, setUsers] = React.useState<User[]>([]);
-  const value = notasEditables[itemId] !== undefined ? notasEditables[itemId] : initialValue;
-  const trimmedValue = value?.trim() || "";
+  const editableInitialValue = stripAutoNotasTimestamp(initialValue);
+  const value = notasEditables[itemId] !== undefined ? notasEditables[itemId] : editableInitialValue;
+  const displayValue = (initialValue || "").trim();
 
   // Cargar usuarios del sistema
   React.useEffect(() => {
@@ -465,7 +469,7 @@ function NotasTextareaCedula({
       
       const { error } = await supabase
         .from("cedulas")
-        .update({ notas: newValue.trim() || null })
+        .update({ notas: withAutoNotasTimestamp(newValue) })
         .eq("id", itemId);
       
       if (error) {
@@ -629,6 +633,10 @@ function NotasTextareaCedula({
   };
 
   const handleClick = () => {
+    setNotasEditables(prev => {
+      if (prev[itemId] !== undefined) return prev;
+      return { ...prev, [itemId]: editableInitialValue };
+    });
     setIsEditing(true);
     setTimeout(() => {
       textareaRef.current?.focus();
@@ -792,7 +800,7 @@ function NotasTextareaCedula({
     );
   }
 
-  if (!trimmedValue) {
+  if (!displayValue) {
     return (
       <div
         onClick={handleClick}
@@ -852,7 +860,7 @@ function NotasTextareaCedula({
         e.currentTarget.style.borderColor = "rgba(255,255,255,.06)";
       }}
     >
-      {trimmedValue}
+      {displayValue}
     </div>
   );
 }
@@ -865,11 +873,13 @@ export default function MisCedulasPage() {
   const [cedulas, setCedulas] = useState<Cedula[]>([]);
   const [sortField, setSortField] = useState<SortField>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const [semaforoFilter, setSemaforoFilter] = useState<Semaforo | null>(null);
-  const [estadoFilter, setEstadoFilter] = useState<EstadoCedula | null>(null);
-  const [juzgadoFilter, setJuzgadoFilter] = useState<string | null>(null);
-  const [tipoDocumentoFilter, setTipoDocumentoFilter] = useState<TipoDocumentoFilter>(null);
-  const [headerFilterOpen, setHeaderFilterOpen] = useState<HeaderFilterKey | null>(null);
+  const { filters, setFilter, clearAll, hasActiveFilters, openFilter, setOpenFilter } =
+    useColumnFilters<ColumnFilterKey>({
+      semaforo: null as string | null,
+      estado: null as string | null,
+      juzgado: null as string | null,
+      tipo_documento: null as string | null,
+    });
   const [buscarTexto, setBuscarTexto] = useState("");
   const [currentUserName, setCurrentUserName] = useState<string>("");
   const [notasEditables, setNotasEditables] = useState<Record<string, string>>({});
@@ -1087,23 +1097,10 @@ export default function MisCedulasPage() {
     };
   }, [menuOpen]);
 
-  useEffect(() => {
-    if (!headerFilterOpen) return;
-    const close = () => setHeaderFilterOpen(null);
-    setTimeout(() => {
-      document.addEventListener("click", close);
-    }, 0);
-    return () => document.removeEventListener("click", close);
-  }, [headerFilterOpen]);
-
-  const juzgadoOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const c of cedulas) {
-      const val = (c.juzgado || "").trim();
-      if (val) set.add(val);
-    }
-    return [...set].sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
-  }, [cedulas]);
+  const juzgadoOptions = uniqueOptionsFromField(
+    cedulas as unknown as readonly Record<string, unknown>[],
+    "juzgado"
+  );
 
   const rows = useMemo(() => {
     let mapped = cedulas.map((c) => {
@@ -1125,22 +1122,22 @@ export default function MisCedulasPage() {
     });
 
     // Aplicar filtro de semáforo
-    if (semaforoFilter) {
-      mapped = mapped.filter((c) => c.sem === semaforoFilter);
+    if (filters.semaforo) {
+      mapped = mapped.filter((c) => c.sem === filters.semaforo);
     }
 
-    if (estadoFilter) {
-      mapped = mapped.filter((c) => getEstadoCedula(c) === estadoFilter);
+    if (filters.estado) {
+      mapped = mapped.filter((c) => getEstadoCedula(c) === filters.estado);
     }
 
-    if (juzgadoFilter) {
-      mapped = mapped.filter((c) => (c.juzgado || "").trim() === juzgadoFilter);
+    if (filters.juzgado) {
+      mapped = mapped.filter((c) => (c.juzgado || "").trim() === filters.juzgado);
     }
 
-    if (tipoDocumentoFilter) {
+    if (filters.tipo_documento) {
       mapped = mapped.filter((c) => {
-        if (tipoDocumentoFilter === "SIN_DATO") return !c.tipo_documento;
-        return c.tipo_documento === tipoDocumentoFilter;
+        if (filters.tipo_documento === "SIN_DATO") return !c.tipo_documento;
+        return c.tipo_documento === filters.tipo_documento;
       });
     }
 
@@ -1202,17 +1199,7 @@ export default function MisCedulasPage() {
     }
 
     return mapped;
-  }, [
-    cedulas,
-    sortField,
-    sortDirection,
-    semaforoFilter,
-    estadoFilter,
-    juzgadoFilter,
-    tipoDocumentoFilter,
-    isAdminCedulas,
-    buscarTexto,
-  ]);
+  }, [cedulas, sortField, sortDirection, filters, isAdminCedulas, buscarTexto]);
 
   function handleSort(field: SortField) {
     if (sortField === field) {
@@ -1702,11 +1689,11 @@ export default function MisCedulasPage() {
               Semáforo automático por antigüedad desde la carga:
             </span>
             <button
-              onClick={() => setSemaforoFilter(semaforoFilter === "VERDE" ? null : "VERDE")}
+              onClick={() => setFilter("semaforo", filters.semaforo === "VERDE" ? null : "VERDE")}
               style={{
                 cursor: "pointer",
-                border: semaforoFilter === "VERDE" ? "2px solid rgba(46, 204, 113, 0.8)" : "1px solid rgba(46, 204, 113, 0.35)",
-                background: semaforoFilter === "VERDE" ? "rgba(46, 204, 113, 0.25)" : "rgba(46, 204, 113, 0.16)",
+                border: filters.semaforo === "VERDE" ? "2px solid rgba(46, 204, 113, 0.8)" : "1px solid rgba(46, 204, 113, 0.35)",
+                background: filters.semaforo === "VERDE" ? "rgba(46, 204, 113, 0.25)" : "rgba(46, 204, 113, 0.16)",
                 color: "rgba(210, 255, 226, 0.95)",
                 padding: "6px 12px",
                 borderRadius: 999,
@@ -1724,11 +1711,11 @@ export default function MisCedulasPage() {
             </button>
             <span style={{ color: "var(--muted)", fontSize: 13 }}>0–29</span>
             <button
-              onClick={() => setSemaforoFilter(semaforoFilter === "AMARILLO" ? null : "AMARILLO")}
+              onClick={() => setFilter("semaforo", filters.semaforo === "AMARILLO" ? null : "AMARILLO")}
               style={{
                 cursor: "pointer",
-                border: semaforoFilter === "AMARILLO" ? "2px solid rgba(241, 196, 15, 0.8)" : "1px solid rgba(241, 196, 15, 0.35)",
-                background: semaforoFilter === "AMARILLO" ? "rgba(241, 196, 15, 0.25)" : "rgba(241, 196, 15, 0.14)",
+                border: filters.semaforo === "AMARILLO" ? "2px solid rgba(241, 196, 15, 0.8)" : "1px solid rgba(241, 196, 15, 0.35)",
+                background: filters.semaforo === "AMARILLO" ? "rgba(241, 196, 15, 0.25)" : "rgba(241, 196, 15, 0.14)",
                 color: "rgba(255, 246, 205, 0.95)",
                 padding: "6px 12px",
                 borderRadius: 999,
@@ -1746,11 +1733,11 @@ export default function MisCedulasPage() {
             </button>
             <span style={{ color: "var(--muted)", fontSize: 13 }}>30–59</span>
             <button
-              onClick={() => setSemaforoFilter(semaforoFilter === "ROJO" ? null : "ROJO")}
+              onClick={() => setFilter("semaforo", filters.semaforo === "ROJO" ? null : "ROJO")}
               style={{
                 cursor: "pointer",
-                border: semaforoFilter === "ROJO" ? "2px solid rgba(231, 76, 60, 0.8)" : "1px solid rgba(231, 76, 60, 0.35)",
-                background: semaforoFilter === "ROJO" ? "rgba(231, 76, 60, 0.25)" : "rgba(231, 76, 60, 0.14)",
+                border: filters.semaforo === "ROJO" ? "2px solid rgba(231, 76, 60, 0.8)" : "1px solid rgba(231, 76, 60, 0.35)",
+                background: filters.semaforo === "ROJO" ? "rgba(231, 76, 60, 0.25)" : "rgba(231, 76, 60, 0.14)",
                 color: "rgba(255, 220, 216, 0.95)",
                 padding: "6px 12px",
                 borderRadius: 999,
@@ -1767,13 +1754,10 @@ export default function MisCedulasPage() {
               ROJO
             </button>
             <span style={{ color: "var(--muted)", fontSize: 13 }}>60+ días</span>
-            {(semaforoFilter || estadoFilter || juzgadoFilter || tipoDocumentoFilter) && (
+            {hasActiveFilters && (
               <button
                 onClick={() => {
-                  setSemaforoFilter(null);
-                  setEstadoFilter(null);
-                  setJuzgadoFilter(null);
-                  setTipoDocumentoFilter(null);
+                  clearAll();
                 }}
                 style={{
                   cursor: "pointer",
@@ -1870,206 +1854,57 @@ export default function MisCedulasPage() {
             <table className="table">
               <thead>
                 <tr>
-                  <th style={{ width: 130, position: "relative" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setHeaderFilterOpen((prev) => (prev === "semaforo" ? null : "semaforo"));
-                        }}
-                        style={{ background: "transparent", border: "none", color: "inherit", cursor: "pointer", fontWeight: 700, padding: 0 }}
-                        title="Filtrar por Semáforo"
-                      >
-                        Semáforo {semaforoFilter ? "●" : ""} ▾
-                      </button>
-                      <button
-                        type="button"
-                        className="sortable"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleSort("semaforo");
-                        }}
-                        title="Ordenar por semáforo"
-                        style={{ background: "transparent", border: "none", color: "inherit", cursor: "pointer", padding: 0 }}
-                      >
-                        <span style={{ opacity: sortField === "semaforo" ? 1 : 0.4 }}>
-                          {sortField === "semaforo" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
-                        </span>
-                      </button>
-                    </div>
-                    {headerFilterOpen === "semaforo" && (
-                      <div
-                        onClick={(e) => e.stopPropagation()}
-                        style={{
-                          position: "absolute",
-                          top: "calc(100% + 6px)",
-                          left: 0,
-                          zIndex: 50,
-                          minWidth: 170,
-                          background: "linear-gradient(180deg, rgba(11,47,85,.98), rgba(7,28,46,.98))",
-                          border: "1px solid rgba(255,255,255,.18)",
-                          borderRadius: 10,
-                          padding: 10,
-                          boxShadow: "0 10px 24px rgba(0,0,0,.45)",
-                        }}
-                      >
-                        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8 }}>Filtrar por</div>
-                        {(["VERDE", "AMARILLO", "ROJO"] as Semaforo[]).map((opt) => (
-                          <button
-                            key={opt}
-                            type="button"
-                            onClick={() => {
-                              setSemaforoFilter(opt);
-                              setHeaderFilterOpen(null);
-                            }}
-                            style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 6, background: semaforoFilter === opt ? "rgba(96,141,186,.25)" : "transparent", border: "1px solid rgba(255,255,255,.14)", borderRadius: 7, color: "var(--text)", cursor: "pointer", padding: "6px 8px" }}
-                          >
-                            {opt}
-                          </button>
-                        ))}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSemaforoFilter(null);
-                            setHeaderFilterOpen(null);
-                          }}
-                          style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "1px solid rgba(255,255,255,.14)", borderRadius: 7, color: "var(--muted)", cursor: "pointer", padding: "6px 8px" }}
-                        >
-                          Limpiar filtro
-                        </button>
-                      </div>
-                    )}
-                  </th>
-                  <th style={{ width: 110, position: "relative" }}>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setHeaderFilterOpen((prev) => (prev === "estado" ? null : "estado"));
-                      }}
-                      style={{ background: "transparent", border: "none", color: "inherit", cursor: "pointer", fontWeight: 700, padding: 0 }}
-                      title="Filtrar por Estado"
-                    >
-                      Estado {estadoFilter ? "●" : ""} ▾
-                    </button>
-                    {headerFilterOpen === "estado" && (
-                      <div
-                        onClick={(e) => e.stopPropagation()}
-                        style={{
-                          position: "absolute",
-                          top: "calc(100% + 6px)",
-                          left: 0,
-                          zIndex: 50,
-                          minWidth: 190,
-                          background: "linear-gradient(180deg, rgba(11,47,85,.98), rgba(7,28,46,.98))",
-                          border: "1px solid rgba(255,255,255,.18)",
-                          borderRadius: 10,
-                          padding: 10,
-                          boxShadow: "0 10px 24px rgba(0,0,0,.45)",
-                        }}
-                      >
-                        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8 }}>Filtrar por</div>
-                        {(["Pendiente", "En Trámite", "En Diligenciamiento", "Completa"] as EstadoCedula[]).map((opt) => (
-                          <button
-                            key={opt}
-                            type="button"
-                            onClick={() => {
-                              setEstadoFilter(opt);
-                              setHeaderFilterOpen(null);
-                            }}
-                            style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 6, background: estadoFilter === opt ? "rgba(96,141,186,.25)" : "transparent", border: "1px solid rgba(255,255,255,.14)", borderRadius: 7, color: "var(--text)", cursor: "pointer", padding: "6px 8px" }}
-                          >
-                            {opt}
-                          </button>
-                        ))}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEstadoFilter(null);
-                            setHeaderFilterOpen(null);
-                          }}
-                          style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "1px solid rgba(255,255,255,.14)", borderRadius: 7, color: "var(--muted)", cursor: "pointer", padding: "6px 8px" }}
-                        >
-                          Limpiar filtro
-                        </button>
-                      </div>
-                    )}
-                  </th>
+                  <FilterableTh
+                    label="Semáforo"
+                    filterKey="semaforo"
+                    options={[
+                      { value: "VERDE", label: "VERDE" },
+                      { value: "AMARILLO", label: "AMARILLO" },
+                      { value: "ROJO", label: "ROJO" },
+                    ]}
+                    activeFilter={filters.semaforo}
+                    onFilter={(v) => setFilter("semaforo", v)}
+                    isOpen={openFilter === "semaforo"}
+                    onToggle={() => setOpenFilter((p) => (p === "semaforo" ? null : "semaforo"))}
+                    sortable
+                    sortField={sortField}
+                    sortDirection={sortDirection}
+                    onSort={() => handleSort("semaforo")}
+                    width={130}
+                  />
+                  <FilterableTh
+                    label="Estado"
+                    filterKey="estado"
+                    options={[
+                      { value: "Pendiente", label: "Pendiente" },
+                      { value: "En Trámite", label: "En Trámite" },
+                      { value: "En Diligenciamiento", label: "En Diligenciamiento" },
+                      { value: "Completa", label: "Completa" },
+                    ]}
+                    activeFilter={filters.estado}
+                    onFilter={(v) => setFilter("estado", v)}
+                    isOpen={openFilter === "estado"}
+                    onToggle={() => setOpenFilter((p) => (p === "estado" ? null : "estado"))}
+                    width={110}
+                    menuMinWidth={190}
+                  />
                   <th>Carátula</th>
-                  <th style={{ position: "relative" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setHeaderFilterOpen((prev) => (prev === "juzgado" ? null : "juzgado"));
-                        }}
-                        style={{ background: "transparent", border: "none", color: "inherit", cursor: "pointer", fontWeight: 700, padding: 0 }}
-                        title="Filtrar por Juzgado"
-                      >
-                        Juzgado {juzgadoFilter ? "●" : ""} ▾
-                      </button>
-                      <button
-                        type="button"
-                        className="sortable"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleSort("juzgado");
-                        }}
-                        title="Ordenar por juzgado"
-                        style={{ background: "transparent", border: "none", color: "inherit", cursor: "pointer", padding: 0 }}
-                      >
-                        <span style={{ opacity: sortField === "juzgado" ? 1 : 0.4 }}>
-                          {sortField === "juzgado" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
-                        </span>
-                      </button>
-                    </div>
-                    {headerFilterOpen === "juzgado" && (
-                      <div
-                        onClick={(e) => e.stopPropagation()}
-                        style={{
-                          position: "absolute",
-                          top: "calc(100% + 6px)",
-                          left: 0,
-                          zIndex: 50,
-                          minWidth: 250,
-                          maxHeight: 280,
-                          overflowY: "auto",
-                          background: "linear-gradient(180deg, rgba(11,47,85,.98), rgba(7,28,46,.98))",
-                          border: "1px solid rgba(255,255,255,.18)",
-                          borderRadius: 10,
-                          padding: 10,
-                          boxShadow: "0 10px 24px rgba(0,0,0,.45)",
-                        }}
-                      >
-                        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8 }}>Filtrar por</div>
-                        {juzgadoOptions.map((opt) => (
-                          <button
-                            key={opt}
-                            type="button"
-                            onClick={() => {
-                              setJuzgadoFilter(opt);
-                              setHeaderFilterOpen(null);
-                            }}
-                            style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 6, background: juzgadoFilter === opt ? "rgba(96,141,186,.25)" : "transparent", border: "1px solid rgba(255,255,255,.14)", borderRadius: 7, color: "var(--text)", cursor: "pointer", padding: "6px 8px", whiteSpace: "normal" }}
-                          >
-                            {opt}
-                          </button>
-                        ))}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setJuzgadoFilter(null);
-                            setHeaderFilterOpen(null);
-                          }}
-                          style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "1px solid rgba(255,255,255,.14)", borderRadius: 7, color: "var(--muted)", cursor: "pointer", padding: "6px 8px" }}
-                        >
-                          Limpiar filtro
-                        </button>
-                      </div>
-                    )}
-                  </th>
+                  <FilterableTh
+                    label="Juzgado"
+                    filterKey="juzgado"
+                    options={juzgadoOptions}
+                    activeFilter={filters.juzgado}
+                    onFilter={(v) => setFilter("juzgado", v)}
+                    isOpen={openFilter === "juzgado"}
+                    onToggle={() => setOpenFilter((p) => (p === "juzgado" ? null : "juzgado"))}
+                    sortable
+                    sortField={sortField}
+                    sortDirection={sortDirection}
+                    onSort={() => handleSort("juzgado")}
+                    menuMinWidth={250}
+                    menuScrollable
+                    optionWhiteSpaceNormal
+                  />
                   {isAdminCedulas && (
                     <th style={{ width: 80, textAlign: "center" }} title="Responsable según juzgado asignado">
                       <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 500 }}>Responsable</span>
@@ -2097,71 +1932,24 @@ export default function MisCedulasPage() {
                       {sortField === "dias" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
                     </span>
                   </th>
-                  <th style={{ width: 170, textAlign: "right", position: "relative" }}>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setHeaderFilterOpen((prev) => (prev === "tipo_documento" ? null : "tipo_documento"));
-                      }}
-                      style={{ background: "transparent", border: "none", color: "inherit", cursor: "pointer", fontWeight: 700, padding: 0 }}
-                      title="Filtrar por Cédula/Oficio"
-                    >
-                      Cédula/Oficio {tipoDocumentoFilter ? "●" : ""} ▾
-                    </button>
-                    {headerFilterOpen === "tipo_documento" && (
-                      <div
-                        onClick={(e) => e.stopPropagation()}
-                        style={{
-                          position: "absolute",
-                          top: "calc(100% + 6px)",
-                          right: 0,
-                          zIndex: 50,
-                          minWidth: 180,
-                          background: "linear-gradient(180deg, rgba(11,47,85,.98), rgba(7,28,46,.98))",
-                          border: "1px solid rgba(255,255,255,.18)",
-                          borderRadius: 10,
-                          padding: 10,
-                          boxShadow: "0 10px 24px rgba(0,0,0,.45)",
-                        }}
-                      >
-                        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8, textAlign: "left" }}>Filtrar por</div>
-                        {(["CEDULA", "OFICIO", "OTROS_ESCRITOS"] as const).map((opt) => (
-                          <button
-                            key={opt}
-                            type="button"
-                            onClick={() => {
-                              setTipoDocumentoFilter(opt);
-                              setHeaderFilterOpen(null);
-                            }}
-                            style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 6, background: tipoDocumentoFilter === opt ? "rgba(96,141,186,.25)" : "transparent", border: "1px solid rgba(255,255,255,.14)", borderRadius: 7, color: "var(--text)", cursor: "pointer", padding: "6px 8px" }}
-                          >
-                            {opt}
-                          </button>
-                        ))}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setTipoDocumentoFilter("SIN_DATO");
-                            setHeaderFilterOpen(null);
-                          }}
-                          style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 6, background: tipoDocumentoFilter === "SIN_DATO" ? "rgba(96,141,186,.25)" : "transparent", border: "1px solid rgba(255,255,255,.14)", borderRadius: 7, color: "var(--text)", cursor: "pointer", padding: "6px 8px" }}
-                        >
-                          Sin dato
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setTipoDocumentoFilter(null);
-                            setHeaderFilterOpen(null);
-                          }}
-                          style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "1px solid rgba(255,255,255,.14)", borderRadius: 7, color: "var(--muted)", cursor: "pointer", padding: "6px 8px" }}
-                        >
-                          Limpiar filtro
-                        </button>
-                      </div>
-                    )}
-                  </th>
+                  <FilterableTh
+                    label="Cédula/Oficio"
+                    filterKey="tipo_documento"
+                    options={[
+                      { value: "CEDULA", label: "CEDULA" },
+                      { value: "OFICIO", label: "OFICIO" },
+                      { value: "OTROS_ESCRITOS", label: "OTROS_ESCRITOS" },
+                      { value: "SIN_DATO", label: "Sin dato" },
+                    ]}
+                    activeFilter={filters.tipo_documento}
+                    onFilter={(v) => setFilter("tipo_documento", v)}
+                    isOpen={openFilter === "tipo_documento"}
+                    onToggle={() => setOpenFilter((p) => (p === "tipo_documento" ? null : "tipo_documento"))}
+                    width={170}
+                    align="right"
+                    menuMinWidth={180}
+                    menuAlign="right"
+                  />
                   <th style={{ width: 250, minWidth: 200 }}>Notas</th>
                 </tr>
               </thead>

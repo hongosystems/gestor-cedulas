@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { pjnScraperSupabase } from "@/lib/pjn-scraper-supabase";
 import { daysSince } from "@/lib/semaforo";
+import { stripAutoNotasTimestamp, withAutoNotasTimestamp } from "@/lib/notas-timestamp";
 import { FilterableTh } from "@/app/components/FilterableTh";
 import NotificationBell from "@/app/components/NotificationBell";
 import ResponsableAvatars from "@/app/components/ResponsableAvatars";
@@ -347,15 +348,32 @@ function NotasTextarea({
     selectedIndex: number;
   } | null>(null);
   const [users, setUsers] = React.useState<User[]>([]);
-  const value = notasEditables[itemId] !== undefined ? notasEditables[itemId] : initialValue;
-  const trimmedValue = value?.trim() || "";
+  const editableInitialValue = stripAutoNotasTimestamp(initialValue);
+  const editedValue = notasEditables[itemId];
+  const value = editedValue !== undefined ? editedValue : editableInitialValue;
+  const displayValue = (editedValue !== undefined ? editedValue : initialValue || "").trim();
 
   // Cargar usuarios del sistema desde API (incluye todos los usuarios de auth.users)
   React.useEffect(() => {
     (async () => {
       try {
         const { data: session } = await supabase.auth.getSession();
-        if (!session.session) return;
+        if (!session.session?.access_token) {
+          const { data: profiles } = await supabase
+            .from("profiles")
+            .select("id, email, full_name")
+            .order("full_name", { ascending: true });
+          if (profiles) {
+            const fallbackUsers: User[] = profiles.map((p: any) => ({
+              id: p.id,
+              email: p.email || "",
+              full_name: p.full_name,
+              username: (p.email || "").split("@")[0].toLowerCase(),
+            }));
+            setUsers(fallbackUsers);
+          }
+          return;
+        }
 
         const res = await fetch("/api/users/list", {
           headers: {
@@ -544,6 +562,7 @@ function NotasTextarea({
     if (notasGuardando[itemId]) return;
     
     setNotasGuardando(prev => ({ ...prev, [itemId]: true }));
+    const valueToSave = withAutoNotasTimestamp(newValue);
     
     try {
       // Obtener usuario actual para notificaciones
@@ -563,7 +582,7 @@ function NotasTextarea({
         // Intentar primero con el cliente principal
         let { data, error } = await supabase
           .from("pjn_favoritos")
-          .update({ notas: newValue.trim() || null })
+          .update({ notas: valueToSave })
           .eq("id", pjnId)
           .select();
         
@@ -613,7 +632,7 @@ function NotasTextarea({
               // Intentar con el cliente pjn-scraper
               const { data: pjnData, error: pjnError } = await pjnScraperSupabase
                 .from("pjn_favoritos")
-                .update({ notas: newValue.trim() || null })
+                .update({ notas: valueToSave })
                 .eq("id", pjnId)
                 .select();
               
@@ -667,7 +686,7 @@ function NotasTextarea({
         // Para expedientes locales
         const { error } = await supabase
           .from("expedientes")
-          .update({ notas: newValue.trim() || null })
+          .update({ notas: valueToSave })
           .eq("id", itemId);
         
         if (error) {
@@ -675,6 +694,7 @@ function NotasTextarea({
           setMsg(`Error al guardar notas: ${error.message}`);
         }
       }
+      setNotasEditables(prev => ({ ...prev, [itemId]: valueToSave || "" }));
     } catch (err) {
       console.error(`Error al guardar notas:`, err);
       setMsg(`Error al guardar notas: ${err instanceof Error ? err.message : String(err)}`);
@@ -737,7 +757,7 @@ function NotasTextarea({
   };
 
   const insertarMencion = (user: User) => {
-    const currentValue = notasEditables[itemId] !== undefined ? notasEditables[itemId] : initialValue;
+    const currentValue = notasEditables[itemId] !== undefined ? notasEditables[itemId] : editableInitialValue;
     const textarea = textareaRef.current;
     if (!textarea) return;
     
@@ -810,7 +830,7 @@ function NotasTextarea({
     // Guardar inmediatamente con ENTER (Ctrl+Enter o Cmd+Enter) o TAB
     if (e.key === "Tab" || (e.key === "Enter" && (e.ctrlKey || e.metaKey))) {
       e.preventDefault();
-      const currentValue = notasEditables[itemId] !== undefined ? notasEditables[itemId] : initialValue;
+      const currentValue = notasEditables[itemId] !== undefined ? notasEditables[itemId] : editableInitialValue;
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
       }
@@ -831,8 +851,8 @@ function NotasTextarea({
   };
 
   const handleBlur = () => {
-    const currentValue = notasEditables[itemId] !== undefined ? notasEditables[itemId] : initialValue;
-    if (currentValue !== initialValue) {
+    const currentValue = notasEditables[itemId] !== undefined ? notasEditables[itemId] : editableInitialValue;
+    if (stripAutoNotasTimestamp(currentValue) !== editableInitialValue) {
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
       }
@@ -842,6 +862,10 @@ function NotasTextarea({
   };
 
   const handleClick = () => {
+    setNotasEditables(prev => {
+      if (prev[itemId] !== undefined) return prev;
+      return { ...prev, [itemId]: editableInitialValue };
+    });
     setIsEditing(true);
     // Enfocar el textarea después de un pequeño delay para que se renderice
     setTimeout(() => {
@@ -1010,7 +1034,7 @@ function NotasTextarea({
   }
 
   // Si no está editando, mostrar bloque similar a Observaciones
-  if (!trimmedValue) {
+  if (!displayValue) {
     return (
       <div
         onClick={handleClick}
@@ -1083,7 +1107,7 @@ function NotasTextarea({
       }}
       title="Haz clic para editar"
     >
-      {trimmedValue}
+      {displayValue}
       {notasGuardando[itemId] && (
         <div style={{ 
           fontSize: 9.5, 

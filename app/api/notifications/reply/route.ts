@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseService } from "@/lib/supabase-server";
+import { withAutoNotasTimestamp } from "@/lib/notas-timestamp";
 
 export const runtime = "nodejs";
 
@@ -635,14 +636,8 @@ export async function POST(req: NextRequest) {
             .single();
 
           if (pjnFav) {
-            const fechaHora = new Date().toLocaleString("es-AR", {
-              day: "2-digit",
-              month: "2-digit",
-              year: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-            });
-            const nuevaNota = `${pjnFav.notas || ""}\n\n[${fechaHora}] ${senderName}: ${messageTrimmed}`.trim();
+            const entradaNota = withAutoNotasTimestamp(`${senderName}: ${messageTrimmed}`);
+            const nuevaNota = `${pjnFav.notas || ""}\n\n${entradaNota || ""}`.trim();
             
             await svc
               .from("pjn_favoritos")
@@ -659,14 +654,8 @@ export async function POST(req: NextRequest) {
             .single();
 
           if (cedula) {
-            const fechaHora = new Date().toLocaleString("es-AR", {
-              day: "2-digit",
-              month: "2-digit",
-              year: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-            });
-            const nuevaNota = `${cedula.notas || ""}\n\n[${fechaHora}] ${senderName}: ${messageTrimmed}`.trim();
+            const entradaNota = withAutoNotasTimestamp(`${senderName}: ${messageTrimmed}`);
+            const nuevaNota = `${cedula.notas || ""}\n\n${entradaNota || ""}`.trim();
             
             await svc
               .from("cedulas")
@@ -682,14 +671,8 @@ export async function POST(req: NextRequest) {
             .single();
 
           if (exp) {
-            const fechaHora = new Date().toLocaleString("es-AR", {
-              day: "2-digit",
-              month: "2-digit",
-              year: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-            });
-            const nuevaNota = `${exp.notas || ""}\n\n[${fechaHora}] ${senderName}: ${messageTrimmed}`.trim();
+            const entradaNota = withAutoNotasTimestamp(`${senderName}: ${messageTrimmed}`);
+            const nuevaNota = `${exp.notas || ""}\n\n${entradaNota || ""}`.trim();
             
             await svc
               .from("expedientes")
