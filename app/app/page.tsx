@@ -251,6 +251,7 @@ type ColumnFilterKey = "semaforo" | "estado" | "juzgado" | "tipo_documento";
 function NotasTextareaCedula({
   itemId,
   initialValue,
+  usersList,
   notasEditables,
   setNotasEditables,
   notasGuardando,
@@ -261,6 +262,7 @@ function NotasTextareaCedula({
 }: {
   itemId: string;
   initialValue: string;
+  usersList: User[];
   notasEditables: Record<string, string>;
   setNotasEditables: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   notasGuardando: Record<string, boolean>;
@@ -280,69 +282,9 @@ function NotasTextareaCedula({
     query: string;
     selectedIndex: number;
   } | null>(null);
-  const [users, setUsers] = React.useState<User[]>([]);
   const editableInitialValue = stripAutoNotasTimestamp(initialValue);
   const value = notasEditables[itemId] !== undefined ? notasEditables[itemId] : editableInitialValue;
   const displayValue = (initialValue || "").trim();
-
-  // Cargar usuarios del sistema
-  React.useEffect(() => {
-    (async () => {
-      try {
-        const { data: session } = await supabase.auth.getSession();
-        if (!session.session) return;
-
-        const res = await fetch("/api/users/list", {
-          headers: {
-            "Authorization": `Bearer ${session.session.access_token}`,
-          },
-        });
-
-        if (res.ok) {
-          const { users: usersList } = await res.json();
-          setUsers(usersList || []);
-        } else {
-          // Fallback: cargar desde profiles
-          const { data: profiles } = await supabase
-            .from("profiles")
-            .select("id, email, full_name")
-            .order("full_name", { ascending: true });
-          
-          if (profiles) {
-            const fallbackUsers: User[] = profiles.map((p: any) => {
-              const username = (p.email || "").split("@")[0].toLowerCase();
-              return {
-                id: p.id,
-                email: p.email || "",
-                full_name: p.full_name,
-                username,
-              };
-            });
-            setUsers(fallbackUsers);
-          }
-        }
-      } catch (err) {
-        console.error("Error al cargar usuarios:", err);
-        const { data: profiles } = await supabase
-          .from("profiles")
-          .select("id, email, full_name")
-          .order("full_name", { ascending: true });
-        
-        if (profiles) {
-          const fallbackUsers: User[] = profiles.map((p: any) => {
-            const username = (p.email || "").split("@")[0].toLowerCase();
-            return {
-              id: p.id,
-              email: p.email || "",
-              full_name: p.full_name,
-              username,
-            };
-          });
-          setUsers(fallbackUsers);
-        }
-      }
-    })();
-  }, []);
 
   // Detectar menciones y crear notificaciones (incluye @todos / @arrobatodos para notificar a todos)
   const detectarYNotificarMenciones = React.useCallback(async (texto: string, currentUserId: string) => {
@@ -412,7 +354,7 @@ function NotasTextareaCedula({
     
     for (const username of mentionedUsernames) {
       if (username === "todos" || username === "arrobatodos") continue;
-      const mentionedUser = users.find(u => u.username.toLowerCase() === username);
+      const mentionedUser = usersList.find(u => u.username.toLowerCase() === username);
       if (!mentionedUser || mentionedUser.id === currentUserId) continue;
       
       const mentionIndex = texto.toLowerCase().indexOf(`@${username}`);
@@ -452,7 +394,7 @@ function NotasTextareaCedula({
         console.error(`Error al crear notificación:`, err);
       }
     }
-  }, [users, itemId, caratula, juzgado]);
+  }, [usersList, itemId, caratula, juzgado]);
 
   const guardarNotas = React.useCallback(async (newValue: string) => {
     if (notasGuardando[itemId]) return;
@@ -563,8 +505,8 @@ function NotasTextareaCedula({
     if (mentionState?.show) {
       const query = mentionState.query.toLowerCase();
       const filteredUsers = !query || query.length === 0
-        ? users.slice(0, 20)
-        : users.filter(u => 
+        ? usersList.slice(0, 20)
+        : usersList.filter(u => 
             u.username.toLowerCase().includes(query) ||
             (u.full_name && u.full_name.toLowerCase().includes(query)) ||
             u.email.toLowerCase().includes(query)
@@ -656,8 +598,8 @@ function NotasTextareaCedula({
     const query = mentionState.query.toLowerCase();
     const showTodos = !query || "todos".startsWith(query) || "arrobatodos".startsWith(query);
     const fromUsers = !query || query.length === 0
-      ? users.slice(0, 20)
-      : users.filter(u =>
+      ? usersList.slice(0, 20)
+      : usersList.filter(u =>
           u.username.toLowerCase().includes(query) ||
           (u.full_name && u.full_name.toLowerCase().includes(query)) ||
           u.email.toLowerCase().includes(query)
@@ -895,6 +837,7 @@ export default function MisCedulasPage() {
   const [reintentandoOcrId, setReintentandoOcrId] = useState<string | null>(null);
   const [selectedCedulaId, setSelectedCedulaId] = useState<string | null>(null);
   const [usuariosByKey, setUsuariosByKey] = useState<Record<string, AbogadoInfo[]>>({});
+  const [usersList, setUsersList] = useState<User[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -1014,6 +957,47 @@ export default function MisCedulasPage() {
       });
       
       setLoading(false);
+    })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data: session } = await supabase.auth.getSession();
+        if (!session.session) return;
+        const res = await fetch("/api/users/list", {
+          headers: {
+            Authorization: `Bearer ${session.session.access_token}`,
+          },
+        });
+
+        if (res.ok) {
+          const { users } = await res.json();
+          setUsersList(users || []);
+          return;
+        }
+      } catch (err) {
+        console.error("Error al cargar usuarios (API):", err);
+      }
+
+      try {
+        const { data: profiles } = await supabase
+          .from("profiles")
+          .select("id, email, full_name")
+          .order("full_name", { ascending: true });
+
+        if (profiles) {
+          const fallbackUsers: User[] = profiles.map((p: any) => ({
+            id: p.id,
+            email: p.email || "",
+            full_name: p.full_name,
+            username: (p.email || "").split("@")[0].toLowerCase(),
+          }));
+          setUsersList(fallbackUsers);
+        }
+      } catch (fallbackErr) {
+        console.error("Error al cargar usuarios (fallback):", fallbackErr);
+      }
     })();
   }, []);
 
@@ -2054,6 +2038,7 @@ export default function MisCedulasPage() {
                       <NotasTextareaCedula
                         itemId={c.id}
                         initialValue={c.notas || ""}
+                        usersList={usersList}
                         notasEditables={notasEditables}
                         setNotasEditables={setNotasEditables}
                         notasGuardando={notasGuardando}
