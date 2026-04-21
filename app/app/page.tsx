@@ -1228,12 +1228,26 @@ export default function MisCedulasPage() {
   }
 
   async function handleCompleta(c: Cedula) {
-    if (c.pjn_cargado_at || c.admin_cedulas_completada_at) {
-      setMsg("Esta cédula/oficio ya fue marcada como completa.");
-      return;
+    setCompletandoId(c.id);
+    try {
+      const completedAt = new Date().toISOString();
+      const { error } = await supabase
+        .from("cedulas")
+        .update({ admin_cedulas_completada_at: completedAt })
+        .eq("id", c.id);
+      if (error) {
+        setMsg(error.message);
+        return;
+      }
+      setCedulas(prev => prev.map(item =>
+        item.id === c.id ? { ...item, admin_cedulas_completada_at: completedAt } : item
+      ));
+      setPopupCompleta(null);
+    } catch (err: any) {
+      setMsg(err?.message || "Error al marcar como completa.");
+    } finally {
+      setCompletandoId(null);
     }
-    const abogados = await fetchAbogadosPorJuzgado(c.juzgado, c.caratula);
-    setPopupCompleta({ cedula: c, abogados });
   }
 
   async function confirmarEnTramite() {
