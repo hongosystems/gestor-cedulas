@@ -61,6 +61,8 @@ export default function ChatWidget() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [deletingConversation, setDeletingConversation] = useState(false);
   const readConversationsRef = useRef<Set<string>>(new Set());
+  const isScrolledUpRef = useRef(false);
+  const initializedUserIdRef = useRef<string | null>(null);
 
   // Función para manejar errores de autenticación
   const handleAuthError = useCallback(async (error: any) => {
@@ -251,6 +253,10 @@ export default function ChatWidget() {
 
   // Obtener sesión y cargar datos iniciales con listener de auth state
   useEffect(() => {
+    isScrolledUpRef.current = isScrolledUp;
+  }, [isScrolledUp]);
+
+  useEffect(() => {
     let mounted = true;
     
     // Listener para cambios de autenticación
@@ -265,9 +271,12 @@ export default function ChatWidget() {
           setIsOpen(false);
         } else if (event === 'TOKEN_REFRESHED' && session) {
           setCurrentUserId(session.user.id);
-        } else if (event === 'SIGNED_IN' && session) {
-          setCurrentUserId(session.user.id);
-          if (mounted) {
+        } else if (event === "SIGNED_IN" && session) {
+          const signedInUserId = session.user.id;
+          setCurrentUserId(signedInUserId);
+          // Evita recargar en loop si SIGNED_IN se dispara más de una vez para el mismo usuario.
+          if (mounted && initializedUserIdRef.current !== signedInUserId) {
+            initializedUserIdRef.current = signedInUserId;
             loadData().catch(console.error);
           }
         }
@@ -286,6 +295,7 @@ export default function ChatWidget() {
         if (session?.session) {
           const userId = session.session.user.id;
           setCurrentUserId((prev) => prev !== userId ? userId : prev);
+          initializedUserIdRef.current = userId;
         }
         if (mounted) {
           loadData().catch(console.error);
@@ -425,7 +435,7 @@ export default function ChatWidget() {
               if (messagesContainerRef.current) {
                 const container = messagesContainerRef.current;
                 const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 200;
-                if (isNearBottom || !isScrolledUp) {
+                if (isNearBottom || !isScrolledUpRef.current) {
                   scrollToBottom(true);
                 }
               } else {
@@ -454,7 +464,7 @@ export default function ChatWidget() {
       console.log("[ChatWidget] Desuscribiéndose de mensajes de conversación:", selectedConversation);
       supabase.removeChannel(channel);
     };
-  }, [selectedConversation, handleAuthError, loadMessages, loadConversations, isScrolledUp]);
+  }, [selectedConversation, handleAuthError, loadMessages, loadConversations]);
 
   // Suscribirse a actualizaciones de conversaciones, participantes y mensajes globales
   useEffect(() => {
