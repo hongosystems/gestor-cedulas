@@ -4,7 +4,7 @@ import Link from "next/link";
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { pjnScraperSupabase } from "@/lib/pjn-scraper-supabase";
-import { daysSince } from "@/lib/semaforo";
+import { daysSince, isLegacySemaforoDate } from "@/lib/semaforo";
 import { stripAutoNotasTimestamp, withAutoNotasTimestamp } from "@/lib/notas-timestamp";
 import { FilterableTh } from "@/app/components/FilterableTh";
 import NotificationBell from "@/app/components/NotificationBell";
@@ -302,6 +302,13 @@ function semaforoByAge(dias: number): Semaforo {
   if (dias >= UMBRAL_ROJO) return "ROJO";
   if (dias >= UMBRAL_AMARILLO) return "AMARILLO";
   return "VERDE";
+}
+
+function clampLegacySemaforo(base: Semaforo, fechaCargaIso: string | null | undefined): Semaforo {
+  if (!fechaCargaIso || !isLegacySemaforoDate(fechaCargaIso)) return base;
+  // Legacy: evita mostrar ROJO por antigüedad histórica.
+  if (base === "ROJO") return "AMARILLO";
+  return base;
 }
 
 type User = {
@@ -2784,7 +2791,9 @@ export default function MisJuzgadosPage() {
           read_by_user_id: c.read_by_user_id || null,
           read_by_name: c.read_by_name || null,
           dias: c.fecha_carga ? daysSince(c.fecha_carga) : null,
-          semaforo: c.fecha_carga ? semaforoByAge(daysSince(c.fecha_carga)) : "VERDE" as Semaforo,
+          semaforo: c.fecha_carga
+            ? clampLegacySemaforo(semaforoByAge(daysSince(c.fecha_carga)), c.fecha_carga)
+            : "VERDE" as Semaforo,
           estado: getEstadoCedula(c),
         }))
       : oficiosFiltered.map(o => ({
@@ -2802,7 +2811,9 @@ export default function MisJuzgadosPage() {
           read_by_name: o.read_by_name || null,
           observaciones: null,
           dias: o.fecha_carga ? daysSince(o.fecha_carga) : null,
-          semaforo: o.fecha_carga ? semaforoByAge(daysSince(o.fecha_carga)) : "VERDE" as Semaforo,
+          semaforo: o.fecha_carga
+            ? clampLegacySemaforo(semaforoByAge(daysSince(o.fecha_carga)), o.fecha_carga)
+            : "VERDE" as Semaforo,
           estado: getEstadoCedula(o),
         }));
     

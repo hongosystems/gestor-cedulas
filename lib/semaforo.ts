@@ -4,9 +4,17 @@ export type SemaforoColor = "VERDE" | "AMARILLO" | "ROJO";
 
 export const UMBRAL_AMARILLO_DIAS = 30; // desde 30 días = amarillo
 export const UMBRAL_ROJO_DIAS = 60;     // desde 60 días = rojo
+export const LEGACY_SEMAFORO_CUTOFF_DATE = process.env.NEXT_PUBLIC_SEMAFORO_LEGACY_CUTOFF_DATE || null;
 
 function startOfDay(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function parseIsoDateOnly(isoDate: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate.trim());
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return isNaN(d.getTime()) ? null : startOfDay(d);
 }
 
 /**
@@ -84,6 +92,19 @@ export function colorFromFechaCarga(fechaCargaIso: string | null | undefined): S
   if (d >= UMBRAL_ROJO_DIAS) return "ROJO";
   if (d >= UMBRAL_AMARILLO_DIAS) return "AMARILLO";
   return "VERDE";
+}
+
+/**
+ * Indica si una fecha de carga cae antes (o en) la fecha de corte legacy
+ * para evitar tratar registros históricos como "rojos" por antigüedad.
+ */
+export function isLegacySemaforoDate(fechaCargaIso: string | null | undefined): boolean {
+  if (!fechaCargaIso || !LEGACY_SEMAFORO_CUTOFF_DATE) return false;
+  const carga = new Date(fechaCargaIso);
+  if (isNaN(carga.getTime())) return false;
+  const cutoff = parseIsoDateOnly(LEGACY_SEMAFORO_CUTOFF_DATE);
+  if (!cutoff) return false;
+  return startOfDay(carga).getTime() <= cutoff.getTime();
 }
 
 export function labelFromColor(c: SemaforoColor) {

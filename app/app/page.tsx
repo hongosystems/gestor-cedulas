@@ -3,7 +3,7 @@
 import Link from "next/link";
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { daysBetween, daysSince } from "@/lib/semaforo";
+import { daysBetween, daysSince, isLegacySemaforoDate } from "@/lib/semaforo";
 import { stripAutoNotasTimestamp, withAutoNotasTimestamp } from "@/lib/notas-timestamp";
 import { FilterableTh } from "@/app/components/FilterableTh";
 import NotificationBell from "@/app/components/NotificationBell";
@@ -130,6 +130,13 @@ function semaforoByAge(diasDesdeCarga: number): Semaforo {
   if (diasDesdeCarga >= 60) return "ROJO";
   if (diasDesdeCarga >= 30) return "AMARILLO";
   return "VERDE";
+}
+
+function clampLegacySemaforo(base: Semaforo, cargaISO: string): Semaforo {
+  if (!isLegacySemaforoDate(cargaISO)) return base;
+  // Legacy: evita mostrar ROJO por antigüedad histórica.
+  if (base === "ROJO") return "AMARILLO";
+  return base;
 }
 
 function SemaforoChip({ value }: { value: Semaforo }) {
@@ -1101,7 +1108,10 @@ export default function MisCedulasPage() {
         }
       }
       const diasValidos = dias !== null && !isNaN(dias) && dias >= 0 ? dias : null;
-      const sem = diasValidos === null ? ("VERDE" as Semaforo) : semaforoByAge(diasValidos);
+      const sem =
+        diasValidos === null
+          ? ("VERDE" as Semaforo)
+          : clampLegacySemaforo(semaforoByAge(diasValidos), cargaISO);
       return { ...c, cargaISO, dias: diasValidos, sem };
     });
 

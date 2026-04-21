@@ -302,6 +302,13 @@ SUPABASE_SERVICE_ROLE_KEY=tu_service_role_key_aqui
 NEXT_PUBLIC_PJN_SCRAPER_SUPABASE_URL=https://pjn-scraper.supabase.co
 NEXT_PUBLIC_PJN_SCRAPER_SUPABASE_ANON_KEY=tu_anon_key_pjn_scraper
 PJN_SCRAPER_TABLE_NAME=cases  # Opcional, por defecto: "cases"
+
+# ============================================
+# SEMAFORO LEGACY (Opcional)
+# Si se define, evita ROJO para registros con fecha_carga <= corte
+# Formato requerido: YYYY-MM-DD
+# ============================================
+NEXT_PUBLIC_SEMAFORO_LEGACY_CUTOFF_DATE=2025-12-31
 ```
 
 ### Variables en Vercel
