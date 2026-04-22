@@ -1225,6 +1225,7 @@ export default function PruebaPericiaPage() {
   const [userJuzgados, setUserJuzgados] = useState<string[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [currentUserName, setCurrentUserName] = useState<string>("");
+  const [lastSyncDate, setLastSyncDate] = useState<string | null>(null);
   const [userRoles, setUserRoles] = useState<{
     isSuperadmin: boolean;
     isAdminExpedientes: boolean;
@@ -1583,6 +1584,26 @@ export default function PruebaPericiaPage() {
         
         setCreatedByOptions(options);
       }
+
+      try {
+        let { data: syncMetadata, error: syncErr } = await supabase
+          .from("pjn_sync_metadata")
+          .select("last_sync_at")
+          .limit(1)
+          .maybeSingle();
+        if (syncErr || !syncMetadata) {
+          const fixedId = '00000000-0000-0000-0000-000000000001';
+          const result = await supabase
+            .from("pjn_sync_metadata")
+            .select("last_sync_at")
+            .eq("id", fixedId)
+            .maybeSingle();
+          syncMetadata = result.data;
+        }
+        if (syncMetadata?.last_sync_at) {
+          setLastSyncDate(syncMetadata.last_sync_at);
+        }
+      } catch {}
 
     } catch (err: any) {
       console.error("Error en loadData:", err);
@@ -2381,6 +2402,54 @@ export default function PruebaPericiaPage() {
           Prueba/Pericia
         </h1>
         </div>
+        {lastSyncDate && (
+          <div style={{ 
+            display: "flex", 
+            flexDirection: "column", 
+            alignItems: "flex-end",
+            padding: "8px 14px",
+            background: "rgba(96,141,186,.12)",
+            border: "1px solid rgba(96,141,186,.25)",
+            borderRadius: 8,
+            flexShrink: 0,
+            minWidth: 200
+          }}>
+            <span style={{ 
+              fontSize: 11, 
+              color: "rgba(234,243,255,.7)", 
+              fontWeight: 500,
+              textTransform: "uppercase",
+              letterSpacing: "0.5px",
+              marginBottom: 4,
+              whiteSpace: "nowrap"
+            }}>
+              Última Actualización con PJN
+            </span>
+            <span style={{ 
+              fontSize: 13, 
+              color: "rgba(234,243,255,.95)", 
+              fontWeight: 600,
+              fontFamily: "monospace",
+              whiteSpace: "nowrap"
+            }}>
+              {(() => {
+                try {
+                  if (!lastSyncDate) return "N/A";
+                  const date = new Date(lastSyncDate);
+                  if (isNaN(date.getTime())) return "N/A";
+                  const day = String(date.getDate()).padStart(2, '0');
+                  const month = String(date.getMonth() + 1).padStart(2, '0');
+                  const year = String(date.getFullYear()).slice(-2);
+                  const hours = String(date.getHours()).padStart(2, '0');
+                  const minutes = String(date.getMinutes()).padStart(2, '0');
+                  return `${day}/${month}/${year}  ${hours}:${minutes}`;
+                } catch {
+                  return "N/A";
+                }
+              })()}
+            </span>
+          </div>
+        )}
         {currentUserName && (
           <div
             title={currentUserName}
