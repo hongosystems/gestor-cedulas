@@ -257,7 +257,16 @@ function tienePruebaPericia(movimientos: any): boolean {
             /AGR[EÉ]GUENSE.*ESTUDIOS.*M[EÉ]DICOS.*EXPERTA/i,
             /AGR[EÉ]GUENSE.*ESTUDIOS.*M[EÉ]DICOS.*EXPERTO/i,
             /PRESENTACION\s+DEL\s+INFORME\s+PERICIAL/i,
-            /INFORME\s+PERICIAL/i
+            /INFORME\s+PERICIAL/i,
+            // Patrones para etapa de apertura de prueba y pericia sin literal "pericial"
+            /AUTOS?\s+A\s+PRUEBA/i,
+            /SE\s+ABRE\s+LA\s+CAUSA\s+A\s+PRUEBA/i,
+            /ABRESE\s+A\s+PRUEBA/i,
+            /PROV[EÉ]ASE\s+PRUEBA/i,
+            /SE\s+PROVEE\s+LA\s+PRUEBA/i,
+            /PUNTOS?\s+DE\s+PERICIA/i,
+            /DESIGN[EA]SE\s+(?:EXPERTO|EXPERTA|CONSULTOR|CONSULTORA)/i,
+            /TRASLADO\s+DEL\s+INFORME/i
           ];
           
           for (const patron of patrones) {
