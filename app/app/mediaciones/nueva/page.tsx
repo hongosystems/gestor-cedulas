@@ -428,7 +428,11 @@ export default function NuevaMediacionPage() {
                   <div className="field"><input className="input" placeholder="Empresa nombre o razón social" value={r.empresa_nombre_razon_social} onChange={(e) => updateRequerido(r.id, "empresa_nombre_razon_social", e.target.value)} /></div>
                   <div className="field"><input className="input" placeholder="Domicilio" value={r.domicilio} onChange={(e) => updateRequerido(r.id, "domicilio", e.target.value)} /></div>
                   <div className="field"><select className="input" value={r.lesiones} onChange={(e) => updateRequerido(r.id, "lesiones", e.target.value)}><option value="">Lesiones</option>{LESIONES.map((l) => <option key={l} value={l}>{l}</option>)}</select></div>
-                  <AseguradorasStep value={aseguradoras} onChange={setAseguradoras} requeridoId={r.id} />
+                  <AseguradorasStep
+                    value={aseguradoras as any}
+                    onChange={setAseguradoras as any}
+                    requeridoId={r.id}
+                  />
                 </div>
               ))}
               <button type="button" className="btn" onClick={addRequerido} disabled={requeridos.length >= 3}>+ Agregar otro requerido</button>
