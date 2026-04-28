@@ -1,0 +1,3443 @@
+{
+  "generado": "2026-04-28T15:28:40.284Z",
+  "fuente": "SSN datos abiertos + cuitonline.com (datos AFIP)",
+  "total": 330,
+  "conDomicilio": 198,
+  "sinDomicilio": 132,
+  "sinCuit": 124,
+  "aseguradoras": [
+    {
+      "matricula": "0864",
+      "denominacion": "ACE AMERICAN INSURANCE COMPANY (SUCURSAL ARGENTINA)",
+      "cuit": "30712255036",
+      "tipoSociedad": "Sucursal",
+      "actividadPrincipal": "Reaseg. Local",
+      "domicilio": {
+        "direccion": "Alem Leandro N. Av. 855",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0910",
+      "denominacion": "ACE INA OVERSEAS INSURANCE COMPANY LTD",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0835",
+      "denominacion": "ACE PROPERTY AND CASUALTY INSURANCE COMPANY",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0983",
+      "denominacion": "ACTIVE CAPITAL REINSURANCE, LTD.",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0755",
+      "denominacion": "AFIANZADORA LATINOAMERICANA COMPAÑÍA DE SEGUROS S.A.",
+      "cuit": "30709187941",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Caución",
+      "domicilio": {
+        "direccion": "Tucuman 117",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0389",
+      "denominacion": "AGROSALTA COOPERATIVA DE SEGUROS LIMITADA",
+      "cuit": "30500064850",
+      "tipoSociedad": "Cooperativa",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "20 de Febrero 197",
+        "provincia": "Salta",
+        "localidad": "Salta"
+      }
+    },
+    {
+      "matricula": "0938",
+      "denominacion": "AIG EUROPE S.A.",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0329",
+      "denominacion": "ALBA COMPAÑÍA ARGENTINA DE SEGUROS SOCIEDAD ANONIMA",
+      "cuit": "33500057039",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Belgrano Av. 875",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0036",
+      "denominacion": "ALLIANZ ARGENTINA COMPAÑIA DE SEGUROS S.A.",
+      "cuit": "30500037217",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Corrientes Av. 299",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0794",
+      "denominacion": "ALLIANZ GLOBAL CORPORATE & SPECIALTY SE",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0572",
+      "denominacion": "ALLIANZ GLOBAL RISKS US INSURANCE COMPANY",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0837",
+      "denominacion": "ALLIANZ RE ARGENTINA S.A.",
+      "cuit": "30712273743",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Reaseg. Local",
+      "domicilio": {
+        "direccion": "Corrientes Av. 299",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0469",
+      "denominacion": "ALLIANZ SE",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0905",
+      "denominacion": "ALLIED WORLD ASSURANCE COMPANY LTD",
+      "cuit": "33535589769",
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": {
+        "direccion": "Maipu 1300",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0842",
+      "denominacion": "ALTERRA EUROPE P.L.C.",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0924",
+      "denominacion": "AMERICAN AGRICULTURAL INSURANCE COMPANY",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0707",
+      "denominacion": "AMERICAN BANKERS INSURANCE COMPANY OF FLORIDA",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0804",
+      "denominacion": "AMERICAN HOME ASSURANCE COMPANY",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0202",
+      "denominacion": "AMERICAN HOME ASSURANCE COMPANY (SUCURSAL ARGENTINA)",
+      "cuit": "30609645977",
+      "tipoSociedad": "Sucursal",
+      "actividadPrincipal": "Reaseg. Local",
+      "domicilio": {
+        "direccion": "Sarmiento 930",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0914",
+      "denominacion": "AMERICAN INTERNATIONAL GROUP UK LIMITED",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0876",
+      "denominacion": "AMTRUST SPECIALTY LIMITED",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0959",
+      "denominacion": "ANDINA ART S.A.",
+      "cuit": "33716992999",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "A.R.T.",
+      "domicilio": {
+        "direccion": "Belgrano Av. 672",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0891",
+      "denominacion": "ANTARES REINSURANCE COMPANY LIMITED",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0246",
+      "denominacion": "ANTARTIDA COMPAÑÍA ARGENTINA DE SEGUROS SOCIEDAD ANÓNIMA",
+      "cuit": "30500051309",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "O Gorman, Camila 425",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0844",
+      "denominacion": "ANTICIPAR COMPAÑÍA DE SEGUROS S.A.",
+      "cuit": "30711517495",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Sepelio",
+      "domicilio": {
+        "direccion": "Cordoba 777",
+        "provincia": "Tucuman",
+        "localidad": "San Miguel de Tucuman"
+      }
+    },
+    {
+      "matricula": "0819",
+      "denominacion": "ARCH INSURANCE COMPANY (EUROPE) LIMITED",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0825",
+      "denominacion": "ARCH REINSURANCE EUROPE UNDERWRITING DESIGNATED ACTIVITY COMPANY",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0241",
+      "denominacion": "ARGOS COMPAÑÍA ARGENTINA DE SEGUROS GENERALES SOCIEDAD ANÓNIMA",
+      "cuit": "30500050795",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Esmeralda 288",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0680",
+      "denominacion": "ARGOS MUTUAL DE SEGUROS DEL TRANSPORTE PÚBLICO DE PASAJEROS",
+      "cuit": "30696164203",
+      "tipoSociedad": "Mutual",
+      "actividadPrincipal": "Transporte Público",
+      "domicilio": {
+        "direccion": "Esmeralda 288 P6",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0962",
+      "denominacion": "ART MUTUAL DE EMPLEADOS MECANICOS Y AFINES DEL TRANSPORTE AUTOMOTOR SAN FRANCISCO",
+      "cuit": "30717216586",
+      "tipoSociedad": "Mutual",
+      "actividadPrincipal": "A.R.T.",
+      "domicilio": {
+        "direccion": "Florida 375",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0932",
+      "denominacion": "ART MUTUAL RURAL DE SEGUROS DE RIESGOS DEL TRABAJO",
+      "cuit": "30716211432",
+      "tipoSociedad": "Mutual",
+      "actividadPrincipal": "A.R.T.",
+      "domicilio": {
+        "direccion": "San Martin 588",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0952",
+      "denominacion": "ARUNDO RE",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0937",
+      "denominacion": "ASEGURADORA DE BIENES Y SERVICIOS S.A.",
+      "cuit": "30715292382",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Vida",
+      "domicilio": {
+        "direccion": "Viamonte 2660",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0297",
+      "denominacion": "ASEGURADORA DE CREDITOS Y GARANTIAS SOCIEDAD ANONIMA",
+      "cuit": "30500064478",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Grierson,cecilia Boulevard 255",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0857",
+      "denominacion": "ASEGURADORA DEL FINISTERRE COMPAÑÍA ARGENTINA DE SEGUROS S.A.",
+      "cuit": "30712340297",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Reconquista 522",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0831",
+      "denominacion": "ASEGURADORES ARGENTINOS COMPAÑIA DE REASEGUROS S.A.",
+      "cuit": "30712147705",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Reaseg. Local",
+      "domicilio": {
+        "direccion": "Manso Juana 555",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0415",
+      "denominacion": "ASEGURADORES DE CAUCIONES SOCIEDAD ANONIMA COMPAÑIA DE SEGUROS",
+      "cuit": "30518919349",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Paraguay 580",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0199",
+      "denominacion": "ASOCIACION MUTUAL DAN",
+      "cuit": "30500045198",
+      "tipoSociedad": "Mutual",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Av. Moreno 570",
+        "provincia": "Buenos Aires",
+        "localidad": "Tres Arroyos"
+      }
+    },
+    {
+      "matricula": "0620",
+      "denominacion": "ASOCIART S.A. ASEGURADORA DE RIESGOS DEL TRABAJO",
+      "cuit": "30686273330",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "A.R.T.",
+      "domicilio": {
+        "direccion": "Alem Leandro N. Av. 621",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0939",
+      "denominacion": "ASPEN BERMUDA LIMITED",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0802",
+      "denominacion": "ASPEN INSURANCE UK LIMITED",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0771",
+      "denominacion": "ASSEKURANSA COMPAÑÍA DE SEGUROS SOCIEDAD ANÓNIMA",
+      "cuit": "30709541036",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Cerrito 1186",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0463",
+      "denominacion": "ASSICURAZIONI GENERALI S.P.A.",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0209",
+      "denominacion": "ASSURANT ARGENTINA COMPAÑÍA DE SEGUROS SOCIEDAD ANÓNIMA",
+      "cuit": "30500045406",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Butty Enrique Ing. 240",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0540",
+      "denominacion": "ASV ARGENTINA SALUD, VIDA Y PATRIMONIALES COMPAÑIA DE SEGUROS S.A.",
+      "cuit": "30678184779",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Vida",
+      "domicilio": {
+        "direccion": "Libertador del Av. 5930",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0812",
+      "denominacion": "ATM COMPAÑÍA DE SEGUROS S.A.",
+      "cuit": "30699408154",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Florida 833",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0961",
+      "denominacion": "ATRADIUS CRÉDITO Y CAUCIÓN S.A. DE SEGUROS Y REASEGUROS",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0868",
+      "denominacion": "AURORA COMPAÑÍA ARGENTINA DE SEGUROS PATRIMONIALES Y DE PERSONAS S.A.",
+      "cuit": "30712337121",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Corrientes Av. 330",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0889",
+      "denominacion": "AUSTRAL RESSEGURADORA S.A.",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0958",
+      "denominacion": "AVIVA INSURANCE LIMITED",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0911",
+      "denominacion": "AXA FRANCE VIE SOCIETÉ ANONYME",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0945",
+      "denominacion": "AXA XL INSURANCE COMPANY UK LIMITED",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0969",
+      "denominacion": "AXA XL REINSURANCE LTD.",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0787",
+      "denominacion": "AXIS RE SE",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0906",
+      "denominacion": "AXIS SPECIALTY EUROPE SE",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0897",
+      "denominacion": "BALOISE INSURANCE LTD",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0335",
+      "denominacion": "BARBUSS RISK SEGUROS (ARGENTINA) S.A.",
+      "cuit": "30500017011",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Peron Juan Tte.g 650 P5",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0893",
+      "denominacion": "BARENTS RE REINSURANCE COMPANY INC",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0396",
+      "denominacion": "BBVA SEGUROS ARGENTINA S.A.",
+      "cuit": "30500064230",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Alem Leandro N. Av. 728",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0555",
+      "denominacion": "BENEFICIO S.A. COMPAÑIA DE SEGUROS",
+      "cuit": "30680827520",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Cordoba 1015",
+        "provincia": "Santa Fe",
+        "localidad": "Rosario"
+      }
+    },
+    {
+      "matricula": "0828",
+      "denominacion": "BERKLEY ARGENTINA DE REASEGUROS S.A.",
+      "cuit": "30712143416",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Reaseg. Local",
+      "domicilio": {
+        "direccion": "Pellegrini Carlos 1023",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0635",
+      "denominacion": "BERKLEY INSURANCE COMPANY",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0624",
+      "denominacion": "BERKLEY INTERNATIONAL ASEGURADORA DE RIESGOS DEL TRABAJO SOCIEDAD ANONIMA",
+      "cuit": "30685893076",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "A.R.T.",
+      "domicilio": {
+        "direccion": "Pellegrini Carlo 1023",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0121",
+      "denominacion": "BERKLEY INTERNATIONAL SEGUROS SOCIEDAD ANONIMA",
+      "cuit": "30500035788",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Mitre 699",
+        "provincia": "Santa Fe",
+        "localidad": "Rosario"
+      }
+    },
+    {
+      "matricula": "0853",
+      "denominacion": "BEST MERIDIAN INSURANCE COMPANY",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0907",
+      "denominacion": "BEST MERIDIAN INTERNATIONAL INSURANCE COMPANY SPC",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0696",
+      "denominacion": "BHN SEGUROS GENERALES S.A.",
+      "cuit": "30693504186",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Tucuman 1",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0695",
+      "denominacion": "BHN VIDA S.A.",
+      "cuit": "30693503953",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Vida",
+      "domicilio": {
+        "direccion": "Rivadavia Av. 611",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0530",
+      "denominacion": "BINARIA SEGUROS DE RETIRO S.A.",
+      "cuit": "30678158433",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros de Retiro",
+      "domicilio": {
+        "direccion": "Alem Leandro N. Av. 1050",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0517",
+      "denominacion": "BINARIA SEGUROS DE VIDA S.A.",
+      "cuit": "30678158506",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Vida",
+      "domicilio": {
+        "direccion": "Alem Leandro N. Av. 1050",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0820",
+      "denominacion": "BIND SEGUROS S.A",
+      "cuit": "30711668302",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Vida",
+      "domicilio": {
+        "direccion": "Maipu 1210",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0573",
+      "denominacion": "BONACORSI  SEGUROS DE PERSONAS S.A.",
+      "cuit": "30651009495",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Sepelio",
+      "domicilio": {
+        "direccion": "Chiclana 380",
+        "provincia": "Buenos Aires",
+        "localidad": "Bahia Blanca"
+      }
+    },
+    {
+      "matricula": "0721",
+      "denominacion": "CAJA DE PREVISIÓN Y SEGURO MÉDICO DE LA PROVINCIA DE BS.AS",
+      "cuit": "30542265317",
+      "tipoSociedad": "Organismo Oficial",
+      "actividadPrincipal": "Vida",
+      "domicilio": {
+        "direccion": "50 520",
+        "provincia": "Buenos Aires",
+        "localidad": "La Plata"
+      }
+    },
+    {
+      "matricula": "0501",
+      "denominacion": "CAJA DE SEGUROS S.A.",
+      "cuit": "30663205621",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Fitz Roy 957",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0259",
+      "denominacion": "CAJA POPULAR DE AHORROS DE LA PROVINCIA DE TUCUMAN",
+      "cuit": "30517999551",
+      "tipoSociedad": "Organismo Oficial",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "San Martin 469",
+        "provincia": "Tucuman",
+        "localidad": "San Miguel de Tucuman"
+      }
+    },
+    {
+      "matricula": "0007",
+      "denominacion": "CAMINOS PROTEGIDOS  COMPAÑÍA DE SEGUROS S.A.",
+      "cuit": "30500043357",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Irigoyen Bernardo de 682",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0406",
+      "denominacion": "CARUSO COMPAÑÍA ARGENTINA DE SEGUROS SOCIEDAD ANÓNIMA",
+      "cuit": "30518309427",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Marcelo T de Alvear 328",
+        "provincia": "Cordoba",
+        "localidad": "Ciudad de Cordoba"
+      }
+    },
+    {
+      "matricula": "0913",
+      "denominacion": "CATLIN RE SCHWEIZ AG",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0491",
+      "denominacion": "CERTEZA COMPAÑIA DE SEGUROS S.A.",
+      "cuit": "30652834317",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Vida",
+      "domicilio": {
+        "direccion": "Florida 537",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0404",
+      "denominacion": "CESCE ARGENTINA S.A. SEGUROS DE CREDITO Y  GARANTÍAS",
+      "cuit": "30562751668",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros de Crédito",
+      "domicilio": {
+        "direccion": "Corrientes Av. 316",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0967",
+      "denominacion": "CHINA PACIFIC PROPERTY INSURANCE COMPANY LTD",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0275",
+      "denominacion": "CHUBB SEGUROS ARGENTINA S.A.",
+      "cuit": "30500016260",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Alem Leandro N. Av. 855",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0908",
+      "denominacion": "CHUBB TEMPEST REINSURANCE LTD",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0576",
+      "denominacion": "CNP ASSURANCES COMPAÑIA DE SEGUROS S.A.",
+      "cuit": "30682408622",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Alvear Marcelo T de 1541",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0980",
+      "denominacion": "COFACE RE S.A.",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0861",
+      "denominacion": "COLON COMPAÑÍA DE SEGUROS SOCIEDAD ANONIMA",
+      "cuit": "30712497641",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Moreau de Justo A.av 170",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0809",
+      "denominacion": "COMARSEG COMPAÑIA ARGENTINA DE SEGUROS S.A.",
+      "cuit": "33711246989",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "25 de Mayo 432",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0714",
+      "denominacion": "COMPAGNIE FRANCAISE D`ASSURANCE POUR LE COMMERCE EXTERIEUR",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0686",
+      "denominacion": "COMPAGNIE FRANCAISE D´ASSURANCE POUR LE COMMERCE EXTERIEUR (SUCURSAL ARGENTINA)",
+      "cuit": "30697250367",
+      "tipoSociedad": "Sucursal",
+      "actividadPrincipal": "Seguros de Crédito",
+      "domicilio": {
+        "direccion": "Cossettini,olga 263",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0412",
+      "denominacion": "COMPAÑIA ARGENTINA DE SEGUROS LATITUD SUR SOCIEDAD ANONIMA",
+      "cuit": "30500066381",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Urquiza 602",
+        "provincia": "Jujuy",
+        "localidad": "Perico"
+      }
+    },
+    {
+      "matricula": "0064",
+      "denominacion": "COMPAÑIA ARGENTINA DE SEGUROS VICTORIA SOCIEDAD ANONIMA",
+      "cuit": "30500032266",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Alem Leandro N Av. 855",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0830",
+      "denominacion": "COMPAÑÍA ASEGURADORA DEL SUR S.A.",
+      "cuit": "30712178147",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Bouchard Av. 680",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0822",
+      "denominacion": "COMPAÑÍA DE SEGUROS DE JUJUY SOCIEDAD DEL ESTADO",
+      "cuit": "30717794784",
+      "tipoSociedad": "Organismo Oficial",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Juana Manuela Gorriti 436",
+        "provincia": "Jujuy",
+        "localidad": "San Salvador de Jujuy"
+      }
+    },
+    {
+      "matricula": "0141",
+      "denominacion": "COMPAÑÍA DE SEGUROS EL NORTE SOCIEDAD ANONIMA",
+      "cuit": "30500040455",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Bv 25 de Mayo 1825",
+        "provincia": "Cordoba",
+        "localidad": "San Francisco"
+      }
+    },
+    {
+      "matricula": "0227",
+      "denominacion": "COMPAÑIA DE SEGUROS EUROAMERICA S.A.",
+      "cuit": "30500049916",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Reconquista 585",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0979",
+      "denominacion": "COMPAÑÍA DE SEGUROS GENERALES DE LA PROVINCIA DE SANTA CRUZ SOCIEDAD ANÓNIMA",
+      "cuit": "33718192949",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": null
+    },
+    {
+      "matricula": "0780",
+      "denominacion": "COMPAÑIA DE SEGUROS INSUR S.A.",
+      "cuit": "30710345364",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Caución",
+      "domicilio": {
+        "direccion": "Cordoba Av. 323",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0116",
+      "denominacion": "COMPAÑIA DE SEGUROS LA MERCANTIL ANDINA SOCIEDAD ANONIMA",
+      "cuit": "30500036911",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Belgrano Av. 672",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0432",
+      "denominacion": "COMPAÑÍA DE SEGUROS MAÑANA SOCIEDAD ANÓNIMA",
+      "cuit": "30628830092",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Acc. Personales",
+      "domicilio": {
+        "direccion": "Alfonsina Storni 83",
+        "provincia": "Mendoza",
+        "localidad": "San Jose"
+      }
+    },
+    {
+      "matricula": "0957",
+      "denominacion": "COMPAÑÍA ESPAÑOLA DE SEGUROS DE CRÉDITO A LA EXPORTACIÓN, S.A., COMPAÑÍA DE SEGUROS Y REASEGUROS, SOCIEDAD MERCANTIL ESTATAL",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0136",
+      "denominacion": "COMPAÑÍA MERCANTIL ASEGURADORA SOCIEDAD ANONIMA ARGENTINA DE SEGUROS",
+      "cuit": "30500032193",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Talcahuano 469",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0821",
+      "denominacion": "CONFLUENCIA COMPAÑIA DE SEGUROS S.A.",
+      "cuit": "30711416060",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Las Heras Gral Av. 2126",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0950",
+      "denominacion": "CONVEX INSURANCE UK LIMITED",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0196",
+      "denominacion": "COOPERACION MUTUAL PATRONAL SOCIEDAD MUTUAL DE SEGUROS GENERALES",
+      "cuit": "30500047174",
+      "tipoSociedad": "Mutual",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "25 de Mayo 530",
+        "provincia": "Santa Fe",
+        "localidad": "Venado Tuerto"
+      }
+    },
+    {
+      "matricula": "0388",
+      "denominacion": "COOPERATIVA DE SEGUROS LUZ Y FUERZA LIMITADA",
+      "cuit": "30518965715",
+      "tipoSociedad": "Cooperativa",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Defensa 453",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0248",
+      "denominacion": "COPAN COOPERATIVA DE SEGUROS LIMITADA",
+      "cuit": "30500051929",
+      "tipoSociedad": "Cooperativa",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Diagonal 77 448",
+        "provincia": "Buenos Aires",
+        "localidad": "La Plata"
+      }
+    },
+    {
+      "matricula": "0725",
+      "denominacion": "COSENA SEGUROS S.A.",
+      "cuit": "30707201882",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Corrientes Av. 538",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0912",
+      "denominacion": "CREDENDO-EXPORT CREDIT AGENCY",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0604",
+      "denominacion": "CREDICOOP COMPAÑIA DE SEGUROS DE RETIRO S.A.",
+      "cuit": "33685226389",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros de Retiro",
+      "domicilio": {
+        "direccion": "Alsina Adolfo 633",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0656",
+      "denominacion": "CREDITO Y CAUCION S.A. COMPAÑÍA DE SEGUROS",
+      "cuit": "30687874354",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Caución",
+      "domicilio": {
+        "direccion": "25 de Mayo 565",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0553",
+      "denominacion": "CRUZ SUIZA COMPAÑÍA DE SEGUROS S.A.",
+      "cuit": "30679888842",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Vida",
+      "domicilio": {
+        "direccion": "San Martin 558",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0948",
+      "denominacion": "DEUTSCHE RÜCKVERSICHERUNG AG",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0872",
+      "denominacion": "DIGNA SEGUROS S.A.",
+      "cuit": "30712148582",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Sepelio",
+      "domicilio": {
+        "direccion": "Lugones 4239",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0968",
+      "denominacion": "ECHO REINSURANCE LIMITED",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0080",
+      "denominacion": "EDIFICAR SEGUROS SOCIEDAD ANÓNIMA",
+      "cuit": "30620833173",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Riobamba 429",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0716",
+      "denominacion": "EL PROGRESO SEGUROS SOCIEDAD ANONIMA",
+      "cuit": "30701829723",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "25 de Mayo 432",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0006",
+      "denominacion": "EL SURCO COMPAÑÍA DE SEGUROS SOCIEDAD ANONIMA",
+      "cuit": "30500039430",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Maipu 1300",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0963",
+      "denominacion": "ENDURANCE SPECIALTY INSURANCE LTD.",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0871",
+      "denominacion": "ENDURANCE WORLDWIDE INSURANCE LIMITED",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0933",
+      "denominacion": "ESENCIA SEGUROS S.A.",
+      "cuit": "30715342371",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Sepelio",
+      "domicilio": {
+        "direccion": "Bv Oro&ñ209;o 797",
+        "provincia": "Santa Fe",
+        "localidad": "Rosario"
+      }
+    },
+    {
+      "matricula": "0236",
+      "denominacion": "EVOLUCIÓN SEGUROS S.A.",
+      "cuit": "30500050620",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Azopardo 1405",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0616",
+      "denominacion": "EXPERTA ASEGURADORA DE RIESGOS DEL TRABAJO SA",
+      "cuit": "30687156168",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "A.R.T.",
+      "domicilio": {
+        "direccion": "Libertador del Av. 6902",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0880",
+      "denominacion": "EXPERTA SEGUROS S.A.",
+      "cuit": "30714590541",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Libertador del Av. 6902",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0801",
+      "denominacion": "FACTORY MUTUAL INSURANCE COMPANY",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0836",
+      "denominacion": "FEDERACION PATRONAL REASEGUROS S.A.",
+      "cuit": "30712295933",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Reaseg. Local",
+      "domicilio": {
+        "direccion": "51 770",
+        "provincia": "Buenos Aires",
+        "localidad": "La Plata"
+      }
+    },
+    {
+      "matricula": "0425",
+      "denominacion": "FEDERACION PATRONAL SEGUROS DE RETIRO S.A.",
+      "cuit": "30628555903",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros de Retiro",
+      "domicilio": {
+        "direccion": "Avda 51 770",
+        "provincia": "Buenos Aires",
+        "localidad": "La Plata"
+      }
+    },
+    {
+      "matricula": "0726",
+      "denominacion": "FEDERACIÓN PATRONAL SEGUROS S.A.U.",
+      "cuit": "33707366589",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros  Gen.-ART",
+      "domicilio": {
+        "direccion": "51 770",
+        "provincia": "Buenos Aires",
+        "localidad": "La Plata"
+      }
+    },
+    {
+      "matricula": "0874",
+      "denominacion": "FEDERADA COMPAÑÍA DE SEGUROS DE PERSONAS SAU",
+      "cuit": "30712484744",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Vida",
+      "domicilio": {
+        "direccion": "Alem Leandro N. Av. 822",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0562",
+      "denominacion": "FEDERAL INSURANCE COMPANY",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0253",
+      "denominacion": "FIANZAS Y CREDITO S. A. COMPAÑIA DE SEGUROS",
+      "cuit": "30500055053",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Bouchard Av. 680",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0951",
+      "denominacion": "FIDELIS INSURANCE BERMUDA LIMITED",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0946",
+      "denominacion": "FIDELIS UNDERWRITING LIMITED",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0619",
+      "denominacion": "GALENO ASEGURADORA DE RIESGOS DEL TRABAJO S.A.",
+      "cuit": "30685228501",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "A.R.T.",
+      "domicilio": {
+        "direccion": "Dellepiane,elvira Rawson de 150",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0878",
+      "denominacion": "GALENO SEGUROS S.A.",
+      "cuit": "30714395196",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Rawson de Dellepiane, Elvira,av. 150",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0426",
+      "denominacion": "GALICIA RETIRO COMPAÑÌA DE SEGUROS SAU",
+      "cuit": "30622930087",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros de Retiro",
+      "domicilio": {
+        "direccion": "Leiva 4070",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0589",
+      "denominacion": "GALICIA SEGUROS SAU",
+      "cuit": "30687145522",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Leiva 4070",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0681",
+      "denominacion": "GARANTÍA MUTUAL DE SEGUROS DEL TRANSPORTE PÚBLICO DE PASAJEROS",
+      "cuit": "30696857837",
+      "tipoSociedad": "Mutual",
+      "actividadPrincipal": "Transporte Público",
+      "domicilio": {
+        "direccion": "25 de Mayo 702",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0901",
+      "denominacion": "GARD MARINE & ENERGY LIMITED",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0459",
+      "denominacion": "GENERAL REINSURANCE AG",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0839",
+      "denominacion": "GENERALI ESPAÑA SOCIEDAD ANONIMA DE SEGUROS Y REASEGUROS",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0882",
+      "denominacion": "GESTION COMPAÑÍA ARGENTINA DE SEGUROS S.A.",
+      "cuit": "30714838810",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "San Martin 140",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0443",
+      "denominacion": "GGAL SEGUROS DE RETIRO S.A.",
+      "cuit": "30643103652",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros de Retiro",
+      "domicilio": {
+        "direccion": "Bouchard Av. 557",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0516",
+      "denominacion": "GGAL SEGUROS S.A.",
+      "cuit": "30663221317",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Vida",
+      "domicilio": {
+        "direccion": "Bouchard Av. 557",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0928",
+      "denominacion": "GREAT LAKES INSURANCE SE",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0333",
+      "denominacion": "HAMBURGO COMPAÑIA DE SEGUROS SOCIEDAD ANONIMA",
+      "cuit": "30500057587",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Independencia 56",
+        "provincia": "Santiago del Estero",
+        "localidad": "Santiago del Estero"
+      }
+    },
+    {
+      "matricula": "0923",
+      "denominacion": "HAMILTON INSURANCE DESIGNATED ACTIVITY COMPANY",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0477",
+      "denominacion": "HANNOVER RÜCK SE",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0778",
+      "denominacion": "HANSEATICA COMPAÑIA  DE SEGUROS SOCIEDAD ANÓNIMA",
+      "cuit": "30710233744",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Libertador del Av. 498",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0927",
+      "denominacion": "HARTFORD FIRE INSURANCE COMPANY",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0811",
+      "denominacion": "HDI GLOBAL NETWORK AG",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0892",
+      "denominacion": "HDI GLOBAL S.E.",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0885",
+      "denominacion": "HELVETIA SCHWEIZERISCHE VERSICHERUNGSGESELLSCHAFT AG (HELVETIA COMPAÑÍA SUIZA DE SEGUROS S.A.)",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0261",
+      "denominacion": "HORIZONTE COMPAÑIA ARGENTINA DE SEGUROS GENERALES SOCIEDAD ANÓNIMA",
+      "cuit": "30500052089",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "San Martin 442",
+        "provincia": "Rio Negro",
+        "localidad": "Viedma"
+      }
+    },
+    {
+      "matricula": "0966",
+      "denominacion": "INCLUIR COMPAÑÍA DE SEGUROS DE PERSONAS SOCIEDAD ANÓNIMA",
+      "cuit": "33718094009",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Sepelio",
+      "domicilio": null
+    },
+    {
+      "matricula": "0381",
+      "denominacion": "INSTITUTO ASEGURADOR MERCANTIL COMPAÑIA ARGENTINA DE SEGUROS SOCIEDAD ANÓNIMA IAM",
+      "cuit": "30500063242",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Belgrano Av. 774",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0254",
+      "denominacion": "INSTITUTO AUTÁRQUICO PROVINCIAL DEL SEGURO",
+      "cuit": "30500055509",
+      "tipoSociedad": "Organismo Oficial",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "San Martin 918",
+        "provincia": "Entre Rios",
+        "localidad": "Parana"
+      }
+    },
+    {
+      "matricula": "0437",
+      "denominacion": "INSTITUTO AUTARQUICO PROVINCIAL DEL SEGURO DE ENTRE RIOS SEGURO DE RETIRO SOCIEDAD ANONIMA",
+      "cuit": "30630063481",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros de Retiro",
+      "domicilio": {
+        "direccion": "San Martin 918",
+        "provincia": "Entre Rios",
+        "localidad": "Parana"
+      }
+    },
+    {
+      "matricula": "0661",
+      "denominacion": "INSTITUTO DE SALTA COMPAÑÍA DE SEGUROS DE VIDA SAU",
+      "cuit": "30690674889",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Vida",
+      "domicilio": {
+        "direccion": "Espa&ñ209;a 943",
+        "provincia": "Salta",
+        "localidad": "Salta"
+      }
+    },
+    {
+      "matricula": "0728",
+      "denominacion": "INSTITUTO DE SEGUROS SOCIEDAD ANÓNIMA",
+      "cuit": "30707250484",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Della Paolera Carlos 265",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0698",
+      "denominacion": "INTACT INSURANCE UK LIMITED",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0720",
+      "denominacion": "INTÉGRITY SEGUROS ARGENTINA S.A.",
+      "cuit": "30704961983",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Paseo Colon Av. 357",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0824",
+      "denominacion": "INTERNATIONAL TRANSPORT INTERMEDIARIES CLUB LIMITED",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0827",
+      "denominacion": "IRB BRASIL RESSEGUROS S.A. (SUCURSAL ARGENTINA)",
+      "cuit": "30711981833",
+      "tipoSociedad": "Sucursal",
+      "actividadPrincipal": "Reaseg. Local",
+      "domicilio": {
+        "direccion": "Madero Eduardo Av. 900",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0703",
+      "denominacion": "IRB-BRASIL RESSEGUROS S.A.",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0919",
+      "denominacion": "JOHN HANCOCK LIFE INSURANCE COMPANY (U.S.A.)",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0899",
+      "denominacion": "KOREAN REINSURANCE COMPANY",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0158",
+      "denominacion": "LA DULCE COOPERATIVA DE SEGUROS LIMITADA",
+      "cuit": "30500041443",
+      "tipoSociedad": "Cooperativa",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "24 1002",
+        "provincia": "Buenos Aires",
+        "localidad": "Nicanor Olivera"
+      }
+    },
+    {
+      "matricula": "0944",
+      "denominacion": "LA EQUIDAD SOCIAL COMPAÑÍA DE SEGUROS PATRIMONIALES S.A.",
+      "cuit": "30714947415",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Cordoba Av. 1495",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0044",
+      "denominacion": "LA EQUITATIVA DEL PLATA SOCIEDAD ANONIMA DE SEGUROS",
+      "cuit": "30515419760",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Pellegrini Carlos 1069",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0419",
+      "denominacion": "LA ESTRELLA S.A. COMPAÑÍA DE SEGUROS DE RETIRO",
+      "cuit": "30620920874",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros de Retiro",
+      "domicilio": {
+        "direccion": "San Martin 483",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0079",
+      "denominacion": "LA HOLANDO SUDAMERICANA COMPAÑIA DE SEGUROS SOCIEDAD ANONIMA",
+      "cuit": "33500038069",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Sarmiento 309",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0244",
+      "denominacion": "LA MERIDIONAL COMPAÑÍA ARGENTINA DE SEGUROS SOCIEDAD ANÓNIMA",
+      "cuit": "30500051163",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Peron Juan Tte.gral. 646",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0163",
+      "denominacion": "LA NUEVA COOPERATIVA DE SEGUROS LIMITADA",
+      "cuit": "30500041133",
+      "tipoSociedad": "Cooperativa",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Mitre Bartolome 4068",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0978",
+      "denominacion": "LA PALABRA COMPAÑÍA DE SEGUROS DE PERSONAS S.A.",
+      "cuit": "30718247337",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Sepelio",
+      "domicilio": null
+    },
+    {
+      "matricula": "0981",
+      "denominacion": "LA PALABRA COMPAÑÍA DE SEGUROS PATRIMONIALES S.A.",
+      "cuit": "33718252119",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": null
+    },
+    {
+      "matricula": "0157",
+      "denominacion": "LA PERSEVERANCIA SEGUROS SOCIEDAD ANONIMA",
+      "cuit": "30500032886",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Colon Esq E Betolaza 0",
+        "provincia": "Buenos Aires",
+        "localidad": "Tres Arroyos"
+      }
+    },
+    {
+      "matricula": "0591",
+      "denominacion": "LA PREVISORA S.A. SEGUROS DE SEPELIO",
+      "cuit": "30681314306",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Sepelio",
+      "domicilio": {
+        "direccion": "Juan Bautista al 438",
+        "provincia": "Salta",
+        "localidad": "Salta"
+      }
+    },
+    {
+      "matricula": "0618",
+      "denominacion": "LA SEGUNDA ASEGURADORA DE RIESGOS DEL TRABAJO SOCIEDAD ANÓNIMA",
+      "cuit": "30689133483",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "A.R.T.",
+      "domicilio": {
+        "direccion": "Juan Manuel de Rosas 957",
+        "provincia": "Santa Fe",
+        "localidad": "Rosario"
+      }
+    },
+    {
+      "matricula": "0117",
+      "denominacion": "LA SEGUNDA COMPAÑIA DE SEGUROS DE PERSONAS SOCIEDAD ANÓNIMA",
+      "cuit": "30500034625",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Vida",
+      "domicilio": {
+        "direccion": "Juan Manuel de Rosas 957",
+        "provincia": "Santa Fe",
+        "localidad": "Rosario"
+      }
+    },
+    {
+      "matricula": "0317",
+      "denominacion": "LA SEGUNDA COOPERATIVA LIMITADA DE SEGUROS GENERALES",
+      "cuit": "30500017704",
+      "tipoSociedad": "Cooperativa",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Juan Manuel de Rosas 957",
+        "provincia": "Santa Fe",
+        "localidad": "Rosario"
+      }
+    },
+    {
+      "matricula": "0436",
+      "denominacion": "LA SEGUNDA SEGUROS DE RETIRO SOCIEDAD ANONIMA",
+      "cuit": "30627558763",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros de Retiro",
+      "domicilio": {
+        "direccion": "Juan M de Rosas 957",
+        "provincia": "Santa Fe",
+        "localidad": "Rosario"
+      }
+    },
+    {
+      "matricula": "0596",
+      "denominacion": "LA TERRITORIAL VIDA Y SALUD COMPAÑÍA DE SEGUROS SOCIEDAD ANÓNIMA",
+      "cuit": "30682500782",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Vida",
+      "domicilio": {
+        "direccion": "25 de Mayo 432",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0700",
+      "denominacion": "LIBERTY MUTUAL INSURANCE COMPANY",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0705",
+      "denominacion": "LIBERTY MUTUAL INSURANCE EUROPE SE",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0852",
+      "denominacion": "LIBRA COMPAÑIA ARGENTINA DE SEGUROS S.A.",
+      "cuit": "30712332820",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Olazabal 1515",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0858",
+      "denominacion": "LIDER MOTOS COMPAÑÍA DE SEGUROS S.A.",
+      "cuit": "33712349579",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Reconquista 585",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0352",
+      "denominacion": "LIDERAR COMPAÑIA GENERAL DE SEGUROS S.A.",
+      "cuit": "30500059490",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Reconquista 585",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0251",
+      "denominacion": "LIFE SEGUROS DE PERSONAS Y PATRIMONIALES S.A.",
+      "cuit": "30500051546",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Peron, Juan Tte.gral. 646",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0738",
+      "denominacion": "LLOYD´S",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0977",
+      "denominacion": "LOGRAR COMPAÑÍA DE SEGUROS DE PERSONAS S.A.",
+      "cuit": "30718268636",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Vida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0975",
+      "denominacion": "LOGRAR COMPAÑÍA DE SEGUROS PATRIMONIALES SOCIEDAD ANÓNIMA",
+      "cuit": "33718266489",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": null
+    },
+    {
+      "matricula": "0699",
+      "denominacion": "MAPFRE ARGENTINA SEGUROS DE VIDA S.A.",
+      "cuit": "33700893729",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Vida",
+      "domicilio": {
+        "direccion": "Alferez Hipolito Bouchard 4191",
+        "provincia": "Buenos Aires",
+        "localidad": "Munro"
+      }
+    },
+    {
+      "matricula": "0213",
+      "denominacion": "MAPFRE ARGENTINA SEGUROS S.A.",
+      "cuit": "30500007539",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Alferez Hipolito Bouchard 4191",
+        "provincia": "Buenos Aires",
+        "localidad": "Munro"
+      }
+    },
+    {
+      "matricula": "0756",
+      "denominacion": "MAPFRE ASISTENCIA, CÍA. INTERNACIONAL DE SEG. Y REASEGUROS",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0745",
+      "denominacion": "MAPFRE GLOBAL RISKS, COMPAÑIA INTERNACIONAL DE SEGUROS Y REASEGUROS S.A.",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0467",
+      "denominacion": "MAPFRE RE COMPAÑIA DE REASEGUROS S.A.",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0826",
+      "denominacion": "MAPFRE RE COMPAÑIA DE REASEGUROS S.A. (SUCURSAL ARGENTINA)",
+      "cuit": "30712041540",
+      "tipoSociedad": "Sucursal",
+      "actividadPrincipal": "Reaseg. Local",
+      "domicilio": {
+        "direccion": "Butty Enrique Ing. 240",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0875",
+      "denominacion": "MARKEL INTERNATIONAL INSURANCE COMPANY LIMITED",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0334",
+      "denominacion": "METROPOL COMPAÑÍA ARGENTINA DE SEGUROS SOCIEDAD ANONIMA",
+      "cuit": "30500061339",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Av. Rivadavia 16976",
+        "provincia": "Buenos Aires",
+        "localidad": "Haedo"
+      }
+    },
+    {
+      "matricula": "0682",
+      "denominacion": "METROPOL SOCIEDAD DE SEGUROS MUTUOS",
+      "cuit": "30696880278",
+      "tipoSociedad": "Mutual",
+      "actividadPrincipal": "Transporte Público",
+      "domicilio": {
+        "direccion": "Av Rivadavia 16976",
+        "provincia": "Buenos Aires",
+        "localidad": "Haedo"
+      }
+    },
+    {
+      "matricula": "0632",
+      "denominacion": "MISTA SEGUROS DE PERSONAS S.A.",
+      "cuit": "30682088318",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Todas",
+      "domicilio": {
+        "direccion": "Sarmiento 811",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0739",
+      "denominacion": "MITSUI SUMITOMO INSURANCE COMPANY LIMITED",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0925",
+      "denominacion": "MS AMLIN AG",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0461",
+      "denominacion": "MUNCHENER RUCKVERSICHERUNGS GESELLSCHAFT",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0890",
+      "denominacion": "MUTUAL DE EMPLEADOS Y OBREROS PETROLEROS PRIVADOS ART MUTUAL",
+      "cuit": "30715002953",
+      "tipoSociedad": "Mutual",
+      "actividadPrincipal": "A.R.T.",
+      "domicilio": {
+        "direccion": "Santa Cruz 275",
+        "provincia": "Neuquen",
+        "localidad": "Neuquen"
+      }
+    },
+    {
+      "matricula": "0678",
+      "denominacion": "MUTUAL RIVADAVIA DE SEGUROS DEL TRANSPORTE PÚBLICO DE PASAJEROS",
+      "cuit": "30692103560",
+      "tipoSociedad": "Mutual",
+      "actividadPrincipal": "Transporte Público",
+      "domicilio": {
+        "direccion": "7 755",
+        "provincia": "Buenos Aires",
+        "localidad": "La Plata"
+      }
+    },
+    {
+      "matricula": "0845",
+      "denominacion": "N.S.A. SEGUROS GENERALES S.A.",
+      "cuit": "30712341447",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Sepelio",
+      "domicilio": {
+        "direccion": "Emilio Civit 444",
+        "provincia": "Mendoza",
+        "localidad": "Mendoza"
+      }
+    },
+    {
+      "matricula": "0832",
+      "denominacion": "NACION REASEGUROS S.A.",
+      "cuit": "30712240993",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Reaseg. Local",
+      "domicilio": {
+        "direccion": "San Martin 913",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0534",
+      "denominacion": "NACIÓN SEGUROS DE RETIRO S.A.",
+      "cuit": "30678582669",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros de Retiro",
+      "domicilio": {
+        "direccion": "San Martin 913",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0515",
+      "denominacion": "NACIÓN SEGUROS S.A.",
+      "cuit": "30678561165",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "San Martin 913",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0557",
+      "denominacion": "NATIONAL UNION FIRE INSURANCE COMPANY OF PITTSBURGH PA",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0854",
+      "denominacion": "NATIONALE BORG REINSURANCE N.V.",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0247",
+      "denominacion": "NATIVA COMPAÑIA ARGENTINA DE SEGUROS S.A.",
+      "cuit": "30500051856",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Rivadavia 2983",
+        "provincia": "Buenos Aires",
+        "localidad": "Olavarria"
+      }
+    },
+    {
+      "matricula": "0884",
+      "denominacion": "NAVIGATORS INSURANCE COMPANY",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0662",
+      "denominacion": "NIVEL SEGUROS S.A.",
+      "cuit": "30690674641",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Eustaquio Frias 73",
+        "provincia": "Salta",
+        "localidad": "Salta"
+      }
+    },
+    {
+      "matricula": "0744",
+      "denominacion": "NOBLE COMPAÑÍA DE SEGUROS SOCIEDAD ANÓNIMA",
+      "cuit": "30708127155",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Sarmiento 539",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0941",
+      "denominacion": "NORTH OF ENGLAND PROTECTING & INDEMNITY ASSOCIATION LTD",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0955",
+      "denominacion": "OCEAN INTERNATIONAL REINSURANCE COMPANY LIMITED",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0683",
+      "denominacion": "ODYSSEY REINSURANCE COMPANY",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0894",
+      "denominacion": "OMINT S.A. COMPAÑÍA DE SEGUROS",
+      "cuit": "30714838926",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Vida",
+      "domicilio": {
+        "direccion": "Pellegrini Carlos 1363",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0869",
+      "denominacion": "OPCIÓN SEGUROS S.A.",
+      "cuit": "30714358797",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Manso Juana 555",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0423",
+      "denominacion": "ORÍGENES SEGUROS DE RETIRO S.A.",
+      "cuit": "30624421899",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros de Retiro",
+      "domicilio": {
+        "direccion": "Peron, Juan Tte.gral. 646",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0895",
+      "denominacion": "PACÍFICO COMPAÑÍA DE SEGUROS S.A.",
+      "cuit": "30715141716",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Caución",
+      "domicilio": {
+        "direccion": "Cordoba Av. 679",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0972",
+      "denominacion": "PARANÁ ASEGURADORA DE RIESGOS DEL TRABAJO SOCIEDAD ANÓNIMA",
+      "cuit": "30718567420",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "A.R.T.",
+      "domicilio": null
+    },
+    {
+      "matricula": "0330",
+      "denominacion": "PARANÁ SOCIEDAD ANONIMA DE SEGUROS",
+      "cuit": "30500057102",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Peron Juan Tte.gral. 690",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0775",
+      "denominacion": "PARTNER REINSURANCE EUROPE SE",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0982",
+      "denominacion": "PEERLESS INSURANCE COMPANY",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0936",
+      "denominacion": "PICC REINSURANCE COMPANY LIMITED",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0643",
+      "denominacion": "PIEVE SEGUROS SOCIEDAD ANONIMA",
+      "cuit": "30690671367",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Sepelio",
+      "domicilio": {
+        "direccion": "San Luis 547",
+        "provincia": "Salta",
+        "localidad": "Salta"
+      }
+    },
+    {
+      "matricula": "0546",
+      "denominacion": "PLENARIA SEGUROS S.A.",
+      "cuit": "30678608439",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Vida",
+      "domicilio": {
+        "direccion": "Florida 537",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0931",
+      "denominacion": "PREMIAR COMPAÑÍA ARGENTINA DE SEGUROS S.A.",
+      "cuit": "30716529793",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Caución",
+      "domicilio": {
+        "direccion": "Rojas Ricardo Dr. 401",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0626",
+      "denominacion": "PREVENCIÓN ASEGURADORA DE RIESGOS DEL TRABAJO S.A.",
+      "cuit": "30684361917",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "A.R.T.",
+      "domicilio": {
+        "direccion": "Ruta Nac 34 Km 257 0",
+        "provincia": "Santa Fe",
+        "localidad": "Sunchales"
+      }
+    },
+    {
+      "matricula": "0930",
+      "denominacion": "PREVENCIÓN SEGUROS DE RETIRO SOCIEDAD ANÓNIMA",
+      "cuit": "30716030438",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros de Retiro",
+      "domicilio": {
+        "direccion": "Ruta Nacional Nro. 34 Km 257 0",
+        "provincia": "Santa Fe",
+        "localidad": "Sunchales"
+      }
+    },
+    {
+      "matricula": "0409",
+      "denominacion": "PREVINCA SEGUROS SOCIEDAD ANONIMA",
+      "cuit": "30500066144",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Entre Rios 537",
+        "provincia": "Santa Fe",
+        "localidad": "Rosario"
+      }
+    },
+    {
+      "matricula": "0348",
+      "denominacion": "PRODUCTORES DE FRUTAS ARGENTINAS COOPERATIVA DE SEGUROS LIMITADA",
+      "cuit": "30500059180",
+      "tipoSociedad": "Cooperativa",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Juncal 1126",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0679",
+      "denominacion": "PROTECCIÓN MUTUAL DE SEGUROS DEL TRANSPORTE PÚBLICO DE PASAJEROS",
+      "cuit": "30694505690",
+      "tipoSociedad": "Mutual",
+      "actividadPrincipal": "Transporte Público",
+      "domicilio": {
+        "direccion": "San Luis 3130",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0528",
+      "denominacion": "PROVIDENCIA COMPAÑIA ARGENTINA DE SEGUROS S.A.",
+      "cuit": "30677290478",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Reconquista 458",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0621",
+      "denominacion": "PROVINCIA ASEGURADORA DE RIESGOS DEL TRABAJO S.A.",
+      "cuit": "30688254090",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "A.R.T.",
+      "domicilio": {
+        "direccion": "Pellegrini Carlos 91",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0532",
+      "denominacion": "PROVINCIA SEGUROS DE VIDA S. A.",
+      "cuit": "30678832576",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Vida",
+      "domicilio": {
+        "direccion": "Pellegrini Carlos 71",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0499",
+      "denominacion": "PROVINCIA SEGUROS SOCIEDAD ANONIMA",
+      "cuit": "30527508165",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Pellegrini Carlos 71",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0484",
+      "denominacion": "PROYECCION SEGUROS DE RETIRO S.A.",
+      "cuit": "33659131299",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros de Retiro",
+      "domicilio": {
+        "direccion": "Av del Libertador 238",
+        "provincia": "Buenos Aires",
+        "localidad": "Vicente Lopez"
+      }
+    },
+    {
+      "matricula": "0040",
+      "denominacion": "PRUDENCIA COMPAÑIA ARGENTINA DE SEGUROS GENERALES SOCIEDAD ANÓNIMA",
+      "cuit": "30500043594",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "25 de Mayo 489",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0860",
+      "denominacion": "PUNTO SUR SOCIEDAD ARGENTINA DE REASEGUROS S.A.",
+      "cuit": "30712115870",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Reaseg. Local",
+      "domicilio": {
+        "direccion": "Libertador del Av. 602",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0883",
+      "denominacion": "QBE CAPITAL (GLOBAL) LTD.",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0915",
+      "denominacion": "QBE EUROPE NV/SA",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0879",
+      "denominacion": "QUALIA COMPAÑÍA DE SEGUROS S.A.",
+      "cuit": "30714496804",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Cerrito 740",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0964",
+      "denominacion": "RCI COMPAÑÍA DE SEGUROS DE PERSONAS SAU",
+      "cuit": "30717570592",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Vida",
+      "domicilio": {
+        "direccion": "Fray S. de Oro 1744",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0639",
+      "denominacion": "REASEGURADORA PATRIA S.A.",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0846",
+      "denominacion": "REASEGURADORES ARGENTINOS S.A.",
+      "cuit": "30712311882",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Reaseg. Local",
+      "domicilio": {
+        "direccion": "De Mayo Av. 1370",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0440",
+      "denominacion": "RECONQUISTA ASEGURADORA DE RIESGOS DEL TRABAJO SOCIEDAD ANONIMA",
+      "cuit": "30632781853",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "A.R.T.",
+      "domicilio": {
+        "direccion": "Pellegrini Carlos 1069",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0971",
+      "denominacion": "RENAISSANCERE EUROPE AG",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0833",
+      "denominacion": "REUNION RE COMPAÑIA DE REASEGUROS S.A.",
+      "cuit": "30712162372",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Reaseg. Local",
+      "domicilio": {
+        "direccion": "Sarmiento 309",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0360",
+      "denominacion": "RÍO URUGUAY COOPERATIVA DE SEGUROS LIMITADA",
+      "cuit": "30500061711",
+      "tipoSociedad": "Cooperativa",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Congreso de Tucuman 21",
+        "provincia": "Entre Rios",
+        "localidad": "Concepcion del Uruguay"
+      }
+    },
+    {
+      "matricula": "0834",
+      "denominacion": "ROYAL & SUN ALLIANCE REINSURANCE LIMITED",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0442",
+      "denominacion": "SAN CRISTÓBAL SEGURO DE RETIRO SOCIEDAD ANONIMA",
+      "cuit": "30624259269",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros de Retiro",
+      "domicilio": {
+        "direccion": "Italia 670",
+        "provincia": "Santa Fe",
+        "localidad": "Rosario"
+      }
+    },
+    {
+      "matricula": "0192",
+      "denominacion": "SAN CRISTÓBAL SOCIEDAD MUTUAL DE SEGUROS GENERALES",
+      "cuit": "34500045339",
+      "tipoSociedad": "Mutual",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Italia 646",
+        "provincia": "Santa Fe",
+        "localidad": "Rosario"
+      }
+    },
+    {
+      "matricula": "0847",
+      "denominacion": "SAN GERMAN SEGUROS S.A.",
+      "cuit": "30712344594",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Sepelio",
+      "domicilio": {
+        "direccion": "Maipu 255",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0926",
+      "denominacion": "SAN MARINO COMPAÑÍA DE SEGUROS SOCIEDAD ANÓNIMA",
+      "cuit": "30714584223",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Sepelio",
+      "domicilio": {
+        "direccion": "Peron Juan Tte.gral. 940",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0500",
+      "denominacion": "SAN PATRICIO SEGUROS S.A.",
+      "cuit": "30661912614",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Vida",
+      "domicilio": {
+        "direccion": "Alvear Marcelo T de 624",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0224",
+      "denominacion": "SANCOR COOPERATIVA DE SEGUROS LIMITADA",
+      "cuit": "30500049460",
+      "tipoSociedad": "Cooperativa",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Ruta Nac 34 Km 257 0",
+        "provincia": "Santa Fe",
+        "localidad": "Sunchales"
+      }
+    },
+    {
+      "matricula": "0498",
+      "denominacion": "SANTA LUCÍA S.A. COMPAÑÍA DE SEGUROS",
+      "cuit": "30663191930",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Sepelio",
+      "domicilio": {
+        "direccion": "De Mayo Av. 819",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0438",
+      "denominacion": "SANTÍSIMA TRINIDAD SEGUROS DE VIDA SOCIEDAD ANONIMA",
+      "cuit": "30628903391",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Vida",
+      "domicilio": {
+        "direccion": "12 329",
+        "provincia": "Buenos Aires",
+        "localidad": "La Plata"
+      }
+    },
+    {
+      "matricula": "0909",
+      "denominacion": "SAVA REINSURANCE COMPANY D.D.",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0954",
+      "denominacion": "SCOR GLOBAL REINSURANCE IRELAND DESIGNATED ACTIVITY COMPANY",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0767",
+      "denominacion": "SCOR REINSURANCE COMPANY",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0464",
+      "denominacion": "SCOR SE",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0974",
+      "denominacion": "SCOR SE (SUCURSAL ARGENTINA)",
+      "cuit": "30718665368",
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Local",
+      "domicilio": null
+    },
+    {
+      "matricula": "0840",
+      "denominacion": "SCOR UK COMPANY LIMITED",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0848",
+      "denominacion": "SEGURCOOP COOPERATIVA DE REASEGUROS LIMITADA",
+      "cuit": "30712479090",
+      "tipoSociedad": "Cooperativa",
+      "actividadPrincipal": "Reaseg. Local",
+      "domicilio": {
+        "direccion": "Alsina Adolfo 633",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0216",
+      "denominacion": "SEGURCOOP COOPERATIVA DE SEGUROS LIMITADA",
+      "cuit": "30500057277",
+      "tipoSociedad": "Cooperativa",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Alsina Adolfo 633",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0286",
+      "denominacion": "SEGUROMETAL COOPERATIVA DE SEGUROS LIMITADA",
+      "cuit": "30500055363",
+      "tipoSociedad": "Cooperativa",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Alvear 930",
+        "provincia": "Santa Fe",
+        "localidad": "Rosario"
+      }
+    },
+    {
+      "matricula": "0222",
+      "denominacion": "SEGUROS BERNARDINO RIVADAVIA COOPERATIVA LIMITADA",
+      "cuit": "30500050310",
+      "tipoSociedad": "Cooperativa",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "7 755",
+        "provincia": "Buenos Aires",
+        "localidad": "La Plata"
+      }
+    },
+    {
+      "matricula": "0025",
+      "denominacion": "SEGUROS GALICIA S.A.",
+      "cuit": "30500000127",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Grierson,cecilia Boulevard 255",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0749",
+      "denominacion": "SEGUROS MÉDICOS SAU",
+      "cuit": "30708340908",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Junin 1448",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0413",
+      "denominacion": "SENTIR SEGUROS SOCIEDAD ANONIMA",
+      "cuit": "30562050775",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Vida",
+      "domicilio": {
+        "direccion": "Suipacha 2488",
+        "provincia": "Santa Fe",
+        "localidad": "Santa Fe"
+      }
+    },
+    {
+      "matricula": "0862",
+      "denominacion": "SERENA ASEGURADORA DE RIESGOS DEL TRABAJO S.A.U.",
+      "cuit": "30712341803",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "A.R.T.",
+      "domicilio": {
+        "direccion": "Pellegrini Carlos 1363",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0956",
+      "denominacion": "SI INSURANCE (EUROPE), SA",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0900",
+      "denominacion": "SIRIUSPOINT INTERNATIONAL INSURANCE CORPORATION (PUBL)",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0002",
+      "denominacion": "SMG COMPAÑÍA ARGENTINA DE SEGUROS SAU",
+      "cuit": "30500031960",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "San Martin 323",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0710",
+      "denominacion": "SMG LIFE COMPAÑÍA DE SEGUROS DE RETIRO SAU",
+      "cuit": "30700964805",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros de Retiro",
+      "domicilio": {
+        "direccion": "Arenales 1826",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0580",
+      "denominacion": "SMG LIFE SEGUROS DE VIDA SAU",
+      "cuit": "30685843400",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Vida",
+      "domicilio": {
+        "direccion": "Arenales 1826",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0747",
+      "denominacion": "SMSV COMPAÑIA ARGENTINA DE SEGUROS S.A.",
+      "cuit": "30708333189",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Todas",
+      "domicilio": {
+        "direccion": "Cordoba Av. 1666",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0973",
+      "denominacion": "SOCIAL SAN JUAN SEGUROS DE PERSONAS S.A.",
+      "cuit": "30717019969",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Sepelio",
+      "domicilio": {
+        "direccion": "Gral Paz 640",
+        "provincia": "San Juan",
+        "localidad": "San Juan"
+      }
+    },
+    {
+      "matricula": "0574",
+      "denominacion": "SOL NACIENTE SEGUROS SOCIEDAD ANONIMA",
+      "cuit": "30682509550",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Las Heras Gral Av. 2126",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0918",
+      "denominacion": "SOLUNION SEGUROS, COMPAÑÍA INTERNACIONAL DE SEGUROS Y REASEGUROS, S.A.",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0922",
+      "denominacion": "SOLVENCIA COMPAÑÍA DE SEGUROS DE RETIRO SOCIEDAD ANÓNIMA.",
+      "cuit": "30716406012",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros de Retiro",
+      "domicilio": {
+        "direccion": "Las Heras Gral Av. 2126",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0953",
+      "denominacion": "SOMPO JAPAN INSURANCE INC",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0786",
+      "denominacion": "STARR INDEMNITY & LIABILITY COMPANY",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0829",
+      "denominacion": "STARR INDEMNITY & LIABILITY COMPANY, SUCURSAL ARGENTINA, DE SEGUROS",
+      "cuit": "30712122478",
+      "tipoSociedad": "Sucursal",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Pellegrini Carlos 1141",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0886",
+      "denominacion": "STARR INSURANCE & REINSURANCE LIMITED",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0934",
+      "denominacion": "STARR INTERNATIONAL (EUROPE) LIMITED",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0805",
+      "denominacion": "STARSTONE INSURANCE SE",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0888",
+      "denominacion": "STELLANTIS INSURANCE COMPAÑIA DE SEGUROS S.A.U.",
+      "cuit": "30715165577",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Vida",
+      "domicilio": {
+        "direccion": "Della Paolera Carlos M. 265",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0665",
+      "denominacion": "SUMICLI  ASOCIACION MUTUAL DE SEGUROS",
+      "cuit": "33690685979",
+      "tipoSociedad": "Mutual",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "R Alvarado 973",
+        "provincia": "Salta",
+        "localidad": "Salta"
+      }
+    },
+    {
+      "matricula": "0595",
+      "denominacion": "SUPERVIELLE SEGUROS S.A.",
+      "cuit": "30682500855",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros de Crédito",
+      "domicilio": {
+        "direccion": "San Martin 344",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0605",
+      "denominacion": "SWISS MEDICAL ART  SAU",
+      "cuit": "33686262869",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "A.R.T.",
+      "domicilio": {
+        "direccion": "Corrientes Av. 1891",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0960",
+      "denominacion": "SWISS RE CORPORATE SOLUTIONS AMERICA INSURANCE CORPORATION",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0742",
+      "denominacion": "SWISS REINSURANCE AMERICA CORPORATION",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0458",
+      "denominacion": "SWISS REINSURANCE COMPANY LTD.",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0935",
+      "denominacion": "TALANX  AG",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0579",
+      "denominacion": "TESTIMONIO COMPAÑÍA DE SEGUROS S.A.",
+      "cuit": "30686244330",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Florida 537",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0947",
+      "denominacion": "THE PEOPLE'S INSURANCE COMPANY OF CHINA (HONG KONG), LIMITED",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0943",
+      "denominacion": "THE TOA REINSURANCE COMPANY OF AMERICA",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0949",
+      "denominacion": "THE UNITED KINGDOM MUTUAL STEAM SHIP ASSURANCE ASSOCIATION",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0940",
+      "denominacion": "THE WEST OF ENGLAND SHIP OWNERS MUTUAL INSURANCE ASSOCIATION (LUXEMBOURG)",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0485",
+      "denominacion": "TOKIO MARINE & NICHIDO FIRE INSURANCE CO LTD",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0568",
+      "denominacion": "TRANSATLANTIC REINSURANCE COMPANY",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0776",
+      "denominacion": "TRAVELERS CASUALTY AND SURETY COMPANY OF AMERICA",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0859",
+      "denominacion": "TRAVELERS PROPERTY CASUALTY COMPANY OF AMERICA",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0578",
+      "denominacion": "TRES PROVINCIAS SEGUROS DE PERSONAS S.A.",
+      "cuit": "30684193038",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Sepelio",
+      "domicilio": {
+        "direccion": "9 de Julio 1475",
+        "provincia": "Mendoza",
+        "localidad": "Mendoza Ciudad"
+      }
+    },
+    {
+      "matricula": "0402",
+      "denominacion": "TRIUNFO COOPERATIVA DE SEGUROS LIMITADA",
+      "cuit": "30500065776",
+      "tipoSociedad": "Cooperativa",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Cerrito 836",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0818",
+      "denominacion": "TT CLUB MUTUAL INSURANCE LIMITED",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0841",
+      "denominacion": "TUTELAR SEGUROS SOCIEDAD ANONIMA",
+      "cuit": "30711442754",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Maipu 215",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0942",
+      "denominacion": "UNITED STATES FIRE INSURANCE COMPANY",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0657",
+      "denominacion": "VIRGINIA SURETY COMPANY, INC.",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0929",
+      "denominacion": "W.R.BERKLEY EUROPE AG",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0229",
+      "denominacion": "WARRANTY INSURANCE COMPANY ARGENTINA DE SEGUROS SOCIEDAD ANÓNIMA",
+      "cuit": "30500050000",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Manso Juana 555",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0976",
+      "denominacion": "WENTWORTH INSURANCE COMPANY LTD.",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0903",
+      "denominacion": "WESTPORT INSURANCE CORPORATION",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0867",
+      "denominacion": "WORANZ COMPAÑÍA DE SEGUROS S.A.",
+      "cuit": "30712162488",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Rivadavia Av. 611",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0743",
+      "denominacion": "XL INSURANCE COMPANY SE",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0970",
+      "denominacion": "XL RE EUROPE SE",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0228",
+      "denominacion": "ZURICH ARGENTINA COMPAÑIA DE SEGUROS SOCIEDAD ANONIMA",
+      "cuit": "30500049770",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Cerrito 1010",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0039",
+      "denominacion": "ZURICH ASEGURADORA ARGENTINA S.A.",
+      "cuit": "30500036393",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Cerrito 1010",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0838",
+      "denominacion": "ZURICH COMPAÑIA DE REASEGUROS ARGENTINA S.A.",
+      "cuit": "30712269282",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Reaseg. Local",
+      "domicilio": {
+        "direccion": "Cerrito 1010",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0456",
+      "denominacion": "ZURICH INSURANCE COMPANY.",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0764",
+      "denominacion": "ZURICH INSURANCE PUBLIC LIMITED COMPANY",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0541",
+      "denominacion": "ZURICH INTERNATIONAL LIFE LIMITED SUCURSAL ARGENTINA",
+      "cuit": "30679657158",
+      "tipoSociedad": "Sucursal",
+      "actividadPrincipal": "Vida",
+      "domicilio": {
+        "direccion": "Cerrito 1010",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    },
+    {
+      "matricula": "0799",
+      "denominacion": "ZURICH LIFE INSURANCE COMPANY LTD.",
+      "cuit": null,
+      "tipoSociedad": "Extranjera",
+      "actividadPrincipal": "Reaseg. Admitida",
+      "domicilio": null
+    },
+    {
+      "matricula": "0692",
+      "denominacion": "ZURICH SANTANDER SEGUROS ARGENTINA S.A.",
+      "cuit": "30698965459",
+      "tipoSociedad": "Sociedad Anónima",
+      "actividadPrincipal": "Seguros Generales",
+      "domicilio": {
+        "direccion": "Corrientes Av. 415",
+        "provincia": "Ciudad Autónoma de Buenos Aires",
+        "localidad": "Ciudad Autonoma Buenos Aires"
+      }
+    }
+  ],
+  "regenerado": "2026-04-28T17:02:10.133Z"
+}

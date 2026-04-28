@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import AseguradorasStep from "./_components/AseguradorasStep";
 
 const LETRADO_CARACTER = ["Apoderado", "Patrocinante", "Apoderado y Patrocinante"];
 const REQ_CONDICION = ["Conductor", "Asegurado", "Propietario", "Conductor y asegurado", "Otro"];
@@ -50,6 +51,17 @@ type Requerido = {
   lesiones: string;
 };
 
+type AseguradoraItem = {
+  requeridoId: string;
+  matricula: string;
+  denominacion: string;
+  cuit: string;
+  domicilio?: { direccion?: string; localidad?: string; provincia?: string } | null;
+  poliza: string;
+  numeroSiniestro: string;
+  domicilioManual: boolean;
+};
+
 async function requireSessionOrRedirect() {
   const { data } = await supabase.auth.getSession();
   if (!data.session) {
@@ -59,7 +71,13 @@ async function requireSessionOrRedirect() {
   return data.session;
 }
 
-const STEP_TITLES = ["Datos letrado requirente", "Requirente", "Requerido/s", "Hecho y reclamo", "Revisión"];
+const STEP_TITLES = [
+  "Datos letrado requirente",
+  "Requirente",
+  "Requerido/s",
+  "Hecho y reclamo",
+  "Revisión",
+];
 
 const REVIEW_WRAP = {
   overflowX: "hidden" as const,
@@ -96,6 +114,7 @@ export default function NuevaMediacionPage() {
   const [requeridos, setRequeridos] = useState<Requerido[]>([
     { id: "1", nombre: "", empresa_nombre_razon_social: "", domicilio: "", lesiones: "" },
   ]);
+  const [aseguradoras, setAseguradoras] = useState<AseguradoraItem[]>([]);
 
   const [objeto_reclamo, setObjeto_reclamo] = useState("");
   const [fecha_hecho, setFecha_hecho] = useState("");
@@ -114,9 +133,22 @@ export default function NuevaMediacionPage() {
     (async () => {
       const session = await requireSessionOrRedirect();
       if (!session) return;
+      const { data: roleData } = await supabase
+        .from("user_roles")
+        .select("is_admin_mediaciones, is_superadmin, is_mediador")
+        .eq("user_id", session.user.id)
+        .maybeSingle();
+      const canCreate =
+        roleData?.is_admin_mediaciones === true ||
+        roleData?.is_superadmin === true ||
+        roleData?.is_mediador === true;
+      if (!canCreate) {
+        router.replace("/app/mediaciones");
+        return;
+      }
       setLoading(false);
     })();
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -151,6 +183,7 @@ export default function NuevaMediacionPage() {
   }
   function removeRequerido(id: string) {
     setRequeridos((prev) => prev.filter((r) => r.id !== id));
+    setAseguradoras((prev) => prev.filter((a) => a.requeridoId !== id));
   }
   function updateRequerido(id: string, field: keyof Requerido, value: string | boolean) {
     setRequeridos((prev) => prev.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
@@ -235,8 +268,31 @@ export default function NuevaMediacionPage() {
       aseguradora_domicilio: null,
       orden: i,
     }));
-    if (reqRows.length > 0) {
-      await supabase.from("mediacion_requeridos").insert(reqRows);
+    const aseguradoraRows = aseguradoras
+      .filter((a) => (a.denominacion || "").trim() !== "")
+      .map((a, i) => {
+        const domicilioDireccion = a.domicilio?.direccion?.trim() || "";
+        const domicilioLocalidad = a.domicilio?.localidad?.trim() || "";
+        const domicilioProvincia = a.domicilio?.provincia?.trim() || "";
+        const domicilioParts = [domicilioDireccion, domicilioLocalidad, domicilioProvincia].filter(Boolean);
+
+        return {
+          mediacion_id: mediacion.id,
+          nombre: "—",
+          empresa_nombre_razon_social: null,
+          condicion: null,
+          domicilio: null,
+          lesiones: null,
+          es_aseguradora: true,
+          aseguradora_nombre: a.denominacion.trim(),
+          aseguradora_domicilio: domicilioParts.length > 0 ? domicilioParts.join(", ") : null,
+          orden: reqRows.length + i,
+        };
+      });
+
+    const requeridosToInsert = [...reqRows, ...aseguradoraRows];
+    if (requeridosToInsert.length > 0) {
+      await supabase.from("mediacion_requeridos").insert(requeridosToInsert);
     }
 
     setSaving(false);
@@ -372,6 +428,7 @@ export default function NuevaMediacionPage() {
                   <div className="field"><input className="input" placeholder="Empresa nombre o razón social" value={r.empresa_nombre_razon_social} onChange={(e) => updateRequerido(r.id, "empresa_nombre_razon_social", e.target.value)} /></div>
                   <div className="field"><input className="input" placeholder="Domicilio" value={r.domicilio} onChange={(e) => updateRequerido(r.id, "domicilio", e.target.value)} /></div>
                   <div className="field"><select className="input" value={r.lesiones} onChange={(e) => updateRequerido(r.id, "lesiones", e.target.value)}><option value="">Lesiones</option>{LESIONES.map((l) => <option key={l} value={l}>{l}</option>)}</select></div>
+                  <AseguradorasStep value={aseguradoras} onChange={setAseguradoras} requeridoId={r.id} />
                 </div>
               ))}
               <button type="button" className="btn" onClick={addRequerido} disabled={requeridos.length >= 3}>+ Agregar otro requerido</button>
@@ -445,6 +502,19 @@ export default function NuevaMediacionPage() {
                       <p style={REVIEW_P}><strong>Empresa:</strong> {r.empresa_nombre_razon_social.trim() || "Empresa nombre o razón social"}</p>
                       <p style={REVIEW_P}><strong>Domicilio:</strong> {r.domicilio.trim() || "Domicilio"}</p>
                       <p style={REVIEW_P}><strong>Lesiones:</strong> {r.lesiones.trim() || "Lesiones"}</p>
+                      {aseguradoras
+                        .filter((a) => a.requeridoId === r.id && a.denominacion.trim())
+                        .map((a, idx) => (
+                          <div key={`${r.id}-${a.matricula}-${a.cuit}-${idx}`} style={{ marginTop: 8, marginLeft: 14 }}>
+                            <p style={REVIEW_P}><strong>Aseguradora:</strong> {a.denominacion}</p>
+                            <p style={REVIEW_P}><strong>Matrícula SSN:</strong> {a.matricula || "—"}</p>
+                            <p style={REVIEW_P}><strong>CUIT:</strong> {a.cuit || "—"}</p>
+                            <p style={REVIEW_P}><strong>Domicilio:</strong> {a.domicilio?.direccion || "—"}</p>
+                            <p style={REVIEW_P}><strong>Localidad / Provincia:</strong> {a.domicilio?.localidad || "—"} / {a.domicilio?.provincia || "—"}</p>
+                            <p style={REVIEW_P}><strong>N° Póliza:</strong> {a.poliza || "—"}</p>
+                            <p style={REVIEW_P}><strong>N° Siniestro:</strong> {a.numeroSiniestro || "—"}</p>
+                          </div>
+                        ))}
                     </div>
                   ))}
                 </div>
@@ -464,6 +534,7 @@ export default function NuevaMediacionPage() {
                 <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>Mecánica del hecho:</strong> {mecanica_hecho || "—"}</p>
                 <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>Intervino:</strong> {intervino || "—"}</p>
                 <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>Lesiones de ambos:</strong> {lesiones_ambos || "—"}</p>
+
               </div>
               <button className="btn primary" onClick={enviarSolicitud} disabled={saving} style={{ padding: "12px 24px", fontSize: 16 }}>{saving ? "Enviando…" : "Enviar solicitud"}</button>
             </div>
