@@ -392,9 +392,7 @@ export default function NuevaCedulaPage() {
       
       // Intentar insertar con tipo_documento primero
       let insertData = { ...baseInsertData };
-      if (tipoDocumento) {
-        insertData.tipo_documento = tipoDocumento;
-      }
+      insertData.tipo = tipoDocumento || "CEDULA";
       
       let { data: created, error: insErr } = await supabase
         .from("cedulas")
