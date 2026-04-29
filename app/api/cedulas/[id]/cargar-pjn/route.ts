@@ -212,6 +212,7 @@ export async function POST(
         jurisdiccion: expData.jurisdiccion,
         cedulaId,
         pdfUrl: signedData.signedUrl,
+        tipo: cedula.tipo,
         descripcion,
       }),
       signal: AbortSignal.timeout(RAILWAY_FETCH_MS),
