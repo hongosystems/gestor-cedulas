@@ -166,6 +166,10 @@ export default function MediacionDetailPage() {
   const [sendingDevolver, setSendingDevolver] = useState(false);
   const [sendingAceptar, setSendingAceptar] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false);
+  const [isAdminMediaciones, setIsAdminMediaciones] = useState(false);
+  const [isSuperadmin, setIsSuperadmin] = useState(false);
+  const [isMediador, setIsMediador] = useState(false);
+  const [currentUid, setCurrentUid] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -173,6 +177,25 @@ export default function MediacionDetailPage() {
       if (!session) return;
 
       const token = session.access_token;
+      const uid = session.user.id;
+      setCurrentUid(uid);
+      const { data: roleData } = await supabase
+        .from("user_roles")
+        .select("is_admin_mediaciones, is_superadmin, is_mediador")
+        .eq("user_id", uid)
+        .maybeSingle();
+      const admin = roleData?.is_admin_mediaciones === true;
+      const superadmin = roleData?.is_superadmin === true;
+      const mediador = roleData?.is_mediador === true;
+      setIsAdminMediaciones(admin);
+      setIsSuperadmin(superadmin);
+      setIsMediador(mediador);
+
+      if (!admin && !superadmin && !mediador) {
+        router.replace("/app");
+        return;
+      }
+
       const res = await fetch(`/api/mediaciones/${id}`, { headers: { Authorization: `Bearer ${token}` } });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -183,7 +206,7 @@ export default function MediacionDetailPage() {
       setMediacion(json.data);
       setLoading(false);
     })();
-  }, [id]);
+  }, [id, router]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -377,8 +400,8 @@ export default function MediacionDetailPage() {
                 <Link href="/app/mediaciones" onClick={() => setMenuOpen(false)} style={linkStyle}>⚖️ Mediaciones</Link>
                 <Link href="/app/mediaciones/nueva" onClick={() => setMenuOpen(false)} style={linkStyle}>➕ Nueva mediación</Link>
                 <Link href="/app/mediaciones/lotes" onClick={() => setMenuOpen(false)} style={linkStyle}>📦 Lotes</Link>
-                <Link href={`/app/mediaciones/${id}/editar`} onClick={() => setMenuOpen(false)} style={linkStyle}>✏️ Editar</Link>
-                <Link href="/superadmin" onClick={() => setMenuOpen(false)} style={linkStyle}>🏠 Inicio</Link>
+                {((isAdminMediaciones || isSuperadmin) || (isMediador && mediacion?.user_id === currentUid)) && <Link href={`/app/mediaciones/${id}/editar`} onClick={() => setMenuOpen(false)} style={linkStyle}>✏️ Editar</Link>}
+                {(isAdminMediaciones || isSuperadmin) && <Link href="/superadmin" onClick={() => setMenuOpen(false)} style={linkStyle}>🏠 Inicio</Link>}
                 <button onClick={() => { setMenuOpen(false); logout(); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 20px", color: "var(--brand-red)", background: "transparent", border: "none", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>🚪 Salir</button>
               </div>
             )}
@@ -407,7 +430,7 @@ export default function MediacionDetailPage() {
                 </div>
               )}
 
-              <Section title="Letrado" open={openLetrado} onToggle={() => setOpenLetrado(!openLetrado)} editHref={`/app/mediaciones/${id}/editar`}>
+              <Section title="Letrado" open={openLetrado} onToggle={() => setOpenLetrado(!openLetrado)} editHref={((isAdminMediaciones || isSuperadmin) || (isMediador && mediacion.user_id === currentUid)) ? `/app/mediaciones/${id}/editar` : undefined}>
                 <p><strong>{mediacion.letrado_nombre || "—"}</strong> {mediacion.letrado_caracter && `(${mediacion.letrado_caracter})`}</p>
                 <p className="muted">Tomo/Folio: {mediacion.letrado_tomo && mediacion.letrado_folio ? `${mediacion.letrado_tomo} / ${mediacion.letrado_folio}` : "—"}</p>
                 <p className="muted">{mediacion.letrado_domicilio || "—"}</p>
@@ -418,7 +441,7 @@ export default function MediacionDetailPage() {
                 title={(mediacion.requirentes || []).length > 1 ? "Requirente/s" : "Requirente"}
                 open={openRequirente}
                 onToggle={() => setOpenRequirente(!openRequirente)}
-                editHref={`/app/mediaciones/${id}/editar`}
+                editHref={((isAdminMediaciones || isSuperadmin) || (isMediador && mediacion.user_id === currentUid)) ? `/app/mediaciones/${id}/editar` : undefined}
               >
                 {(mediacion.requirentes || []).length > 0 ? (
                   <ul style={{ paddingLeft: 20, margin: 0, overflowX: "hidden", wordBreak: "break-word", overflowWrap: "break-word" }}>
@@ -446,22 +469,25 @@ export default function MediacionDetailPage() {
                 )}
               </Section>
 
-              <Section title="Requerido/s" open={openRequeridos} onToggle={() => setOpenRequeridos(!openRequeridos)} editHref={`/app/mediaciones/${id}/editar`}>
+              <Section title="Requerido/s" open={openRequeridos} onToggle={() => setOpenRequeridos(!openRequeridos)} editHref={((isAdminMediaciones || isSuperadmin) || (isMediador && mediacion.user_id === currentUid)) ? `/app/mediaciones/${id}/editar` : undefined}>
                 {(mediacion.requeridos || []).length === 0 ? <p className="muted">—</p> : (
                   <ul style={{ paddingLeft: 20, margin: 0, overflowX: "hidden", wordBreak: "break-word", overflowWrap: "break-word" }}>
                     {(mediacion.requeridos || []).map((r: any, i: number) => (
                       <li key={r.id || i}>
                         {r.nombre}
-                        {r.empresa_nombre_razon_social && ` · ${r.empresa_nombre_razon_social}`}
+                        {r.condicion && ` · Condición: ${r.condicion}`}
                         {r.domicilio && ` · Domicilio: ${r.domicilio}`}
                         {r.lesiones && ` · Lesiones: ${r.lesiones}`}
+                        {r.empresa_nombre_razon_social && ` · Empresa: ${r.empresa_nombre_razon_social}`}
+                        {r.es_aseguradora && r.aseguradora_nombre && ` · Aseguradora: ${r.aseguradora_nombre}`}
+                        {r.es_aseguradora && r.aseguradora_nombre && r.aseguradora_domicilio && ` · Domicilio Aseguradora: ${r.aseguradora_domicilio}`}
                       </li>
                     ))}
                   </ul>
                 )}
               </Section>
 
-              <Section title="Hecho y reclamo" open={openHecho} onToggle={() => setOpenHecho(!openHecho)} editHref={`/app/mediaciones/${id}/editar`}>
+              <Section title="Hecho y reclamo" open={openHecho} onToggle={() => setOpenHecho(!openHecho)} editHref={((isAdminMediaciones || isSuperadmin) || (isMediador && mediacion.user_id === currentUid)) ? `/app/mediaciones/${id}/editar` : undefined}>
                 <div style={{ overflowX: "hidden", wordBreak: "break-word", overflowWrap: "break-word" }}>
                   <p><strong>Objeto:</strong> {mediacion.objeto_reclamo || "—"}</p>
                   <p className="muted">Fecha: {formatDate(mediacion.fecha_hecho)} · Lugar: {mediacion.lugar_hecho || "—"}</p>
@@ -486,7 +512,7 @@ export default function MediacionDetailPage() {
               </Section>
 
               {/* Acciones por estado */}
-              <div style={{ marginTop: 24, display: "flex", flexWrap: "wrap", gap: 12 }}>
+              {((isAdminMediaciones || isSuperadmin) || (isMediador && mediacion.user_id === currentUid)) && <div style={{ marginTop: 24, display: "flex", flexWrap: "wrap", gap: 12 }}>
                 {(mediacion.estado === "pendiente_rta" || mediacion.estado === "reenviado") && (
                   <>
                     <button className="btn" onClick={() => setModalDevolver(true)}>Devolver con observaciones</button>
@@ -502,7 +528,7 @@ export default function MediacionDetailPage() {
                     <button type="button" className="btn primary" onClick={descargarPdf}>Descargar PDF</button>
                   </>
                 )}
-              </div>
+              </div>}
             </div>
 
             {/* Timeline historial */}
