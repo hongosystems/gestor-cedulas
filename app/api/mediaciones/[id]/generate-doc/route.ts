@@ -139,10 +139,19 @@ function buildFormularioMediacionPdf(mediacion: any, requeridos: any[], requiren
     line(`- Nombre y Apellido: ${v(r.nombre)}`, false, 11);
     line(`(Empresa nombre o razón social): ${v(r.empresa_nombre_razon_social)}`, false, 11);
     y += 2;
+    line(`Condición: ${v(r.condicion)}`, false, 11);
+    y += 2;
     line(`Domicilio: ${v(r.domicilio)}`, false, 11);
     y += 2;
     const lesionesTexto = r.lesiones == null || String(r.lesiones).trim() === "" ? "Lesiones" : String(r.lesiones);
     line(`Lesiones: ${lesionesTexto}`, false, 11);
+    y += 2;
+    if (r.es_aseguradora && v(r.aseguradora_nombre)) {
+      line(`Aseguradora: ${v(r.aseguradora_nombre)}`, false, 11);
+      if (v(r.aseguradora_domicilio)) {
+        line(`Domicilio Aseguradora: ${v(r.aseguradora_domicilio)}`, false, 11);
+      }
+    }
     y += 4;
   }
 

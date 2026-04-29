@@ -27,7 +27,6 @@ export async function GET(req: NextRequest) {
     const svc = supabaseService();
 
     let storagePath: string;
-    let filename: string;
 
     if (documentoId) {
       const { data: doc, error: docErr } = await svc
@@ -56,7 +55,6 @@ export async function GET(req: NextRequest) {
       }
 
       storagePath = doc.storage_path;
-      filename = `mediacion-doc-${doc.mediacion_id}.pdf`;
     } else if (mediacionId) {
       const { data: med, error: medErr } = await svc
         .from("mediaciones")
@@ -86,29 +84,19 @@ export async function GET(req: NextRequest) {
       }
 
       storagePath = latest.storage_path;
-      filename = `mediacion-${mediacionId}.pdf`;
     } else {
       return new NextResponse("Indique documento_id o mediacion_id", { status: 400 });
     }
 
-    const { data: fileData, error: downloadErr } = await svc.storage
+    const { data: signed, error: signErr } = await svc.storage
       .from("mediaciones")
-      .download(storagePath);
+      .createSignedUrl(storagePath, 60 * 60);
 
-    if (downloadErr || !fileData) {
-      return new NextResponse("Error al descargar el archivo", { status: 500 });
+    if (signErr || !signed?.signedUrl) {
+      return new NextResponse("Error al generar enlace de descarga", { status: 500 });
     }
 
-    const arrayBuffer = await fileData.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-
-    return new NextResponse(buffer, {
-      headers: {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${filename}"`,
-        "Content-Length": buffer.length.toString(),
-      },
-    });
+    return NextResponse.redirect(signed.signedUrl);
   } catch (e: any) {
     console.error("[mediaciones/download]", e);
     return new NextResponse("Error interno", { status: 500 });

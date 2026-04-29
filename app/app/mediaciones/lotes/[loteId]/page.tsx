@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
@@ -38,23 +38,43 @@ async function requireSessionOrRedirect() {
 
 export default function LoteDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const loteId = params.loteId as string;
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
   const [lote, setLote] = useState<Lote | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [enviando, setEnviando] = useState(false);
+  const [descargandoTodos, setDescargandoTodos] = useState(false);
 
   useEffect(() => {
     (async () => {
       const session = await requireSessionOrRedirect();
       if (!session) return;
+      const { data: roleData } = await supabase
+        .from("user_roles")
+        .select("is_admin_mediaciones, is_superadmin, is_mediador")
+        .eq("user_id", session.user.id)
+        .maybeSingle();
+      const canAccess =
+        roleData?.is_admin_mediaciones === true ||
+        roleData?.is_superadmin === true ||
+        roleData?.is_mediador === true;
+      if (!canAccess) {
+        router.replace("/app/mediaciones");
+        return;
+      }
 
       const res = await fetch(`/api/mediaciones/lotes/${loteId}`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (res.status === 403) {
+          setMsg(json.error || "No autorizado para este lote");
+          setTimeout(() => router.replace("/app/mediaciones"), 1200);
+          return;
+        }
         setMsg(json.error || "Lote no encontrado");
         setLoading(false);
         return;
@@ -62,7 +82,7 @@ export default function LoteDetailPage() {
       setLote(json.data);
       setLoading(false);
     })();
-  }, [loteId]);
+  }, [loteId, router]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -87,6 +107,54 @@ export default function LoteDetailPage() {
       return;
     }
     setLote((prev) => (prev ? { ...prev, estado: "enviado", fecha_envio: json.data?.fecha_envio || new Date().toISOString() } : null));
+  }
+
+  async function reenviarLote() {
+    const session = await requireSessionOrRedirect();
+    if (!session || !lote) return;
+    const ok = window.confirm("¿Seguro que querés reenviar este lote?");
+    if (!ok) return;
+    setEnviando(true);
+    setMsg("");
+    const res = await fetch("/api/mediaciones/lotes/send", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ lote_id: loteId }),
+    });
+    const json = await res.json().catch(() => ({}));
+    setEnviando(false);
+    if (!res.ok) {
+      setMsg(json.error || "Error al reenviar lote");
+      return;
+    }
+    setLote((prev) =>
+      prev
+        ? { ...prev, estado: "enviado", fecha_envio: json.data?.fecha_envio || new Date().toISOString() }
+        : null
+    );
+    setMsg(json.message || "Lote reenviado correctamente.");
+  }
+
+  function descargarPdfMediacion(mediacionId: string) {
+    window.open(`/api/mediaciones/download?mediacion_id=${encodeURIComponent(mediacionId)}`, "_blank", "noopener,noreferrer");
+  }
+
+  async function descargarTodos() {
+    if (!lote?.items?.length) return;
+    setDescargandoTodos(true);
+    setMsg("");
+    try {
+      for (const item of lote.items) {
+        if (!item?.mediacion_id) continue;
+        window.open(`/api/mediaciones/download?mediacion_id=${encodeURIComponent(item.mediacion_id)}`, "_blank", "noopener,noreferrer");
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    } finally {
+      setDescargandoTodos(false);
+    }
   }
 
   async function logout() {
@@ -143,6 +211,9 @@ export default function LoteDetailPage() {
           {lote.estado === "abierto" && (
             <button className="btn primary" onClick={marcarEnviado} disabled={enviando}>{enviando ? "…" : "Marcar como enviado"}</button>
           )}
+          {lote.estado === "enviado" && (
+            <button className="btn primary" onClick={reenviarLote} disabled={enviando}>{enviando ? "…" : "Reenviar lote"}</button>
+          )}
           <Link className="btn" href="/app/mediaciones/lotes">Volver a lotes</Link>
         </header>
 
@@ -154,6 +225,11 @@ export default function LoteDetailPage() {
           <p className="muted" style={{ marginBottom: 24, whiteSpace: "pre-wrap" }}><strong>Texto mail:</strong><br />{lote.texto_mail || "—"}</p>
 
           <h3 style={{ marginBottom: 8 }}>Mediaciones en el lote</h3>
+          <div style={{ marginBottom: 12 }}>
+            <button className="btn" onClick={descargarTodos} disabled={descargandoTodos || (lote.items || []).length === 0}>
+              {descargandoTodos ? "Descargando…" : "Descargar todos"}
+            </button>
+          </div>
           <div className="tableWrap">
             <table className="table">
               <thead>
@@ -162,6 +238,7 @@ export default function LoteDetailPage() {
                   <th>Requirente</th>
                   <th>Objeto</th>
                   <th>Estado</th>
+                  <th>PDF</th>
                   <th></th>
                 </tr>
               </thead>
@@ -172,12 +249,19 @@ export default function LoteDetailPage() {
                     <td>{item.mediaciones?.req_nombre || "—"}</td>
                     <td style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.mediaciones?.objeto_reclamo || "—"}</td>
                     <td>{item.mediaciones?.estado || "—"}</td>
+                    <td>
+                      {item.documento_id ? (
+                        <button className="btn" onClick={() => descargarPdfMediacion(item.mediacion_id)}>Descargar PDF</button>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
                     <td><Link className="btn" href={`/app/mediaciones/${item.mediacion_id}`}>Ver mediación</Link></td>
                   </tr>
                 ))}
                 {(lote.items || []).length === 0 && (
                   <tr>
-                    <td colSpan={5} className="muted">No hay mediaciones en este lote. Agregá desde el detalle de cada mediación («Agregar a lote»).</td>
+                    <td colSpan={6} className="muted">No hay mediaciones en este lote. Agregá desde el detalle de cada mediación («Agregar a lote»).</td>
                   </tr>
                 )}
               </tbody>

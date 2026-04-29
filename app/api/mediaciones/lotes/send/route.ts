@@ -87,9 +87,7 @@ export async function POST(req: NextRequest) {
       if (error || !data) {
         return NextResponse.json({ error: "Lote no encontrado" }, { status: 404 });
       }
-      if (data.estado === "enviado") {
-        return NextResponse.json({ ok: true, data: data, message: "Lote ya estaba enviado" });
-      }
+      // Permitir reenvío de lotes ya enviados (no bloquear)
       lote = data;
     } else {
       const { data } = await svc
