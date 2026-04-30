@@ -27,6 +27,8 @@ type Notif = {
     cedula_id?: string;
     sender_id?: string;
     transfer_id?: string;
+    orden_id?: string;
+    expediente_ref?: string;
     doc_type?: "CEDULA" | "OFICIO" | "OTROS_ESCRITOS";
     title?: string | null;
   } | null;
@@ -56,6 +58,41 @@ function fmtTime(iso: string) {
   return `${dd}/${mm}/${yy} ${hh}:${mi}`;
 }
 
+function isUuidLike(value: string | null | undefined) {
+  if (!value) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+function parsePjnCaseKey(raw: string | null | undefined): { jurisdiccion: string; numero: string; anio: number } | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  const match = trimmed.match(/^([A-Z]{2,6})\s+0*([0-9]+)\/([0-9]{4})$/i);
+  if (!match) return null;
+  return {
+    jurisdiccion: match[1].toUpperCase(),
+    numero: String(Number(match[2])),
+    anio: Number(match[3]),
+  };
+}
+
+function stripLeadingZeros(value: string | null | undefined) {
+  if (!value) return "";
+  return value.replace(/^0+/, "") || "0";
+}
+
+function parseMetadataSafe(rawMetadata: unknown) {
+  let metadata = rawMetadata;
+  // Doble-parse: si después del primer parse sigue siendo string, parsear de nuevo.
+  if (typeof metadata === "string") {
+    try { metadata = JSON.parse(metadata); } catch {}
+  }
+  if (typeof metadata === "string") {
+    try { metadata = JSON.parse(metadata); } catch {}
+  }
+  if (metadata && typeof metadata === "object") return metadata as Record<string, any>;
+  return {};
+}
+
 export default function NotificacionesPage() {
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<Notif[]>([]);
@@ -67,6 +104,7 @@ export default function NotificacionesPage() {
   const [replyText, setReplyText] = useState<string>("");
   const [replyFile, setReplyFile] = useState<File | null>(null);
   const [replying, setReplying] = useState(false);
+  const [ordenPdfUrl, setOrdenPdfUrl] = useState<string | null>(null);
   const [expedienteInfo, setExpedienteInfo] = useState<{
     caratula?: string | null;
     juzgado?: string | null;
@@ -145,20 +183,12 @@ export default function NotificacionesPage() {
         if (mounted) {
           // Parsear metadata si viene como string JSON
           const parsedData = (data ?? []).map((item: any) => {
-            let parsedMetadata = item.metadata;
-            if (typeof item.metadata === 'string') {
-              try {
-                parsedMetadata = JSON.parse(item.metadata);
-              } catch (e) {
-                console.error("Error parseando metadata:", e, item.metadata);
-                parsedMetadata = {};
-              }
-            }
+            const parsedMetadata = parseMetadataSafe(item.metadata);
             console.log("[Notificaciones] Item parseado:", {
               id: item.id,
               title: item.title,
               metadata: parsedMetadata,
-              metadataType: typeof item.metadata,
+              metadataType: typeof parsedMetadata,
               nota_context: item.nota_context,
               nota_context_length: item.nota_context?.length || 0
             });
@@ -201,6 +231,11 @@ export default function NotificacionesPage() {
   }, [items, filter]);
 
   const unreadCount = items.filter((n) => !n.is_read).length;
+  const selectedMeta = (() => {
+    if (!selectedNotif?.metadata) return {};
+    return parseMetadataSafe(selectedNotif.metadata);
+  })();
+  const isAutoPericia = (selectedMeta as any).source === "auto_pericia";
 
   async function markRead(id: string) {
     if (processingIds.has(id)) return;
@@ -311,6 +346,63 @@ export default function NotificacionesPage() {
     setReplyText("");
     setReplyFile(null);
     setExpedienteInfo(null);
+    setOrdenPdfUrl(null);
+    // Resolución por case_ref para notificaciones automáticas de pericia
+    const meta = parseMetadataSafe(notif.metadata);
+    let expedienteInfoResolvedByCaseRef = false;
+    
+    if (meta.case_ref) {
+      const parts = String(meta.case_ref).split("/");
+      if (parts.length === 2) {
+        const [numero, anio] = parts;
+        try {
+          const { data: favData } = await supabase
+            .from("pjn_favoritos")
+            .select("caratula, juzgado, numero, anio")
+            .eq("numero", numero.trim())
+            .eq("anio", anio.trim())
+            .limit(1)
+            .maybeSingle();
+          
+          if (favData) {
+            setExpedienteInfo({
+              caratula: favData.caratula || null,
+              juzgado: favData.juzgado || null,
+              numero: `${favData.numero}/${favData.anio}`,
+            });
+            expedienteInfoResolvedByCaseRef = true;
+            // Si resolvió por case_ref, no necesita los demás fallbacks para expedienteInfo
+            // pero sigue con la carga del hilo de mensajes normalmente
+          }
+        } catch (err) {
+          console.warn("Error buscando pjn_favorito por case_ref:", err);
+        }
+      }
+    }
+    if ((meta as any).source === "auto_pericia" && (meta as any).orden_id) {
+      try {
+        const { data: orden } = await supabase
+          .from("ordenes_medicas")
+          .select("storage_path")
+          .eq("id", (meta as any).orden_id)
+          .maybeSingle();
+
+        if (orden?.storage_path) {
+          const { data: signedUrlData } = await supabase.storage
+            .from("ordenes-medicas")
+            .createSignedUrl(orden.storage_path, 3600);
+          setOrdenPdfUrl(signedUrlData?.signedUrl || null);
+        } else {
+          setOrdenPdfUrl(null);
+        }
+      } catch (err) {
+        console.warn("Error obteniendo PDF de orden:", err);
+        setOrdenPdfUrl(null);
+      }
+    }
+    // Usar un mensaje del hilo con mejor contexto de expediente/cédula si el seleccionado no lo trae.
+    let contextNotif: Notif = notif;
+    let resolutionThreadData: Notif[] = [notif];
 
     // Cargar todas las notificaciones del hilo (thread_id) para mostrar el historial completo
     const { data: sess } = await supabase.auth.getSession();
@@ -327,14 +419,7 @@ export default function NotificacionesPage() {
         if (threadData) {
         // Parsear metadata para cada mensaje del hilo
         const parsedThreadData = threadData.map((item: any) => {
-          let parsedMetadata = item.metadata;
-          if (typeof item.metadata === 'string') {
-            try {
-              parsedMetadata = JSON.parse(item.metadata);
-            } catch (e) {
-              parsedMetadata = {};
-            }
-          }
+          const parsedMetadata = parseMetadataSafe(item.metadata);
           return {
             ...item,
             metadata: parsedMetadata || {},
@@ -342,6 +427,34 @@ export default function NotificacionesPage() {
           };
         });
         setThreadMessages(parsedThreadData as Notif[]);
+        resolutionThreadData = parsedThreadData as Notif[];
+        // Fallback fuerte: tomar datos de expediente desde cualquier metadata del hilo.
+        const threadInfoCandidate = parsedThreadData.find((item: any) => {
+          const meta = item?.metadata && typeof item.metadata === "object" ? item.metadata : {};
+          return Boolean(meta?.caratula || meta?.juzgado || meta?.numero);
+        });
+        if (threadInfoCandidate) {
+          const threadMeta = (threadInfoCandidate.metadata || {}) as any;
+          setExpedienteInfo({
+            caratula: threadMeta.caratula || null,
+            juzgado: threadMeta.juzgado || null,
+            numero: threadMeta.numero || null,
+          });
+        }
+        const notifWithContext = parsedThreadData.find((item: any) => {
+          const meta = (item?.metadata && typeof item.metadata === "object") ? item.metadata : {};
+          return Boolean(
+            item?.expediente_id ||
+            item?.link ||
+            meta?.cedula_id ||
+            meta?.caratula ||
+            meta?.juzgado ||
+            meta?.numero
+          );
+        });
+        if (notifWithContext) {
+          contextNotif = notifWithContext as Notif;
+        }
         
         // Cargar nombres de usuario únicos del hilo usando sender_id de metadata
         const uniqueSenderIds = [
@@ -376,36 +489,78 @@ export default function NotificacionesPage() {
         setThreadUserNames(namesMap);
       } else {
         setThreadMessages([notif]);
+        resolutionThreadData = [notif];
         setThreadUserNames({ [uid || ""]: currentUserName || "Tú" });
       }
     } else {
       // Si no hay thread_id, mostrar solo esta notificación
       setThreadMessages([notif]);
+      resolutionThreadData = [notif];
       if (uid) {
         setThreadUserNames({ [uid]: currentUserName || "Tú" });
       }
     }
 
+    if (expedienteInfoResolvedByCaseRef) {
+      return;
+    }
+
+    // Fuente principal robusta: resolver contexto en backend con acceso consolidado.
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess.session?.access_token;
+      if (token) {
+        const res = await fetch("/api/notifications/context", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            notification_id: notif.id,
+            thread_id: notif.thread_id || null,
+          }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (res.ok && json?.data) {
+          setExpedienteInfo({
+            caratula: json.data.caratula || null,
+            juzgado: json.data.juzgado || null,
+            numero: json.data.numero || null,
+          });
+          return;
+        }
+      }
+    } catch (err) {
+      console.error("Error resolviendo contexto de notificacion:", err);
+    }
+
     // Intentar obtener información del expediente de varias formas
-    let expedienteId = notif.expediente_id;
-    let isPjn = notif.is_pjn_favorito;
+    let expedienteId = contextNotif.expediente_id;
+    let isPjn = contextNotif.is_pjn_favorito;
 
     // Si no hay expediente_id, intentar extraerlo del link o body
-    if (!expedienteId && notif.link) {
+    if (!expedienteId && contextNotif.link) {
       // El link puede tener formato:
       // - /superadmin/mis-juzgados#pjn_123 (PJN favorito)
       // - /superadmin/mis-juzgados#123 (expediente)
       // - /app#cedula_id (cédula/oficio)
-      if (notif.link.startsWith("/app#")) {
+      if (contextNotif.link.startsWith("/app#")) {
         // Es una cédula
-        const hashMatch = notif.link.match(/#([a-f0-9-]+)$/i);
+        const hashMatch = contextNotif.link.match(/#([a-f0-9-]+)$/i);
         if (hashMatch) {
           expedienteId = hashMatch[1];
           isPjn = false;
         }
+      } else if (contextNotif.link.startsWith("/prueba-pericia#")) {
+        const hashMatch = contextNotif.link.match(/#(pjn_)?(.+)$/i);
+        if (hashMatch) {
+          expedienteId = hashMatch[1] ? `pjn_${hashMatch[2]}` : hashMatch[2];
+          isPjn = !!hashMatch[1];
+        }
       } else {
         // Es un expediente o PJN favorito
-        const hashMatch = notif.link.match(/#(pjn_)?([a-f0-9-]+)$/i);
+        const hashMatch = contextNotif.link.match(/#(pjn_)?([a-f0-9-]+)$/i);
         if (hashMatch) {
           expedienteId = hashMatch[1] ? hashMatch[0].substring(1) : hashMatch[2];
           isPjn = !!hashMatch[1];
@@ -414,13 +569,13 @@ export default function NotificacionesPage() {
     }
 
     // Si aún no hay expediente_id, intentar extraer del body (buscar carátula mencionada)
-    if (!expedienteId && notif.body) {
+    if (!expedienteId && contextNotif.body) {
       // Buscar tanto en expedientes como en cédulas
-      const caratulaMatch = notif.body.match(/(?:expediente|cedula|oficio)\s+"([^"]+)"/i);
+      const caratulaMatch = contextNotif.body.match(/(?:expediente|cedula|oficio)\s+"([^"]+)"/i);
       if (caratulaMatch) {
         const caratulaBuscada = caratulaMatch[1];
         // Primero intentar buscar en cédulas (si el body menciona "cédula/oficio")
-        if (notif.body.toLowerCase().includes("cédula") || notif.body.toLowerCase().includes("oficio")) {
+        if (contextNotif.body.toLowerCase().includes("cédula") || contextNotif.body.toLowerCase().includes("oficio")) {
           try {
             const { data: cedula } = await supabase
               .from("cedulas")
@@ -470,19 +625,138 @@ export default function NotificacionesPage() {
     }
 
     // Verificar si es una cédula usando metadata PRIMERO (antes de buscar en expedientes)
-    const metadata = notif.metadata || {};
-    const isCedula = metadata.cedula_id || (notif.link && notif.link.startsWith("/app#"));
+    const metadata = contextNotif.metadata || {};
+    if (!expedienteId && metadata.expediente_ref) {
+      expedienteId = metadata.expediente_ref;
+    }
+    if (metadata.is_pjn_favorito !== undefined) {
+      isPjn = !!metadata.is_pjn_favorito;
+    }
+    const isCedula = metadata.cedula_id || (contextNotif.link && contextNotif.link.startsWith("/app#"));
+
+    // Notificaciones con link a órdenes médicas (legacy): /prueba-pericia?tab=ordenes&orden_id=...
+    const ordenIdFromLinkMatch = contextNotif.link?.match(/[?&]orden_id=([^&#]+)/i);
+    const ordenIdFromLink = ordenIdFromLinkMatch?.[1] || metadata.orden_id;
+    if (ordenIdFromLink) {
+      try {
+        const { data: orden } = await supabase
+          .from("ordenes_medicas")
+          .select(`
+            case_ref,
+            expediente_id,
+            expedientes:expediente_id (
+              caratula,
+              juzgado,
+              numero_expediente
+            )
+          `)
+          .eq("id", ordenIdFromLink)
+          .maybeSingle();
+
+        if (orden) {
+          const expRel = (orden as any).expedientes;
+          if (expRel) {
+            setExpedienteInfo({
+              caratula: expRel.caratula || orden.case_ref || null,
+              juzgado: expRel.juzgado || null,
+              numero: expRel.numero_expediente || orden.case_ref || null,
+            });
+            return;
+          }
+          if (orden.case_ref) {
+            setExpedienteInfo({
+              caratula: orden.case_ref,
+              juzgado: null,
+              numero: orden.case_ref,
+            });
+            return;
+          }
+        }
+      } catch (err) {
+        console.error("Error al resolver expediente desde orden_id del link:", err);
+      }
+    }
+
+    // Notificaciones de órdenes médicas: resolver expediente desde orden_id
+    if (metadata.orden_id && !metadata.caratula && !metadata.juzgado) {
+      try {
+        const { data: orden } = await supabase
+          .from("ordenes_medicas")
+          .select(`
+            case_ref,
+            expediente_id,
+            expedientes:expediente_id (
+              caratula,
+              juzgado,
+              numero_expediente
+            )
+          `)
+          .eq("id", metadata.orden_id)
+          .maybeSingle();
+
+        if (orden) {
+          const expRel = (orden as any).expedientes;
+          if (expRel) {
+            setExpedienteInfo({
+              caratula: expRel.caratula || orden.case_ref || null,
+              juzgado: expRel.juzgado || null,
+              numero: expRel.numero_expediente || orden.case_ref || null,
+            });
+            return;
+          }
+          if (orden.case_ref) {
+            setExpedienteInfo({
+              caratula: orden.case_ref,
+              juzgado: null,
+              numero: orden.case_ref,
+            });
+            return;
+          }
+        }
+      } catch (err) {
+        console.error("Error al obtener datos de orden médica:", err);
+      }
+    }
     
     // Si tenemos expediente_id, obtener la información
     if (expedienteId) {
       try {
         if (isPjn) {
-          const pjnId = expedienteId.replace(/^pjn_/, "");
-          const { data: pjnFav } = await supabase
-            .from("pjn_favoritos")
-            .select("caratula, juzgado, numero")
-            .eq("id", pjnId)
-            .single();
+          const pjnRef = expedienteId.replace(/^pjn_/, "");
+          let pjnFav: any = null;
+          if (isUuidLike(pjnRef)) {
+            const { data } = await supabase
+              .from("pjn_favoritos")
+              .select("caratula, juzgado, numero")
+              .eq("id", pjnRef)
+              .maybeSingle();
+            pjnFav = data;
+          } else {
+            const parsed = parsePjnCaseKey(pjnRef);
+            if (parsed) {
+              // Intento 1: número sin ceros (normalizado)
+              let { data } = await supabase
+                .from("pjn_favoritos")
+                .select("caratula, juzgado, numero")
+                .eq("jurisdiccion", parsed.jurisdiccion)
+                .eq("anio", parsed.anio)
+                .eq("numero", parsed.numero)
+                .maybeSingle();
+              // Intento 2: número con padding a 6 (dataset histórico)
+              if (!data) {
+                const padded = parsed.numero.padStart(6, "0");
+                const retry = await supabase
+                  .from("pjn_favoritos")
+                  .select("caratula, juzgado, numero")
+                  .eq("jurisdiccion", parsed.jurisdiccion)
+                  .eq("anio", parsed.anio)
+                  .eq("numero", padded)
+                  .maybeSingle();
+                data = retry.data;
+              }
+              pjnFav = data;
+            }
+          }
           
           if (pjnFav) {
             setExpedienteInfo({
@@ -511,11 +785,31 @@ export default function NotificacionesPage() {
           }
         } else {
           // Es un expediente local - SOLO buscar aquí si NO es cédula
-          const { data: exp } = await supabase
-            .from("expedientes")
-            .select("caratula, juzgado, numero_expediente")
-            .eq("id", expedienteId)
-            .single();
+          let exp: any = null;
+          if (isUuidLike(expedienteId)) {
+            const { data } = await supabase
+              .from("expedientes")
+              .select("caratula, juzgado, numero_expediente")
+              .eq("id", expedienteId)
+              .maybeSingle();
+            exp = data;
+          } else {
+            const numeroSinCeros = stripLeadingZeros(expedienteId);
+            let { data } = await supabase
+              .from("expedientes")
+              .select("caratula, juzgado, numero_expediente")
+              .eq("numero_expediente", expedienteId)
+              .maybeSingle();
+            if (!data && numeroSinCeros !== expedienteId) {
+              const retry = await supabase
+                .from("expedientes")
+                .select("caratula, juzgado, numero_expediente")
+                .eq("numero_expediente", numeroSinCeros)
+                .maybeSingle();
+              data = retry.data;
+            }
+            exp = data;
+          }
           
           if (exp) {
             setExpedienteInfo({
@@ -541,6 +835,66 @@ export default function NotificacionesPage() {
       // Si no hay expediente_id pero hay metadata, usar la metadata directamente
       setExpedienteInfo({
         caratula: metadata.caratula || null,
+        juzgado: metadata.juzgado || null,
+        numero: metadata.numero || null,
+      });
+      return;
+    }
+
+    // Último fallback: inferir número de expediente y resolver contra BD.
+    const bodyText = contextNotif.body || "";
+    const titleText = contextNotif.title || "";
+    const combinedText = resolutionThreadData
+      .map((msg) => `${msg.title || ""}\n${msg.body || ""}\n${msg.nota_context || ""}`)
+      .join("\n")
+      .trim() || `${titleText}\n${bodyText}`;
+    const numeroMatch = combinedText.match(/\b(\d{1,7})\s*\/\s*(\d{4})\b/);
+    if (numeroMatch) {
+      const numeroRaw = numeroMatch[1];
+      const anio = numeroMatch[2];
+      const numeroNormalizado = `${stripLeadingZeros(numeroRaw)}/${anio}`;
+      const numeroConCeros = `${numeroRaw.padStart(6, "0")}/${anio}`;
+      try {
+        let { data: exp } = await supabase
+          .from("expedientes")
+          .select("caratula, juzgado, numero_expediente")
+          .ilike("numero_expediente", `%${numeroNormalizado}%`)
+          .limit(1)
+          .maybeSingle();
+
+        if (!exp) {
+          const retry = await supabase
+            .from("expedientes")
+            .select("caratula, juzgado, numero_expediente")
+            .ilike("numero_expediente", `%${numeroConCeros}%`)
+            .limit(1)
+            .maybeSingle();
+          exp = retry.data;
+        }
+
+        if (exp) {
+          setExpedienteInfo({
+            caratula: exp.caratula,
+            juzgado: exp.juzgado,
+            numero: exp.numero_expediente,
+          });
+          return;
+        }
+      } catch (err) {
+        console.error("Error al buscar expediente por número inferido:", err);
+      }
+    }
+
+    // Fallback textual controlado: solo si el body trae carátula explícita.
+    const quotedCase =
+      combinedText.match(/(?:expediente|cedula|cédula|oficio)\s+"([^"]+)"/i)?.[1] ||
+      combinedText.match(/(?:del|de la)\s+(?:expediente|oficio|cédula|cedula)\s+([^.,\n]+)/i)?.[1] ||
+      null;
+    const inferredCaratula = quotedCase;
+
+    if (inferredCaratula) {
+      setExpedienteInfo({
+        caratula: inferredCaratula,
         juzgado: metadata.juzgado || null,
         numero: metadata.numero || null,
       });
@@ -753,15 +1107,7 @@ export default function NotificacionesPage() {
             if (data) {
               // Parsear metadata si viene como string JSON
               const parsedData = data.map((item: any) => {
-                let parsedMetadata = item.metadata;
-                if (typeof item.metadata === 'string') {
-                  try {
-                    parsedMetadata = JSON.parse(item.metadata);
-                  } catch (e) {
-                    console.error("Error parseando metadata:", e, item.metadata);
-                    parsedMetadata = {};
-                  }
-                }
+                const parsedMetadata = parseMetadataSafe(item.metadata);
                 console.log("[Notificaciones] Item recargado después de responder:", {
                   id: item.id,
                   title: item.title,
@@ -790,14 +1136,7 @@ export default function NotificacionesPage() {
                 
                 if (threadData) {
                   const parsedThreadData = threadData.map((item: any) => {
-                    let parsedMetadata = item.metadata;
-                    if (typeof item.metadata === 'string') {
-                      try {
-                        parsedMetadata = JSON.parse(item.metadata);
-                      } catch (e) {
-                        parsedMetadata = {};
-                      }
-                    }
+                    const parsedMetadata = parseMetadataSafe(item.metadata);
                     return {
                       ...item,
                       metadata: parsedMetadata || {},
@@ -1301,9 +1640,15 @@ export default function NotificacionesPage() {
                           <div style={{ 
                             fontSize: 12, 
                             fontWeight: 600, 
-                            color: isMyMsg ? "rgba(96,141,186,.9)" : "rgba(234,243,255,.8)" 
+                            color: isMyMsg
+                              ? "rgba(96,141,186,.9)"
+                              : (isAutoPericia ? "rgba(241,196,15,.9)" : "rgba(234,243,255,.8)"),
+                            fontSize: isAutoPericia && !isMyMsg ? 12 : 12,
+                            fontWeight: isAutoPericia && !isMyMsg ? 600 : 600,
                           }}>
-                            {isMyMsg ? "Tú" : userName}
+                            {isMyMsg
+                              ? "Tú"
+                              : (isAutoPericia ? "🤖 NO RESPONDER - PJN AUTOMÁTICO" : userName)}
                           </div>
                           <div style={{ 
                             fontSize: 11, 
@@ -1427,134 +1772,165 @@ export default function NotificacionesPage() {
                   </div>
                 ) : (
                   // Es una notificación de expediente/cédula normal
-                  <div style={{
-                    padding: 16,
-                    background: "rgba(96,141,186,.1)",
-                    borderRadius: 8,
-                    border: "1px solid rgba(96,141,186,.2)"
-                  }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: "rgba(234,243,255,.8)", marginBottom: 8 }}>
-                      Información del expediente:
-                    </div>
-                    <div style={{ fontSize: 13, color: "rgba(234,243,255,.9)", lineHeight: 1.8 }}>
-                      {/* Usar metadata si existe, sino usar expedienteInfo cargado dinámicamente */}
-                      {(() => {
-                        const info = selectedNotif.metadata && Object.keys(selectedNotif.metadata).length > 0 
-                          ? selectedNotif.metadata 
-                          : expedienteInfo;
-                        
-                        return (
-                          <>
-                            {info?.caratula ? (
-                              <div style={{ marginBottom: 6 }}><strong>Carátula:</strong> {info.caratula}</div>
-                            ) : (
-                              <div style={{ marginBottom: 6, color: "rgba(234,243,255,.5)", fontStyle: "italic" }}>Sin carátula</div>
-                            )}
-                            {info?.juzgado ? (
-                              <div style={{ marginBottom: 6 }}><strong>Juzgado:</strong> {info.juzgado}</div>
-                            ) : (
-                              <div style={{ marginBottom: 6, color: "rgba(234,243,255,.5)", fontStyle: "italic" }}>Sin juzgado</div>
-                            )}
-                            {info?.numero ? (
-                              <div style={{ marginBottom: 6 }}><strong>Número:</strong> {info.numero}</div>
-                            ) : (
-                              <div style={{ marginBottom: 6, color: "rgba(234,243,255,.5)", fontStyle: "italic" }}>Sin número</div>
-                            )}
-                          </>
-                        );
-                      })()}
-                    </div>
+                  // Solo mostrar si hay al menos un dato de expediente disponible
+                  (() => {
+                    const metadata = selectedNotif.metadata || {};
+                    const info = {
+                      caratula: metadata.caratula || expedienteInfo?.caratula || null,
+                      juzgado: metadata.juzgado || expedienteInfo?.juzgado || null,
+                      numero: metadata.numero || expedienteInfo?.numero || null,
+                    };
+                    const hasAnyInfo = info.caratula || info.juzgado || info.numero;
+                    
+                    if (!hasAnyInfo) return null;
+                    
+                    return (
+                      <div style={{
+                        padding: 16,
+                        background: "rgba(96,141,186,.1)",
+                        borderRadius: 8,
+                        border: "1px solid rgba(96,141,186,.2)"
+                      }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "rgba(234,243,255,.8)", marginBottom: 8 }}>
+                          Información del expediente:
+                        </div>
+                        <div style={{ fontSize: 13, color: "rgba(234,243,255,.9)", lineHeight: 1.8 }}>
+                          {info.caratula && (
+                            <div style={{ marginBottom: 6 }}><strong>Carátula:</strong> {info.caratula}</div>
+                          )}
+                          {info.juzgado && (
+                            <div style={{ marginBottom: 6 }}><strong>Juzgado:</strong> {info.juzgado}</div>
+                          )}
+                          {info.numero && (
+                            <div style={{ marginBottom: 6 }}><strong>Número:</strong> {info.numero}</div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()
+                )}
+
+                {isAutoPericia && ordenPdfUrl && (
+                  <div style={{ marginBottom: 12, padding: "0 16px" }}>
+                    <a href={ordenPdfUrl} target="_blank" rel="noopener noreferrer"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "10px 16px",
+                        background: "rgba(96,141,186,.2)",
+                        border: "1px solid rgba(96,141,186,.3)",
+                        borderRadius: 8,
+                        color: "rgba(234,243,255,.9)",
+                        textDecoration: "none",
+                        fontSize: 13,
+                        fontWeight: 600,
+                      }}>
+                      📄 Ver Orden Médica (PDF)
+                    </a>
                   </div>
                 )}
 
                 {/* Botón de responder */}
                 <div style={{ borderTop: "1px solid rgba(255,255,255,.1)", paddingTop: 16 }}>
-                  <div style={{ marginBottom: 12 }}>
-                    <textarea
-                      value={replyText}
-                      onChange={(e) => setReplyText(e.target.value)}
-                      placeholder="Escribe tu respuesta..."
-                      style={{
-                        width: "100%",
-                        minHeight: 100,
-                        padding: 12,
-                        background: "rgba(255,255,255,.05)",
-                        border: "1px solid rgba(255,255,255,.15)",
-                        borderRadius: 8,
-                        color: "var(--text)",
-                        fontSize: 13,
-                        fontFamily: "inherit",
-                        resize: "vertical",
-                        lineHeight: 1.6,
-                      }}
-                    />
-                  </div>
-                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                    {/* Campo para adjuntar archivo (solo para notificaciones de transferencia) */}
-                    {selectedNotif.link === "/app/recibidos" && (
+                  {isAutoPericia ? (
+                    <div style={{
+                      padding: 12, background: "rgba(241,196,15,.08)",
+                      border: "1px solid rgba(241,196,15,.2)", borderRadius: 8,
+                      fontSize: 12, color: "rgba(241,196,15,.8)", textAlign: "center",
+                    }}>
+                      Esta notificación fue generada automáticamente por el sistema PJN.
+                    </div>
+                  ) : (
+                    <>
                       <div style={{ marginBottom: 12 }}>
-                        <label style={{ 
-                          display: "block", 
-                          fontSize: 12, 
-                          fontWeight: 600, 
-                          color: "rgba(234,243,255,.8)", 
-                          marginBottom: 6 
-                        }}>
-                          Adjuntar archivo (.docx) - Opcional
-                        </label>
-                        <input
-                          type="file"
-                          accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                          onChange={(e) => setReplyFile(e.target.files?.[0] ?? null)}
+                        <textarea
+                          value={replyText}
+                          onChange={(e) => setReplyText(e.target.value)}
+                          placeholder="Escribe tu respuesta..."
                           style={{
                             width: "100%",
-                            padding: 8,
+                            minHeight: 100,
+                            padding: 12,
                             background: "rgba(255,255,255,.05)",
                             border: "1px solid rgba(255,255,255,.15)",
                             borderRadius: 8,
                             color: "var(--text)",
                             fontSize: 13,
                             fontFamily: "inherit",
+                            resize: "vertical",
+                            lineHeight: 1.6,
                           }}
                         />
-                        {replyFile && (
-                          <div style={{ 
-                            marginTop: 6, 
-                            fontSize: 12, 
-                            color: "rgba(234,243,255,.7)" 
-                          }}>
-                            Archivo seleccionado: {replyFile.name}
+                      </div>
+                      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                        {/* Campo para adjuntar archivo (solo para notificaciones de transferencia) */}
+                        {selectedNotif.link === "/app/recibidos" && (
+                          <div style={{ marginBottom: 12 }}>
+                            <label style={{
+                              display: "block",
+                              fontSize: 12,
+                              fontWeight: 600,
+                              color: "rgba(234,243,255,.8)",
+                              marginBottom: 6
+                            }}>
+                              Adjuntar archivo (.docx) - Opcional
+                            </label>
+                            <input
+                              type="file"
+                              accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                              onChange={(e) => setReplyFile(e.target.files?.[0] ?? null)}
+                              style={{
+                                width: "100%",
+                                padding: 8,
+                                background: "rgba(255,255,255,.05)",
+                                border: "1px solid rgba(255,255,255,.15)",
+                                borderRadius: 8,
+                                color: "var(--text)",
+                                fontSize: 13,
+                                fontFamily: "inherit",
+                              }}
+                            />
+                            {replyFile && (
+                              <div style={{
+                                marginTop: 6,
+                                fontSize: 12,
+                                color: "rgba(234,243,255,.7)"
+                              }}>
+                                Archivo seleccionado: {replyFile.name}
+                              </div>
+                            )}
                           </div>
                         )}
+                        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                          <button
+                            onClick={() => {
+                              setSelectedNotif(null);
+                              setReplyText("");
+                              setReplyFile(null);
+                            }}
+                            className="btn"
+                            disabled={replying}
+                            style={{ padding: "8px 16px", fontSize: 13 }}
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            onClick={handleReply}
+                            className="btn"
+                            disabled={replying || !replyText.trim()}
+                            style={{
+                              padding: "8px 16px",
+                              fontSize: 13,
+                              opacity: (!replyText.trim() || replying) ? 0.6 : 1
+                            }}
+                          >
+                            {replying ? "Enviando..." : replyFile ? "Responder con archivo" : "Responder"}
+                          </button>
+                        </div>
                       </div>
-                    )}
-                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                      <button
-                        onClick={() => {
-                          setSelectedNotif(null);
-                          setReplyText("");
-                          setReplyFile(null);
-                        }}
-                        className="btn"
-                        disabled={replying}
-                        style={{ padding: "8px 16px", fontSize: 13 }}
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        onClick={handleReply}
-                        className="btn"
-                        disabled={replying || !replyText.trim()}
-                        style={{ 
-                          padding: "8px 16px", 
-                          fontSize: 13,
-                          opacity: (!replyText.trim() || replying) ? 0.6 : 1
-                        }}
-                      >
-                        {replying ? "Enviando..." : replyFile ? "Responder con archivo" : "Responder"}
-                      </button>
-                    </div>
-                  </div>
+                    </>
+                  )}
                 </div>
               </div>
             )}
