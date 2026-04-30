@@ -1643,8 +1643,6 @@ export default function NotificacionesPage() {
                             color: isMyMsg
                               ? "rgba(96,141,186,.9)"
                               : (isAutoPericia ? "rgba(241,196,15,.9)" : "rgba(234,243,255,.8)"),
-                            fontSize: isAutoPericia && !isMyMsg ? 12 : 12,
-                            fontWeight: isAutoPericia && !isMyMsg ? 600 : 600,
                           }}>
                             {isMyMsg
                               ? "Tú"
