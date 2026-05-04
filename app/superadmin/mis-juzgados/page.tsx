@@ -2599,10 +2599,10 @@ export default function MisJuzgadosPage() {
       
       // Abrir el blob URL en una nueva pestaña - el navegador lo abrirá según el tipo MIME
       // Para PDFs se abrirá en el visor del navegador, para otros tipos dependerá del navegador
-      window.open(blobUrl, "_blank");
+      window.open(blobUrl, "_blank", "noopener,noreferrer");
       
       // Limpiar el blob URL después de un tiempo para liberar memoria
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
     } catch (error: any) {
       console.error("Error al abrir archivo:", error);
       setMsg("Error al abrir el archivo: " + (error?.message || "Error desconocido"));
