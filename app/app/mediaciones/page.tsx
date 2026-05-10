@@ -75,6 +75,8 @@ export default function MediacionesPage() {
   const [search, setSearch] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [isAdminMediaciones, setIsAdminMediaciones] = useState(false);
+  const [isSuperadmin, setIsSuperadmin] = useState(false);
+  const [isMediadorOnly, setIsMediadorOnly] = useState(false);
   const [currentUserName, setCurrentUserName] = useState("");
 
   useEffect(() => {
@@ -88,22 +90,32 @@ export default function MediacionesPage() {
 
       const { data: roleData } = await supabase
         .from("user_roles")
-        .select("is_admin_mediaciones")
+        .select("is_admin_mediaciones, is_superadmin, is_mediador")
         .eq("user_id", uid)
         .maybeSingle();
 
       const admin = roleData?.is_admin_mediaciones === true;
+      const superadmin = roleData?.is_superadmin === true;
+      const mediador = roleData?.is_mediador === true;
       setIsAdminMediaciones(admin);
+      setIsSuperadmin(superadmin);
+      setIsMediadorOnly(!admin && !superadmin && mediador);
 
-      if (!admin) {
+      if (!admin && !superadmin && !mediador) {
         router.replace("/app");
         return;
       }
 
-      const { data: list, error } = await supabase
+      const query = supabase
         .from("mediaciones")
         .select("*, mediacion_requeridos(nombre)")
         .order("created_at", { ascending: false });
+
+      if (!admin && !superadmin && mediador) {
+        query.eq("user_id", uid);
+      }
+
+      const { data: list, error } = await query;
 
       if (error) {
         setMsg(error.message || "Error al cargar");
@@ -247,7 +259,9 @@ export default function MediacionesPage() {
                 <Link href="/app/mediaciones" onClick={() => setMenuOpen(false)} style={linkStyle} onMouseEnter={linkHover} onMouseLeave={linkLeave}>⚖️ Mediaciones</Link>
                 <Link href="/app/mediaciones/nueva" onClick={() => setMenuOpen(false)} style={linkStyle} onMouseEnter={linkHover} onMouseLeave={linkLeave}>➕ Nueva mediación</Link>
                 <Link href="/app/mediaciones/lotes" onClick={() => setMenuOpen(false)} style={linkStyle} onMouseEnter={linkHover} onMouseLeave={linkLeave}>📦 Despacho por lotes</Link>
-                <Link href="/superadmin" onClick={() => setMenuOpen(false)} style={linkStyle} onMouseEnter={linkHover} onMouseLeave={linkLeave}>🏠 Inicio</Link>
+                {(isAdminMediaciones || isSuperadmin) && (
+                  <Link href="/superadmin" onClick={() => setMenuOpen(false)} style={linkStyle} onMouseEnter={linkHover} onMouseLeave={linkLeave}>🏠 Inicio</Link>
+                )}
                 <button onClick={() => { setMenuOpen(false); logout(); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 20px", color: "var(--brand-red)", background: "transparent", border: "none", fontSize: 14, fontWeight: 600, cursor: "pointer", borderLeft: "3px solid transparent" }}>🚪 Salir</button>
               </div>
             )}
@@ -332,7 +346,7 @@ export default function MediacionesPage() {
                     menuMinWidth={200}
                   />
                   <th>Fecha</th>
-                  <th style={{ width: 44 }}></th>
+                  {!isMediadorOnly && <th style={{ width: 44 }}></th>}
                 </tr>
               </thead>
               <tbody>
@@ -354,27 +368,29 @@ export default function MediacionesPage() {
                     <td style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.objeto_reclamo || ""}>{r.objeto_reclamo || "—"}</td>
                     <td><span style={badgeStyle(r.estado)}>{r.estado.replace(/_/g, " ")}</span></td>
                     <td>{formatDate(r.created_at)}</td>
-                    <td style={{ textAlign: "right" }}>
-                      <button
-                        type="button"
-                        title="Borrar mediación"
-                        aria-label="Borrar mediación"
-                        className="btn danger"
-                        style={{ padding: "6px 10px", minWidth: 44 }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          e.preventDefault();
-                          borrarMediacion(r.id, r.numero_tramite);
-                        }}
-                      >
-                        🗑️
-                      </button>
-                    </td>
+                    {!isMediadorOnly && (
+                      <td style={{ textAlign: "right" }}>
+                        <button
+                          type="button"
+                          title="Borrar mediación"
+                          aria-label="Borrar mediación"
+                          className="btn danger"
+                          style={{ padding: "6px 10px", minWidth: 44 }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            borrarMediacion(r.id, r.numero_tramite);
+                          }}
+                        >
+                          🗑️
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
                 {filteredRows.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="muted">No hay mediaciones con los filtros aplicados.</td>
+                    <td colSpan={isMediadorOnly ? 5 : 6} className="muted">No hay mediaciones con los filtros aplicados.</td>
                   </tr>
                 )}
               </tbody>

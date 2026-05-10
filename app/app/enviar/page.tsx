@@ -21,6 +21,7 @@ export default function EnviarPage() {
   const [recipient, setRecipient] = useState("");
   const [docType, setDocType] = useState<"CEDULA" | "OFICIO" | "OTROS_ESCRITOS">("CEDULA");
   const [title, setTitle] = useState("");
+  const [expedienteRef, setExpedienteRef] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [sending, setSending] = useState(false);
 
@@ -77,6 +78,9 @@ export default function EnviarPage() {
       fd.append("recipient_user_id", recipient);
       fd.append("doc_type", docType);
       fd.append("title", title.trim());
+      if (expedienteRef.trim()) {
+        fd.append("expediente_ref", expedienteRef.trim());
+      }
       fd.append("file", file);
 
       const res = await fetch("/api/transfers/send", {
@@ -93,6 +97,7 @@ export default function EnviarPage() {
 
       setMsg("Enviado ✅");
       setTitle("");
+      setExpedienteRef("");
       setFile(null);
       setRecipient("");
     } finally {
@@ -131,7 +136,7 @@ export default function EnviarPage() {
             <select className="input" value={docType} onChange={(e) => setDocType(e.target.value as any)}>
               <option value="CEDULA">Cédula</option>
               <option value="OFICIO">Oficio</option>
-              <option value="OTROS_ESCRITOS">Otros Escritos</option>
+              <option value="OTROS_ESCRITOS">Causas Penales</option>
             </select>
           </div>
 
@@ -150,6 +155,19 @@ export default function EnviarPage() {
           <div>
             <label className="label">Título (opcional)</label>
             <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ej: Oficio Banco X" />
+          </div>
+
+          <div>
+            <label className="label">Expediente (opcional)</label>
+            <input
+              className="input"
+              value={expedienteRef}
+              onChange={(e) => setExpedienteRef(e.target.value)}
+              placeholder="Ej: 104244/2024"
+            />
+            <p className="helper" style={{ marginTop: 6 }}>
+              Número/Año del expediente asociado. Permite ver la carátula en las notificaciones.
+            </p>
           </div>
 
           <div>

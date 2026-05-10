@@ -12,16 +12,21 @@ export async function GET(req: NextRequest) {
     }
 
     const svc = supabaseService();
-    const { isAdminMediaciones, isSuperadmin } = await getMediacionesRole(user.id, svc);
-    if (!isAdminMediaciones && !isSuperadmin) {
-      return NextResponse.json({ error: "Solo administradores de mediaciones" }, { status: 403 });
+    const { isAdminMediaciones, isSuperadmin, isMediador } = await getMediacionesRole(user.id, svc);
+    if (!isAdminMediaciones && !isSuperadmin && !isMediador) {
+      return NextResponse.json({ error: "Sin permisos para mediaciones" }, { status: 403 });
     }
 
-    const { data: mediaciones } = await svc
+    let mediacionesQuery = svc
       .from("mediaciones")
       .select("id, numero_tramite, req_nombre, objeto_reclamo, created_at")
       .eq("estado", "doc_generado")
       .order("created_at", { ascending: false });
+    if (!isAdminMediaciones && !isSuperadmin && isMediador) {
+      mediacionesQuery = mediacionesQuery.eq("user_id", user.id);
+    }
+
+    const { data: mediaciones } = await mediacionesQuery;
 
     const { data: lotesEnviados } = await svc
       .from("mediacion_lotes")

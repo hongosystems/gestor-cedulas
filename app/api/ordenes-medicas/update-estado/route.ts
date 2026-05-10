@@ -167,7 +167,17 @@ export async function POST(req: NextRequest) {
         // Obtener información de la orden
         const { data: orden } = await svc
           .from("ordenes_medicas")
-          .select("id, case_ref, emitida_por_user_id")
+          .select(`
+            id,
+            case_ref,
+            emitida_por_user_id,
+            expediente_id,
+            expedientes:expediente_id (
+              caratula,
+              juzgado,
+              numero_expediente
+            )
+          `)
           .eq("id", gestion.orden_id)
           .single();
 
@@ -206,12 +216,15 @@ export async function POST(req: NextRequest) {
             title: `Estudio realizado - ${orden.case_ref}`,
             body: `${currentUserName} marcó el estudio como realizado para la orden médica del caso ${orden.case_ref}`,
             link: `/prueba-pericia?tab=ordenes&orden_id=${orden.id}`,
-            expediente_id: orden.id,
+            expediente_id: orden.expediente_id || null,
             is_pjn_favorito: false,
             metadata: {
               orden_id: orden.id,
               gestion_id: gestion_id,
               tipo: "ESTUDIO_REALIZADO",
+              caratula: (orden as any)?.expedientes?.caratula || null,
+              juzgado: (orden as any)?.expedientes?.juzgado || null,
+              numero: (orden as any)?.expedientes?.numero_expediente || orden.case_ref || null,
             },
           });
         }

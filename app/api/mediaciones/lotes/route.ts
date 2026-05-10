@@ -12,15 +12,51 @@ export async function GET(req: NextRequest) {
     }
 
     const svc = supabaseService();
-    const { isAdminMediaciones, isSuperadmin } = await getMediacionesRole(user.id, svc);
-    if (!isAdminMediaciones && !isSuperadmin) {
-      return NextResponse.json({ error: "Solo administradores de mediaciones" }, { status: 403 });
+    const { isAdminMediaciones, isSuperadmin, isMediador } = await getMediacionesRole(user.id, svc);
+    if (!isAdminMediaciones && !isSuperadmin && !isMediador) {
+      return NextResponse.json({ error: "Sin permisos para mediaciones" }, { status: 403 });
     }
 
-    const { data: lotes, error } = await svc
-      .from("mediacion_lotes")
-      .select("id, numero_lote, estado, umbral, destinatarios, texto_mail, envio_automatico, fecha_envio, created_at")
-      .order("numero_lote", { ascending: false });
+    const isAdmin = isAdminMediaciones || isSuperadmin;
+    let lotes: any[] | null = null;
+    let error: any = null;
+
+    if (isAdmin) {
+      const response = await svc
+        .from("mediacion_lotes")
+        .select("id, numero_lote, estado, umbral, destinatarios, texto_mail, envio_automatico, fecha_envio, created_at")
+        .order("numero_lote", { ascending: false });
+      lotes = response.data;
+      error = response.error;
+    } else {
+      const { data: myItems } = await svc
+        .from("mediacion_lote_items")
+        .select("lote_id, mediaciones!inner(user_id)")
+        .eq("mediaciones.user_id", user.id);
+      const myLoteIds = [...new Set((myItems || []).map((row: any) => row.lote_id).filter(Boolean))];
+      if (myLoteIds.length === 0) {
+        return NextResponse.json({ ok: true, data: [] });
+      }
+      const { data: allItemsInMyLotes } = await svc
+        .from("mediacion_lote_items")
+        .select("lote_id, mediaciones!inner(user_id)")
+        .in("lote_id", myLoteIds);
+      const visibleLoteIds = myLoteIds.filter((loteId) =>
+        (allItemsInMyLotes || [])
+          .filter((row: any) => row.lote_id === loteId)
+          .every((row: any) => row.mediaciones?.user_id === user.id)
+      );
+      if (visibleLoteIds.length === 0) {
+        return NextResponse.json({ ok: true, data: [] });
+      }
+      const response = await svc
+        .from("mediacion_lotes")
+        .select("id, numero_lote, estado, umbral, destinatarios, texto_mail, envio_automatico, fecha_envio, created_at")
+        .in("id", visibleLoteIds)
+        .order("numero_lote", { ascending: false });
+      lotes = response.data;
+      error = response.error;
+    }
 
     if (error) {
       if (error.message?.includes("does not exist") || error.code === "PGRST116") {
@@ -64,9 +100,9 @@ export async function POST(req: NextRequest) {
     }
 
     const svc = supabaseService();
-    const { isAdminMediaciones, isSuperadmin } = await getMediacionesRole(user.id, svc);
-    if (!isAdminMediaciones && !isSuperadmin) {
-      return NextResponse.json({ error: "Solo administradores de mediaciones" }, { status: 403 });
+    const { isAdminMediaciones, isSuperadmin, isMediador } = await getMediacionesRole(user.id, svc);
+    if (!isAdminMediaciones && !isSuperadmin && !isMediador) {
+      return NextResponse.json({ error: "Sin permisos para crear lotes" }, { status: 403 });
     }
 
     const body = await req.json().catch(() => ({}));

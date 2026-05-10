@@ -28,11 +28,12 @@ export async function getUserFromRequest(req: Request): Promise<User | null> {
 export async function getMediacionesRole(userId: string, supabaseAdmin: ReturnType<typeof import("@/lib/supabase-server").supabaseService>) {
   const { data } = await supabaseAdmin
     .from("user_roles")
-    .select("is_admin_mediaciones, is_superadmin")
+    .select("is_admin_mediaciones, is_superadmin, is_mediador")
     .eq("user_id", userId)
     .maybeSingle();
   return {
     isAdminMediaciones: data?.is_admin_mediaciones === true,
     isSuperadmin: data?.is_superadmin === true,
+    isMediador: data?.is_mediador === true,
   };
 }

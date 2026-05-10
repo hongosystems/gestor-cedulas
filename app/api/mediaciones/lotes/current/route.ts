@@ -8,8 +8,8 @@ async function requireAdmin(
   userId: string,
   svc: ReturnType<typeof supabaseService>
 ) {
-  const { isAdminMediaciones, isSuperadmin } = await getMediacionesRole(userId, svc);
-  return isAdminMediaciones || isSuperadmin;
+  const { isAdminMediaciones, isSuperadmin, isMediador } = await getMediacionesRole(userId, svc);
+  return { isAdmin: isAdminMediaciones || isSuperadmin, isMediador };
 }
 
 export async function GET(req: NextRequest) {
@@ -20,8 +20,9 @@ export async function GET(req: NextRequest) {
     }
 
     const svc = supabaseService();
-    if (!(await requireAdmin(user.id, svc))) {
-      return NextResponse.json({ error: "Solo administradores de mediaciones" }, { status: 403 });
+    const access = await requireAdmin(user.id, svc);
+    if (!access.isAdmin && !access.isMediador) {
+      return NextResponse.json({ error: "Sin permisos para mediaciones" }, { status: 403 });
     }
 
     const { data: lote, error: loteErr } = await svc
@@ -54,6 +55,20 @@ export async function GET(req: NextRequest) {
     }
 
     const itemsWithMediacion = items || [];
+    if (!access.isAdmin) {
+      if (itemsWithMediacion.length === 0) {
+        return NextResponse.json({ ok: true, data: null });
+      }
+      const { data: ownerRows } = await svc
+        .from("mediaciones")
+        .select("id, user_id")
+        .in("id", itemsWithMediacion.map((i: any) => i.mediacion_id).filter(Boolean));
+      const ownerById = new Map((ownerRows || []).map((r: any) => [r.id, r.user_id]));
+      const onlyMine = itemsWithMediacion.every((item: any) => ownerById.get(item.mediacion_id) === user.id);
+      if (!onlyMine) {
+        return NextResponse.json({ ok: true, data: null });
+      }
+    }
     const mediacionIds = [...new Set(itemsWithMediacion.map((i: any) => i.mediacion_id).filter(Boolean))];
     let mediaciones: Record<string, any> = {};
     if (mediacionIds.length > 0) {

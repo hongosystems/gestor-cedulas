@@ -95,13 +95,31 @@ export default function EditarMediacionPage() {
     (async () => {
       const session = await requireSessionOrRedirect();
       if (!session) return;
+      const { data: roleData } = await supabase
+        .from("user_roles")
+        .select("is_admin_mediaciones, is_superadmin, is_mediador")
+        .eq("user_id", session.user.id)
+        .maybeSingle();
+      const canOpen =
+        roleData?.is_admin_mediaciones === true ||
+        roleData?.is_superadmin === true ||
+        roleData?.is_mediador === true;
+      if (!canOpen) {
+        router.replace("/app/mediaciones");
+        return;
+      }
 
       const res = await fetch(`/api/mediaciones/${id}`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json.data) {
-        setMsg(json.error || "Mediación no encontrada");
+        const errorMsg = json.error || "Mediación no encontrada";
+        setMsg(errorMsg);
+        if (res.status === 403) {
+          setTimeout(() => router.replace("/app/mediaciones"), 1200);
+          return;
+        }
         setLoading(false);
         return;
       }
@@ -145,7 +163,7 @@ export default function EditarMediacionPage() {
       );
       setLoading(false);
     })();
-  }, [id]);
+  }, [id, router]);
 
   useEffect(() => {
     if (!menuOpen) return;

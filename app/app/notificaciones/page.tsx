@@ -1697,7 +1697,7 @@ export default function NotificacionesPage() {
                       {selectedNotif.metadata?.transfer_id ? (
                         <div style={{ marginBottom: 12 }}>
                           <div style={{ marginBottom: 8 }}>
-                            <strong>Tipo:</strong> {selectedNotif.metadata.doc_type === "OFICIO" ? "Oficio" : selectedNotif.metadata.doc_type === "OTROS_ESCRITOS" ? "Otros Escritos" : "Cédula"}
+                            <strong>Tipo:</strong> {selectedNotif.metadata.doc_type === "OFICIO" ? "Oficio" : selectedNotif.metadata.doc_type === "OTROS_ESCRITOS" ? "Causas Penales" : "Cédula"}
                           </div>
                           {selectedNotif.title && (
                             <div style={{ marginBottom: 8 }}>

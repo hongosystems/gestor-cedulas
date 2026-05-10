@@ -24,9 +24,9 @@ export async function POST(req: NextRequest) {
     }
 
     const svc = supabaseService();
-    const { isAdminMediaciones, isSuperadmin } = await getMediacionesRole(user.id, svc);
-    if (!isAdminMediaciones && !isSuperadmin) {
-      return NextResponse.json({ error: "Solo administradores de mediaciones" }, { status: 403 });
+    const { isAdminMediaciones, isSuperadmin, isMediador } = await getMediacionesRole(user.id, svc);
+    if (!isAdminMediaciones && !isSuperadmin && !isMediador) {
+      return NextResponse.json({ error: "Sin permisos para crear mediaciones" }, { status: 403 });
     }
 
     const body = await req.json();

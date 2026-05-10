@@ -194,7 +194,7 @@ export async function POST(req: Request) {
       (newRecipientProfile?.email || "").trim() ||
       "Usuario";
 
-    const tipoTxt = originalTransfer.doc_type === "CEDULA" ? "Cédula" : originalTransfer.doc_type === "OFICIO" ? "Oficio" : "Otros Escritos";
+    const tipoTxt = originalTransfer.doc_type === "CEDULA" ? "Cédula" : originalTransfer.doc_type === "OFICIO" ? "Oficio" : "Causas Penales";
 
     // 8) Crear notificación para el nuevo destinatario
     const notificationTitle = originalTransfer.title 

@@ -27,7 +27,7 @@ export default function LoginPage() {
       // Verificar todos los roles del usuario
       const { data: roleData, error: roleErr } = await supabase
         .from("user_roles")
-        .select("is_superadmin, is_admin_expedientes, is_admin_cedulas, is_abogado, is_admin_mediaciones")
+        .select("is_superadmin, is_admin_expedientes, is_admin_cedulas, is_abogado, is_admin_mediaciones, is_mediador")
         .eq("user_id", uid)
         .maybeSingle();
 
@@ -41,6 +41,7 @@ export default function LoginPage() {
       const isAdminCedulas = roleData.is_admin_cedulas === true;
       const isAbogado = roleData.is_abogado === true;
       const isAdminMediaciones = roleData.is_admin_mediaciones === true;
+      const isMediador = roleData.is_mediador === true;
 
       // Prioridad: Abogado/Superadmin siempre entra directo al Dashboard
       // (evitar pantalla intermedia aunque tenga roles adicionales)
@@ -50,7 +51,7 @@ export default function LoginPage() {
       }
 
       // Contar cuántos roles tiene
-      const roleCount = [isSuperadmin, isAdminExp, isAdminCedulas, isAbogado, isAdminMediaciones].filter(Boolean).length;
+      const roleCount = [isSuperadmin, isAdminExp, isAdminCedulas, isAbogado, isAdminMediaciones, isMediador].filter(Boolean).length;
 
       // Si tiene múltiples roles, redirigir a selección de rol
       if (roleCount > 1) {
@@ -70,6 +71,10 @@ export default function LoginPage() {
       }
 
       if (isAdminMediaciones) {
+        window.location.href = "/app/mediaciones";
+        return;
+      }
+      if (isMediador) {
         window.location.href = "/app/mediaciones";
         return;
       }
@@ -105,7 +110,7 @@ export default function LoginPage() {
     // Verificar todos los roles del usuario
     const { data: roleData, error: roleErr } = await supabase
       .from("user_roles")
-      .select("is_superadmin, is_admin_expedientes, is_admin_cedulas, is_abogado, is_admin_mediaciones")
+      .select("is_superadmin, is_admin_expedientes, is_admin_cedulas, is_abogado, is_admin_mediaciones, is_mediador")
       .eq("user_id", uid)
       .maybeSingle();
 
@@ -119,6 +124,7 @@ export default function LoginPage() {
     const isAdminCedulas = roleData.is_admin_cedulas === true;
     const isAbogado = roleData.is_abogado === true;
     const isAdminMediaciones = roleData.is_admin_mediaciones === true;
+    const isMediador = roleData.is_mediador === true;
 
     // Prioridad: Abogado/Superadmin siempre entra directo al Dashboard
     // (evitar pantalla intermedia aunque tenga roles adicionales)
@@ -128,7 +134,7 @@ export default function LoginPage() {
     }
 
     // Contar cuántos roles tiene
-    const roleCount = [isSuperadmin, isAdminExp, isAdminCedulas, isAbogado, isAdminMediaciones].filter(Boolean).length;
+    const roleCount = [isSuperadmin, isAdminExp, isAdminCedulas, isAbogado, isAdminMediaciones, isMediador].filter(Boolean).length;
 
     // Si tiene múltiples roles, redirigir a selección de rol
     if (roleCount > 1) {
@@ -148,6 +154,10 @@ export default function LoginPage() {
     }
 
     if (isAdminMediaciones) {
+      window.location.href = "/app/mediaciones";
+      return;
+    }
+    if (isMediador) {
       window.location.href = "/app/mediaciones";
       return;
     }

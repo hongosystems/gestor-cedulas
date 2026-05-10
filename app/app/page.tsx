@@ -106,6 +106,13 @@ type User = {
 
 type DocumentType = "CEDULA" | "OFICIO" | "OTROS_ESCRITOS" | null;
 
+function labelTipoDocumentoListado(t: DocumentType): string {
+  if (t === "CEDULA") return "Cédula";
+  if (t === "OFICIO") return "Oficio";
+  if (t === "OTROS_ESCRITOS") return "Causas Penales";
+  return "";
+}
+
 function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
@@ -894,13 +901,21 @@ export default function MisCedulasPage() {
       // Verificar roles (admin_expedientes, admin_cedulas, admin_mediaciones)
       const { data: roleData, error: roleErr } = await supabase
         .from("user_roles")
-        .select("is_admin_expedientes, is_admin_cedulas, is_admin_mediaciones")
+        .select("is_admin_expedientes, is_admin_cedulas, is_admin_mediaciones, is_superadmin, is_mediador")
         .eq("user_id", uid)
         .maybeSingle();
       
       const isAdminExp = !roleErr && roleData?.is_admin_expedientes === true;
+      const isSuperadmin = !roleErr && roleData?.is_superadmin === true;
       setIsAdminCedulas(!roleErr && roleData?.is_admin_cedulas === true);
       setIsAdminMediaciones(!roleErr && roleData?.is_admin_mediaciones === true);
+      const isMediador = !roleErr && roleData?.is_mediador === true;
+      const onlyMediador = isMediador && !isSuperadmin && !isAdminExp && !(roleData?.is_admin_cedulas === true) && !(roleData?.is_admin_mediaciones === true);
+
+      if (onlyMediador) {
+        window.location.href = "/app/mediaciones";
+        return;
+      }
       
       if (isAdminExp) {
         window.location.href = "/app/expedientes";
@@ -1944,9 +1959,9 @@ export default function MisCedulasPage() {
                     label="Cédula/Oficio"
                     filterKey="tipo_documento"
                     options={[
-                      { value: "CEDULA", label: "CEDULA" },
-                      { value: "OFICIO", label: "OFICIO" },
-                      { value: "OTROS_ESCRITOS", label: "OTROS_ESCRITOS" },
+                      { value: "CEDULA", label: "Cédula" },
+                      { value: "OFICIO", label: "Oficio" },
+                      { value: "OTROS_ESCRITOS", label: "Causas Penales" },
                       { value: "SIN_DATO", label: "Sin dato" },
                     ]}
                     activeFilter={filters.tipo_documento}
@@ -2033,10 +2048,9 @@ export default function MisCedulasPage() {
                                 fontWeight: 600,
                                 color: "var(--muted)",
                                 letterSpacing: 0.5,
-                                textTransform: "uppercase",
                               }}
                             >
-                              {c.tipo_documento}
+                              {labelTipoDocumentoListado(c.tipo_documento)}
                             </span>
                           )}
                           <button className="btn primary" onClick={() => abrirArchivo(c.pdf_path!, c.id)}>

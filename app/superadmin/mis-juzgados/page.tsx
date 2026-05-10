@@ -3799,7 +3799,7 @@ export default function MisJuzgadosPage() {
                                   whiteSpace: "nowrap"
                                 }}
                               >
-                                {item.tipo_documento === "OFICIO" ? "VER OFICIO" : item.tipo_documento === "OTROS_ESCRITOS" ? "VER OTROS ESCRITOS" : "VER CÉDULA"}
+                                {item.tipo_documento === "OFICIO" ? "VER OFICIO" : item.tipo_documento === "OTROS_ESCRITOS" ? "VER CAUSAS PENALES" : "VER CÉDULA"}
                               </button>
                               {item.read_by_name && (
                                 <div style={{ 

@@ -77,6 +77,19 @@ export default function MediacionLotesPage() {
     (async () => {
       const session = await requireSessionOrRedirect();
       if (!session) return;
+      const { data: roleData } = await supabase
+        .from("user_roles")
+        .select("is_admin_mediaciones, is_superadmin, is_mediador")
+        .eq("user_id", session.user.id)
+        .maybeSingle();
+      const canAccess =
+        roleData?.is_admin_mediaciones === true ||
+        roleData?.is_superadmin === true ||
+        roleData?.is_mediador === true;
+      if (!canAccess) {
+        router.replace("/app/mediaciones");
+        return;
+      }
 
       const token = session.access_token;
 

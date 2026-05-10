@@ -53,6 +53,15 @@ function fmtDDMMAA(iso?: string | null): string {
   return `${d}/${m}/${y.slice(2)}`;
 }
 
+/** Parsea X-Exp-Nro típico "12345/2024" para los campos del formulario */
+function parseExpNroForForm(expNro: string | null): { numero: string; anio: string } | null {
+  if (!expNro?.trim()) return null;
+  const t = expNro.trim().replace(/\s+/g, " ");
+  const m = /(\d+)\s*\/\s*(\d{4})\s*$/.exec(t);
+  if (m) return { numero: m[1], anio: m[2] };
+  return null;
+}
+
 export default function NuevaCedulaPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -85,6 +94,9 @@ export default function NuevaCedulaPage() {
 
   const [file, setFile] = useState<File | null>(null);
   const [tipoDocumento, setTipoDocumento] = useState<"CEDULA" | "OFICIO" | "OTROS_ESCRITOS" | null>(null);
+  /** Solo CÉDULA u OFICIO detectados por OCR (Railway); no aplica a Causas Penales */
+  const [tipoAutoDetectado, setTipoAutoDetectado] = useState(false);
+  const [tipoDetectado, setTipoDetectado] = useState<"CEDULA" | "OFICIO" | null>(null);
   const [currentUserName, setCurrentUserName] = useState<string>("");
 
   // Se setea AL SUBIR ARCHIVO, no editable
@@ -157,14 +169,43 @@ export default function NuevaCedulaPage() {
     }
   }, [caratula]);
 
+  function handleTipoChange(raw: string) {
+    const nuevoTipo =
+      raw === "" ? null : (raw as "CEDULA" | "OFICIO" | "OTROS_ESCRITOS");
+    if (
+      tipoAutoDetectado &&
+      tipoDetectado &&
+      nuevoTipo !== null &&
+      nuevoTipo !== tipoDetectado
+    ) {
+      const tipoLabel = tipoDetectado === "CEDULA" ? "CÉDULA" : "OFICIO";
+      if (
+        !confirm(
+          `El sistema detectó este documento como ${tipoLabel}. ¿Está seguro que desea modificar el tipo?`
+        )
+      ) {
+        return;
+      }
+      setTipoAutoDetectado(false);
+      setTipoDetectado(null);
+    }
+    setTipoDocumento(nuevoTipo);
+  }
+
   async function onFileChange(f: File | null) {
     setMsg("");
-    setFile(f);
+    setTipoAutoDetectado(false);
+    setTipoDetectado(null);
 
     if (!f) {
+      setFile(null);
       setFechaCargaISO("");
+      setTipoDocumento(null);
       return;
     }
+
+    setFile(f);
+    setTipoDocumento(null);
 
     // al subir archivo: setear fecha de carga (hoy)
     setFechaCargaISO(isoToday());
@@ -178,36 +219,55 @@ export default function NuevaCedulaPage() {
       setMsg("Formato inválido. Tipos permitidos: PDF, DOC, DOCX.");
       setFile(null);
       setFechaCargaISO("");
+      setTipoDocumento(null);
       return;
     }
 
-    // Autorrelleno para archivos DOCX y PDF
+    // Autorrelleno para archivos DOCX y PDF (PDF: Railway /procesar → /procesar-oficio; fallback local)
     if (name.endsWith(".docx") || name.endsWith(".pdf")) {
+      setExtracting(true);
       try {
-        // Detectar tipo de documento (CÉDULA u OFICIO) para guardarlo en la BD
-        // Esto funciona tanto para PDF como DOCX
         const formDataTipo = new FormData();
         formDataTipo.append("file", f);
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token;
         const tipoRes = await fetch("/api/detect-type-upload", {
           method: "POST",
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
           body: formDataTipo,
         });
+        if (tipoRes.status === 401) {
+          setMsg("Sesión expirada. Volvé a iniciar sesión.");
+          return;
+        }
         if (tipoRes.ok) {
           const tipoData = await tipoRes.json();
-          if (tipoData.tipo) {
+          if (tipoData.tipo === "CEDULA" || tipoData.tipo === "OFICIO") {
             setTipoDocumento(tipoData.tipo);
+            if (tipoData.autoDetected === true) {
+              setTipoAutoDetectado(true);
+              setTipoDetectado(tipoData.tipo);
+            }
+            const parts = parseExpNroForForm(tipoData.expNro ?? null);
+            if (parts) {
+              setExpedienteNumero(parts.numero);
+              setExpedienteAnio(parts.anio);
+              buscarExpediente(parts.numero, parts.anio, expedienteJurisdiccion);
+            }
+            const oc = typeof tipoData.caratula === "string" ? tipoData.caratula.trim() : "";
+            if (oc) {
+              setCaratula((prev) => (prev.trim() ? prev : oc));
+            }
           }
         }
-      } catch (err) {
-        // Si falla el parseo, no es crítico - el usuario puede completar manualmente
-        if (!msg) {
-          setMsg("No pude procesar el archivo automáticamente. Completá los campos manualmente.");
-        }
+      } catch {
+        setMsg(
+          "No pude procesar el archivo automáticamente. Completá los campos manualmente."
+        );
       } finally {
-        // setExtracting(false); // Ya no se muestra loader
+        setExtracting(false);
       }
     } else {
-      // Para DOC u otros formatos, intentar detectar por nombre del archivo
       const nameUpper = (f.name || "").toUpperCase();
       if (/OFICIO/i.test(nameUpper)) {
         setTipoDocumento("OFICIO");
@@ -370,6 +430,10 @@ export default function NuevaCedulaPage() {
       setMsg("Falta completar Carátula.");
       return;
     }
+    if (!tipoDocumento) {
+      setMsg("Seleccioná el tipo de documento.");
+      return;
+    }
 
     setSaving(true);
     try {
@@ -392,7 +456,7 @@ export default function NuevaCedulaPage() {
       
       // Intentar insertar con tipo_documento primero
       let insertData = { ...baseInsertData };
-      insertData.tipo = tipoDocumento || "CEDULA";
+      insertData.tipo_documento = tipoDocumento;
       
       let { data: created, error: insErr } = await supabase
         .from("cedulas")
@@ -644,21 +708,42 @@ export default function NuevaCedulaPage() {
                   style={{ width: 100 }}
                   maxLength={4}
                 />
-                <select
-                  className="input"
-                  value={tipoDocumento || ""}
-                  onChange={(e) => setTipoDocumento(e.target.value as "CEDULA" | "OFICIO" | "OTROS_ESCRITOS" | null || null)}
-                  style={{ 
-                    minWidth: 150,
-                    cursor: "pointer",
-                    marginLeft: "auto"
-                  }}
-                >
-                  <option value="">Seleccionar...</option>
-                  <option value="CEDULA">Cédula</option>
-                  <option value="OFICIO">Oficio</option>
-                  <option value="OTROS_ESCRITOS">Otros Escritos</option>
-                </select>
+                <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <select
+                    className="input"
+                    value={tipoDocumento ?? ""}
+                    onChange={(e) => handleTipoChange(e.target.value)}
+                    style={{
+                      minWidth: 160,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <option value="" disabled>
+                      Seleccionar...
+                    </option>
+                    <option value="CEDULA">Cédula</option>
+                    <option value="OFICIO">Oficio</option>
+                    <option value="OTROS_ESCRITOS">Causas Penales</option>
+                  </select>
+                  {tipoAutoDetectado &&
+                    tipoDetectado &&
+                    (tipoDocumento === "CEDULA" || tipoDocumento === "OFICIO") && (
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 600,
+                          padding: "4px 10px",
+                          borderRadius: 999,
+                          background: "rgba(74, 222, 128, 0.18)",
+                          color: "#4ade80",
+                          border: "1px solid rgba(74, 222, 128, 0.45)",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        Detectado automáticamente
+                      </span>
+                    )}
+                </div>
               </div>
               <p className="helper" style={{ marginTop: 6, marginBottom: 0 }}>
                 Ingresá la jurisdicción, número y año del expediente. Si existe en la base de datos, se completarán automáticamente Carátula y Juzgado.

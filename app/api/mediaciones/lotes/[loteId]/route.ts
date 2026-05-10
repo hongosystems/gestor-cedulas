@@ -4,12 +4,21 @@ import { getUserFromRequest, getMediacionesRole } from "@/lib/auth-api";
 
 export const runtime = "nodejs";
 
-async function requireAdmin(userId: string, svc: ReturnType<typeof supabaseService>) {
-  const { isAdminMediaciones, isSuperadmin } = await getMediacionesRole(userId, svc);
-  if (!isAdminMediaciones && !isSuperadmin) {
-    return false;
-  }
-  return true;
+async function getAccess(userId: string, svc: ReturnType<typeof supabaseService>) {
+  const { isAdminMediaciones, isSuperadmin, isMediador } = await getMediacionesRole(userId, svc);
+  return {
+    isAdmin: isAdminMediaciones || isSuperadmin,
+    isMediador,
+  };
+}
+
+async function mediadorOwnsEntireLote(loteId: string, userId: string, svc: ReturnType<typeof supabaseService>) {
+  const { data: loteItems } = await svc
+    .from("mediacion_lote_items")
+    .select("mediacion_id, mediaciones!inner(user_id)")
+    .eq("lote_id", loteId);
+  if (!loteItems || loteItems.length === 0) return false;
+  return loteItems.every((item: any) => item.mediaciones?.user_id === userId);
 }
 
 export async function GET(
@@ -23,8 +32,9 @@ export async function GET(
     }
 
     const svc = supabaseService();
-    if (!(await requireAdmin(user.id, svc))) {
-      return NextResponse.json({ error: "Solo administradores de mediaciones" }, { status: 403 });
+    const access = await getAccess(user.id, svc);
+    if (!access.isAdmin && !access.isMediador) {
+      return NextResponse.json({ error: "Sin permisos para mediaciones" }, { status: 403 });
     }
 
     const { loteId } = await params;
@@ -37,6 +47,12 @@ export async function GET(
 
     if (loteErr || !lote) {
       return NextResponse.json({ error: "Lote no encontrado" }, { status: 404 });
+    }
+    if (!access.isAdmin) {
+      const ownsLote = await mediadorOwnsEntireLote(loteId, user.id, svc);
+      if (!ownsLote) {
+        return NextResponse.json({ error: "No autorizado para este lote" }, { status: 403 });
+      }
     }
 
     const { data: items } = await svc
@@ -73,11 +89,18 @@ export async function PATCH(
     }
 
     const svc = supabaseService();
-    if (!(await requireAdmin(user.id, svc))) {
-      return NextResponse.json({ error: "Solo administradores de mediaciones" }, { status: 403 });
+    const access = await getAccess(user.id, svc);
+    if (!access.isAdmin && !access.isMediador) {
+      return NextResponse.json({ error: "Sin permisos para mediaciones" }, { status: 403 });
     }
 
     const { loteId } = await params;
+    if (!access.isAdmin) {
+      const ownsLote = await mediadorOwnsEntireLote(loteId, user.id, svc);
+      if (!ownsLote) {
+        return NextResponse.json({ error: "No autorizado para este lote" }, { status: 403 });
+      }
+    }
     const body = await req.json();
 
     const updatePayload: Record<string, unknown> = {};

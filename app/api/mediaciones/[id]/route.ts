@@ -8,8 +8,8 @@ async function requireAdmin(
   userId: string,
   svc: ReturnType<typeof supabaseService>
 ) {
-  const { isAdminMediaciones, isSuperadmin } = await getMediacionesRole(userId, svc);
-  return isAdminMediaciones || isSuperadmin;
+  const { isAdminMediaciones, isSuperadmin, isMediador } = await getMediacionesRole(userId, svc);
+  return { isAdmin: isAdminMediaciones || isSuperadmin, isMediador };
 }
 
 export async function GET(
@@ -35,8 +35,13 @@ export async function GET(
       return NextResponse.json({ error: "Mediación no encontrada" }, { status: 404 });
     }
 
-    if (!(await requireAdmin(user.id, svc))) {
-      return NextResponse.json({ error: "Solo administradores de mediaciones" }, { status: 403 });
+    const { isAdminMediaciones, isSuperadmin, isMediador } = await getMediacionesRole(user.id, svc);
+    const isAdmin = isAdminMediaciones || isSuperadmin;
+    if (!isAdmin && !isMediador) {
+      return NextResponse.json({ error: "Sin permisos para mediaciones" }, { status: 403 });
+    }
+    if (!isAdmin && isMediador && mediacion.user_id !== user.id) {
+      return NextResponse.json({ error: "No autorizado para esta mediación" }, { status: 403 });
     }
 
     const [reqRes, reqnteRes, obsRes, histRes, docRes] = await Promise.all([
@@ -102,8 +107,12 @@ export async function PATCH(
       return NextResponse.json({ error: "Mediación no encontrada" }, { status: 404 });
     }
 
-    if (!(await requireAdmin(user.id, svc))) {
-      return NextResponse.json({ error: "Solo administradores de mediaciones" }, { status: 403 });
+    const access = await requireAdmin(user.id, svc);
+    if (!access.isAdmin && !access.isMediador) {
+      return NextResponse.json({ error: "Sin permisos para mediaciones" }, { status: 403 });
+    }
+    if (!access.isAdmin && access.isMediador && existing.user_id !== user.id) {
+      return NextResponse.json({ error: "No autorizado para editar esta mediación" }, { status: 403 });
     }
 
     const body = await req.json();
@@ -236,7 +245,8 @@ export async function DELETE(
       return NextResponse.json({ error: "Mediación no encontrada" }, { status: 404 });
     }
 
-    if (!(await requireAdmin(user.id, svc))) {
+    const access = await requireAdmin(user.id, svc);
+    if (!access.isAdmin) {
       return NextResponse.json({ error: "Solo administradores de mediaciones" }, { status: 403 });
     }
 

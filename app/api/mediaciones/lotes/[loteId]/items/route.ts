@@ -4,9 +4,9 @@ import { getUserFromRequest, getMediacionesRole } from "@/lib/auth-api";
 
 export const runtime = "nodejs";
 
-async function requireAdmin(userId: string, svc: ReturnType<typeof supabaseService>) {
-  const { isAdminMediaciones, isSuperadmin } = await getMediacionesRole(userId, svc);
-  return isAdminMediaciones || isSuperadmin;
+async function getAccess(userId: string, svc: ReturnType<typeof supabaseService>) {
+  const { isAdminMediaciones, isSuperadmin, isMediador } = await getMediacionesRole(userId, svc);
+  return { isAdmin: isAdminMediaciones || isSuperadmin, isMediador };
 }
 
 export async function POST(
@@ -20,8 +20,9 @@ export async function POST(
     }
 
     const svc = supabaseService();
-    if (!(await requireAdmin(user.id, svc))) {
-      return NextResponse.json({ error: "Solo administradores de mediaciones" }, { status: 403 });
+    const access = await getAccess(user.id, svc);
+    if (!access.isAdmin && !access.isMediador) {
+      return NextResponse.json({ error: "Sin permisos para mediaciones" }, { status: 403 });
     }
 
     const { loteId } = await params;
@@ -44,6 +45,18 @@ export async function POST(
     }
     if (lote.estado !== "abierto") {
       return NextResponse.json({ error: "Solo se pueden agregar ítems a lotes abiertos" }, { status: 400 });
+    }
+
+    if (!access.isAdmin) {
+      const { data: mediacionesPropias } = await svc
+        .from("mediaciones")
+        .select("id")
+        .in("id", mediacionIds)
+        .eq("user_id", user.id);
+      const ownIds = new Set((mediacionesPropias || []).map((m: any) => m.id));
+      if (ownIds.size !== mediacionIds.length) {
+        return NextResponse.json({ error: "Solo podés despachar mediaciones propias" }, { status: 403 });
+      }
     }
 
     const rows = mediacionIds.map((mediacion_id: string) => ({
@@ -82,8 +95,9 @@ export async function DELETE(
     }
 
     const svc = supabaseService();
-    if (!(await requireAdmin(user.id, svc))) {
-      return NextResponse.json({ error: "Solo administradores de mediaciones" }, { status: 403 });
+    const access = await getAccess(user.id, svc);
+    if (!access.isAdmin && !access.isMediador) {
+      return NextResponse.json({ error: "Sin permisos para mediaciones" }, { status: 403 });
     }
 
     const { loteId } = await params;
@@ -91,6 +105,18 @@ export async function DELETE(
 
     if (!mediacionId) {
       return NextResponse.json({ error: "mediacion_id query es requerido" }, { status: 400 });
+    }
+
+    if (!access.isAdmin) {
+      const { data: own } = await svc
+        .from("mediaciones")
+        .select("id")
+        .eq("id", mediacionId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (!own) {
+        return NextResponse.json({ error: "Solo podés modificar mediaciones propias" }, { status: 403 });
+      }
     }
 
     const { error } = await svc

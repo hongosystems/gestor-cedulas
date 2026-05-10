@@ -11,12 +11,14 @@ export default function SelectRolePage() {
     isAdminCedulas: boolean;
     isAbogado: boolean;
     isAdminMediaciones: boolean;
+    isMediador: boolean;
   }>({
     isSuperadmin: false,
     isAdminExpedientes: false,
     isAdminCedulas: false,
     isAbogado: false,
     isAdminMediaciones: false,
+    isMediador: false,
   });
   const router = useRouter();
 
@@ -33,7 +35,7 @@ export default function SelectRolePage() {
       // Verificar roles del usuario
       const { data: roleData, error: roleErr } = await supabase
         .from("user_roles")
-        .select("is_superadmin, is_admin_expedientes, is_admin_cedulas, is_abogado, is_admin_mediaciones")
+        .select("is_superadmin, is_admin_expedientes, is_admin_cedulas, is_abogado, is_admin_mediaciones, is_mediador")
         .eq("user_id", uid)
         .maybeSingle();
 
@@ -47,6 +49,7 @@ export default function SelectRolePage() {
       const isAdminCedulas = roleData.is_admin_cedulas === true;
       const isAbogado = roleData.is_abogado === true;
       const isAdminMediaciones = roleData.is_admin_mediaciones === true;
+      const isMediador = roleData.is_mediador === true;
 
       // Prioridad: si es Abogado o Superadmin, ir directo al Dashboard (sin pantalla intermedia)
       if (isSuperadmin || isAbogado) {
@@ -55,7 +58,7 @@ export default function SelectRolePage() {
       }
 
       // Contar cuántos roles tiene
-      const roleCount = [isSuperadmin, isAdminExpedientes, isAdminCedulas, isAbogado, isAdminMediaciones].filter(Boolean).length;
+      const roleCount = [isSuperadmin, isAdminExpedientes, isAdminCedulas, isAbogado, isAdminMediaciones, isMediador].filter(Boolean).length;
 
       // Si solo tiene un rol, redirigir automáticamente
       if (roleCount === 1) {
@@ -71,6 +74,10 @@ export default function SelectRolePage() {
           router.push("/app/mediaciones");
           return;
         }
+        if (isMediador) {
+          router.push("/app/mediaciones");
+          return;
+        }
         router.push("/app");
         return;
       }
@@ -82,6 +89,7 @@ export default function SelectRolePage() {
         isAdminCedulas,
         isAbogado,
         isAdminMediaciones,
+        isMediador,
       });
       setLoading(false);
     })();
@@ -116,7 +124,7 @@ export default function SelectRolePage() {
     );
   }
 
-  const roleCount = [roles.isSuperadmin, roles.isAdminExpedientes, roles.isAdminCedulas, roles.isAbogado, roles.isAdminMediaciones].filter(Boolean).length;
+  const roleCount = [roles.isSuperadmin, roles.isAdminExpedientes, roles.isAdminCedulas, roles.isAbogado, roles.isAdminMediaciones, roles.isMediador].filter(Boolean).length;
 
   if (roleCount <= 1) {
     return null; // Ya se redirigió
@@ -193,6 +201,17 @@ export default function SelectRolePage() {
               >
                 <div style={{ fontWeight: 700, marginBottom: 4 }}>MEDIACIONES</div>
                 <div style={{ fontSize: 13, opacity: 0.8 }}>Trámites de mediación y lotes</div>
+              </button>
+            )}
+
+            {roles.isMediador && !roles.isAdminMediaciones && (
+              <button
+                className="btn primary"
+                onClick={() => selectRole("mediaciones")}
+                style={{ padding: "16px 24px", fontSize: 16, textAlign: "left" }}
+              >
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>MIS MEDIACIONES</div>
+                <div style={{ fontSize: 13, opacity: 0.8 }}>Ver solo mediaciones asignadas</div>
               </button>
             )}
           </div>

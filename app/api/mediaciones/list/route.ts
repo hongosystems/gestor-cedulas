@@ -12,9 +12,9 @@ export async function GET(req: NextRequest) {
     }
 
     const svc = supabaseService();
-    const { isAdminMediaciones, isSuperadmin } = await getMediacionesRole(user.id, svc);
-    if (!isAdminMediaciones && !isSuperadmin) {
-      return NextResponse.json({ error: "Solo administradores de mediaciones" }, { status: 403 });
+    const { isAdminMediaciones, isSuperadmin, isMediador } = await getMediacionesRole(user.id, svc);
+    if (!isAdminMediaciones && !isSuperadmin && !isMediador) {
+      return NextResponse.json({ error: "Sin permisos para mediaciones" }, { status: 403 });
     }
 
     const estado = req.nextUrl.searchParams.get("estado");
@@ -37,6 +37,10 @@ export async function GET(req: NextRequest) {
         fecha_hecho
       `)
       .order("created_at", { ascending: false });
+
+    if (!isAdminMediaciones && !isSuperadmin && isMediador) {
+      query = query.eq("user_id", user.id);
+    }
 
     if (estado && estado.trim() !== "") {
       query = query.eq("estado", estado.trim());

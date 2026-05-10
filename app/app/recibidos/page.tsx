@@ -261,7 +261,7 @@ export default function RecibidosPage() {
                     options={[
                       { value: "CEDULA", label: "Cédula" },
                       { value: "OFICIO", label: "Oficio" },
-                      { value: "OTROS_ESCRITOS", label: "Otros Escritos" },
+                      { value: "OTROS_ESCRITOS", label: "Causas Penales" },
                     ]}
                     activeFilter={filters.rec_doc}
                     onFilter={(v) => setFilter("rec_doc", v)}
@@ -278,7 +278,7 @@ export default function RecibidosPage() {
               <tbody>
                 {receivedFiltered.map((t) => (
                   <tr key={t.id}>
-                    <td>{t.doc_type === "CEDULA" ? "Cédula" : t.doc_type === "OFICIO" ? "Oficio" : "Otros Escritos"}</td>
+                    <td>{t.doc_type === "CEDULA" ? "Cédula" : t.doc_type === "OFICIO" ? "Oficio" : "Causas Penales"}</td>
                     <td>{displayName(profiles[t.sender_user_id])}</td>
                     <td>{t.title || "-"}</td>
                     <td>{fmtDate(t.created_at)}</td>
@@ -330,7 +330,7 @@ export default function RecibidosPage() {
                     options={[
                       { value: "CEDULA", label: "Cédula" },
                       { value: "OFICIO", label: "Oficio" },
-                      { value: "OTROS_ESCRITOS", label: "Otros Escritos" },
+                      { value: "OTROS_ESCRITOS", label: "Causas Penales" },
                     ]}
                     activeFilter={filters.sent_doc}
                     onFilter={(v) => setFilter("sent_doc", v)}
@@ -347,7 +347,7 @@ export default function RecibidosPage() {
               <tbody>
                 {sentFiltered.map((t) => (
                   <tr key={t.id}>
-                    <td>{t.doc_type === "CEDULA" ? "Cédula" : t.doc_type === "OFICIO" ? "Oficio" : "Otros Escritos"}</td>
+                    <td>{t.doc_type === "CEDULA" ? "Cédula" : t.doc_type === "OFICIO" ? "Oficio" : "Causas Penales"}</td>
                     <td>{displayName(profiles[t.recipient_user_id])}</td>
                     <td>{t.title || "-"}</td>
                     <td>{fmtDate(t.created_at)}</td>
@@ -428,7 +428,7 @@ export default function RecibidosPage() {
                     ? "Cédula"
                     : selectedTransfer.doc_type === "OFICIO"
                     ? "Oficio"
-                    : "Otros Escritos"}
+                    : "Causas Penales"}
                 </span>
               </div>
               {selectedTransfer.title && (

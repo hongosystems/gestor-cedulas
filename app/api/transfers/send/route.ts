@@ -49,6 +49,7 @@ export async function POST(req: Request) {
     const recipient_user_id = String(form.get("recipient_user_id") || "");
     const doc_type = String(form.get("doc_type") || "");
     const title = String(form.get("title") || "").trim();
+    const expediente_ref = String(form.get("expediente_ref") || "").trim() || null;
     const file = form.get("file");
 
     if (!recipient_user_id) {
@@ -93,6 +94,7 @@ export async function POST(req: Request) {
         recipient_user_id,
         doc_type,
         title: title || null,
+        expediente_ref,
       })
       .select("id")
       .single();
@@ -145,7 +147,28 @@ export async function POST(req: Request) {
       (senderProfile?.email || "").trim() ||
       "Usuario";
 
-    const tipoTxt = doc_type === "CEDULA" ? "Cédula" : doc_type === "OFICIO" ? "Oficio" : "Otros Escritos";
+    const tipoTxt = doc_type === "CEDULA" ? "Cédula" : doc_type === "OFICIO" ? "Oficio" : "Causas Penales";
+    let expedienteData: { caratula?: string; juzgado?: string; numero?: string } = {};
+    if (expediente_ref) {
+      const parts = expediente_ref.split("/");
+      if (parts.length === 2) {
+        const [numero, anio] = parts;
+        const { data: favData } = await svc
+          .from("pjn_favoritos")
+          .select("caratula, juzgado, numero, anio")
+          .eq("numero", numero.trim())
+          .eq("anio", anio.trim())
+          .limit(1)
+          .maybeSingle();
+        if (favData) {
+          expedienteData = {
+            caratula: favData.caratula || undefined,
+            juzgado: favData.juzgado || undefined,
+            numero: `${favData.numero}/${favData.anio}`,
+          };
+        }
+      }
+    }
 
     // 5) Crear notificación para el destinatario
     const notificationTitle = title ? `${tipoTxt}: ${title}` : `${tipoTxt} nueva`;
@@ -153,12 +176,16 @@ export async function POST(req: Request) {
       user_id: recipient_user_id,
       title: notificationTitle,
       body: `${senderName} te envió un ${tipoTxt.toLowerCase()}${title ? `: "${title}"` : ""}. Haz clic en "Descargar archivo" para obtener el documento adjunto.`,
-      link: `/app/recibidos`,
+      link: expediente_ref ? `/superadmin/mis-juzgados` : `/app/recibidos`,
       metadata: {
         transfer_id: transferId,
         sender_id: user.id,
         doc_type: doc_type,
         title: title || null,
+        ...(expedienteData.caratula ? { caratula: expedienteData.caratula } : {}),
+        ...(expedienteData.juzgado ? { juzgado: expedienteData.juzgado } : {}),
+        ...(expedienteData.numero ? { numero: expedienteData.numero } : {}),
+        ...(expediente_ref ? { case_ref: expediente_ref } : {}),
       },
     });
 
