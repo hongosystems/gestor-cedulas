@@ -162,14 +162,32 @@ function tienePruebaPericia(movimientos: any): boolean {
       }
     }
     
-    if (Array.isArray(movs) && movs.length > 0) {
+    // Un solo movimiento { cols, tipo } a veces viene como objeto, no como array
+    if (!Array.isArray(movs)) {
+      if (
+        typeof movs === "object" &&
+        movs !== null &&
+        ("cols" in movs || "Detalle" in movs || "detalle" in movs)
+      ) {
+        movs = [movs];
+      } else {
+        return false;
+      }
+    }
+    
+    if (movs.length > 0) {
       for (const mov of movs) {
         if (typeof mov === 'object' && mov !== null) {
           let detalleText = '';
           
-          if (mov.Detalle) {
-            detalleText = String(mov.Detalle).toUpperCase();
-          } else if (mov.cols && Array.isArray(mov.cols)) {
+          // Solo usar Detalle raíz si tiene texto real; si no, seguir con cols (evita Detalle "" o " " que saltaba cols)
+          const m = mov as Record<string, unknown>;
+          const detalleDirectRaw = m.Detalle ?? m.detalle;
+          if (detalleDirectRaw != null && String(detalleDirectRaw).trim() !== "") {
+            detalleText = String(detalleDirectRaw).toUpperCase();
+          }
+          
+          if ((!detalleText || detalleText.trim().length === 0) && mov.cols && Array.isArray(mov.cols)) {
             // Primero: buscar "Detalle:" en cualquier columna
             for (const col of mov.cols) {
               const colStr = String(col).trim();
@@ -268,6 +286,14 @@ function tienePruebaPericia(movimientos: any): boolean {
             /DESIGN[EA]SE\s+(?:EXPERTO|EXPERTA|CONSULTOR|CONSULTORA)/i,
             /TRASLADO\s+DEL\s+INFORME/i
           ];
+          
+          if (/perito/i.test(detalleText)) {
+            console.log("[DEBUG tienePruebaPericia] detalleText (contiene perito):", detalleText);
+            for (const patron of patrones) {
+              const matched = patron.test(detalleText);
+              console.log("[DEBUG tienePruebaPericia] patrón:", patron.toString(), "→ match:", matched);
+            }
+          }
           
           for (const patron of patrones) {
             if (patron.test(detalleText)) {
@@ -1796,7 +1822,18 @@ export default function PruebaPericiaPage() {
       if (numExp && expedientesIds.has(numExp)) return;
       expedientesIds.add(numExp);
       
-      todos.push({ ...e, is_pjn_favorito: false });
+      // Enriquecer con movimientos del favorito PJN si existe
+      const numExpKey = e.numero_expediente || "";
+      const favMatch = pjnFavoritos.find(f => `${f.numero}/${f.anio}` === numExpKey);
+      todos.push({ 
+        ...e, 
+        is_pjn_favorito: false,
+        movimientos: favMatch?.movimientos || null,
+        fecha_ultima_carga: e.fecha_ultima_carga || favMatch?.fecha_ultima_carga || null,
+      });
+      if (favMatch?.movimientos) {
+        console.log('[DEBUG] Expediente enriquecido con movimientos:', numExpKey, 'tiene perito:', tienePruebaPericia(favMatch.movimientos));
+      }
     });
 
     // Agregar favoritos PJN como expedientes (filtrar por juzgados si aplica)
@@ -1841,6 +1878,7 @@ export default function PruebaPericiaPage() {
     });
 
     // Filtrar solo por Prueba/Pericia usando el patrón canónico
+    console.log('[DEBUG] Total todos antes de filtro:', todos.length, 'después de filtro:', todos.filter(e => e.movimientos ? tienePruebaPericia(e.movimientos) : false).length);
     return todos.filter(e => {
       return e.movimientos ? tienePruebaPericia(e.movimientos) : false;
     });
