@@ -121,6 +121,7 @@ type RailwayTryResult = {
   ok: boolean;
   expNro: string | null;
   caratula: string | null;
+  tipoDocumento: string | null;
 };
 
 async function tryRailwayEndpoint(
@@ -156,21 +157,25 @@ async function tryRailwayEndpoint(
       }
     }
 
+    const tipoDocumento =
+      res.headers.get("X-Tipo-Documento") || res.headers.get("x-tipo-documento") || null;
+
     await res.arrayBuffer().catch(() => undefined);
 
     return {
       ok: res.ok && !!expNro,
       expNro,
       caratula: caratula || null,
+      tipoDocumento,
     };
   } catch (e) {
     console.warn("[detect-type-upload] Railway fetch failed:", endpoint, e);
-    return { ok: false, expNro: null, caratula: null };
+    return { ok: false, expNro: null, caratula: null, tipoDocumento: null };
   }
 }
 
 /**
- * POST /procesar primero; si no hay expediente, POST /procesar-oficio.
+ * POST /procesar primero (tipo vía X-Tipo-Documento); si falla, POST /procesar-oficio como respaldo.
  * Éxito = respuesta OK y header X-Exp-Nro no vacío (misma convención que procesar-ocr).
  */
 async function railwayClassifyPdf(buffer: Buffer): Promise<{
@@ -189,8 +194,9 @@ async function railwayClassifyPdf(buffer: Buffer): Promise<{
 
     const ced = await tryRailwayEndpoint(base, "/procesar", buffer, "cedula.pdf");
     if (ced.ok) {
+      const detectedTipo = ced.tipoDocumento === "OFICIO" ? "OFICIO" : "CEDULA";
       return {
-        tipo: "CEDULA",
+        tipo: detectedTipo,
         autoDetected: true,
         expNro: ced.expNro,
         caratula: ced.caratula,
