@@ -23,6 +23,20 @@ function formatDateInput(value: string): string {
   return formatted;
 }
 
+function formatTime24Input(value: string): string {
+  let d = value.replace(/\D/g, "").slice(0, 4);
+  if (d.length >= 2) {
+    const hh = Math.min(23, parseInt(d.slice(0, 2), 10) || 0);
+    d = String(hh).padStart(2, "0") + d.slice(2);
+  }
+  if (d.length >= 4) {
+    const mm = Math.min(59, parseInt(d.slice(2, 4), 10) || 0);
+    d = d.slice(0, 2) + String(mm).padStart(2, "0");
+  }
+  if (d.length <= 2) return d;
+  return d.slice(0, 2) + ":" + d.slice(2);
+}
+
 function ddmmaaaaToISO(ddmmaaaa: string): string | null {
   if (!ddmmaaaa || ddmmaaaa.trim() === "") return null;
   const parts = ddmmaaaa.trim().split("/");
@@ -119,6 +133,7 @@ export default function NuevaMediacionPage() {
   const [objeto_reclamo, setObjeto_reclamo] = useState("");
   const [fecha_hecho, setFecha_hecho] = useState("");
   const [lugar_hecho, setLugar_hecho] = useState("");
+  const [horario_hecho, setHorario_hecho] = useState("");
   const [vehiculo, setVehiculo] = useState("");
   const [dominio_patente, setDominio_patente] = useState("");
   const [nro_siniestro, setNro_siniestro] = useState("");
@@ -127,6 +142,7 @@ export default function NuevaMediacionPage() {
   const [linea_interno, setLinea_interno] = useState("");
   const [articulo, setArticulo] = useState("");
   const [intervino, setIntervino] = useState("");
+  const [lugar_atencion, setLugar_atencion] = useState("");
   const [lesiones_ambos, setLesiones_ambos] = useState("");
 
   useEffect(() => {
@@ -218,6 +234,7 @@ export default function NuevaMediacionPage() {
         objeto_reclamo: objeto_reclamo || null,
         fecha_hecho: ddmmaaaaToISO(fecha_hecho) || null,
         lugar_hecho: lugar_hecho.trim() || null,
+        horario_hecho: horario_hecho.trim() || null,
         vehiculo: vehiculo.trim() || null,
         dominio_patente: dominio_patente.trim() || null,
         nro_siniestro: nro_siniestro.trim() || null,
@@ -226,6 +243,7 @@ export default function NuevaMediacionPage() {
         linea_interno: linea_interno.trim() || null,
         articulo: articulo.trim() || null,
         intervino: intervino.trim() || null,
+        lugar_atencion: lugar_atencion.trim() || null,
         lesiones_ambos: lesiones_ambos.trim() || null,
       })
       .select("id")
@@ -444,7 +462,10 @@ export default function NuevaMediacionPage() {
               <h3 style={{ marginBottom: 16 }}>Hecho y reclamo</h3>
               <div className="field"><label className="label">Objeto del reclamo</label><select className="input" value={objeto_reclamo} onChange={(e) => setObjeto_reclamo(e.target.value)}><option value="">—</option>{OBJETO_RECLAMO.map((o) => <option key={o} value={o}>{o}</option>)}</select></div>
               <div className="field"><label className="label">Fecha del hecho (DD/MM/AAAA)</label><input className="input" value={fecha_hecho} onChange={(e) => setFecha_hecho(formatDateInput(e.target.value))} placeholder="DD/MM/AAAA" /></div>
-              <div className="field"><label className="label">Lugar</label><input className="input" value={lugar_hecho} onChange={(e) => setLugar_hecho(e.target.value)} /></div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div className="field"><label className="label">Lugar</label><input className="input" value={lugar_hecho} onChange={(e) => setLugar_hecho(e.target.value)} /></div>
+                <div className="field"><label className="label">Horario: HH:MM</label><input className="input" value={horario_hecho} onChange={(e) => setHorario_hecho(formatTime24Input(e.target.value))} placeholder="24 hrs" inputMode="numeric" /></div>
+              </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <div className="field"><label className="label">Vehículo</label><input className="input" value={vehiculo} onChange={(e) => setVehiculo(e.target.value)} /></div>
                 <div className="field"><label className="label">Colectivo — Línea e interno</label><input className="input" value={linea_interno} onChange={(e) => setLinea_interno(e.target.value)} /></div>
@@ -459,6 +480,7 @@ export default function NuevaMediacionPage() {
               </div>
               <div className="field"><label className="label">Mecánica del hecho</label><textarea className="input" rows={4} value={mecanica_hecho} onChange={(e) => setMecanica_hecho(e.target.value)} placeholder="Describa brevemente el hecho..." /></div>
               <div className="field"><label className="label">Intervino</label><input className="input" value={intervino} onChange={(e) => setIntervino(e.target.value)} placeholder="Ej: policía, ambulancia, bomberos" /></div>
+              <div className="field"><label className="label">Lugar de Atención</label><input className="input" value={lugar_atencion} onChange={(e) => setLugar_atencion(e.target.value)} placeholder="Hospital o centro de atención" /></div>
               <div className="field"><label className="label">Lesiones de ambos</label><textarea className="input" rows={3} value={lesiones_ambos} onChange={(e) => setLesiones_ambos(e.target.value)} /></div>
             </div>
           )}
@@ -529,6 +551,7 @@ export default function NuevaMediacionPage() {
                 <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>Objeto del reclamo:</strong> {objeto_reclamo || "—"}</p>
                 <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>Fecha del hecho:</strong> {fecha_hecho || "—"}</p>
                 <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>Lugar:</strong> {lugar_hecho || "—"}</p>
+                <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>Horario (HH:MM):</strong> {horario_hecho || "—"}</p>
                 <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>Vehículo:</strong> {vehiculo || "—"}</p>
                 <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>Línea/Interno:</strong> {linea_interno || "—"}</p>
                 <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>Dominio/Patente:</strong> {dominio_patente || "—"}</p>
@@ -537,6 +560,7 @@ export default function NuevaMediacionPage() {
                 <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>N° Póliza:</strong> {nro_poliza || "—"}</p>
                 <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>Mecánica del hecho:</strong> {mecanica_hecho || "—"}</p>
                 <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>Intervino:</strong> {intervino || "—"}</p>
+                <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>Lugar de Atención:</strong> {lugar_atencion || "—"}</p>
                 <p style={{ marginLeft: 14, ...REVIEW_P }}><strong>Lesiones de ambos:</strong> {lesiones_ambos || "—"}</p>
 
               </div>

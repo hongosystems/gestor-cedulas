@@ -48,6 +48,7 @@ export async function POST(req: NextRequest) {
       objeto_reclamo,
       fecha_hecho,
       lugar_hecho,
+      horario_hecho,
       vehiculo,
       dominio_patente,
       nro_siniestro,
@@ -56,6 +57,7 @@ export async function POST(req: NextRequest) {
       linea_interno,
       articulo,
       intervino,
+      lugar_atencion,
       lesiones_ambos,
       requeridos = [],
     } = body;
@@ -81,6 +83,7 @@ export async function POST(req: NextRequest) {
         objeto_reclamo: objeto_reclamo ?? null,
         fecha_hecho: fecha_hecho || null,
         lugar_hecho: lugar_hecho ?? null,
+        horario_hecho: horario_hecho ?? null,
         vehiculo: vehiculo ?? null,
         dominio_patente: dominio_patente ?? null,
         nro_siniestro: nro_siniestro ?? null,
@@ -89,6 +92,7 @@ export async function POST(req: NextRequest) {
         linea_interno: linea_interno ?? null,
         articulo: articulo ?? null,
         intervino: intervino ?? null,
+        lugar_atencion: lugar_atencion ?? null,
         lesiones_ambos: lesiones_ambos ?? null,
       })
       .select("id, numero_tramite, estado, created_at")

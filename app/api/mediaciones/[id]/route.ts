@@ -136,6 +136,7 @@ export async function PATCH(
       objeto_reclamo,
       fecha_hecho,
       lugar_hecho,
+      horario_hecho,
       vehiculo,
       dominio_patente,
       nro_siniestro,
@@ -144,6 +145,7 @@ export async function PATCH(
       linea_interno,
       articulo,
       intervino,
+      lugar_atencion,
       lesiones_ambos,
       requeridos,
     } = body;
@@ -168,6 +170,7 @@ export async function PATCH(
     if (objeto_reclamo !== undefined) updatePayload.objeto_reclamo = objeto_reclamo;
     if (fecha_hecho !== undefined) updatePayload.fecha_hecho = fecha_hecho || null;
     if (lugar_hecho !== undefined) updatePayload.lugar_hecho = lugar_hecho;
+    if (horario_hecho !== undefined) updatePayload.horario_hecho = horario_hecho;
     if (vehiculo !== undefined) updatePayload.vehiculo = vehiculo;
     if (dominio_patente !== undefined) updatePayload.dominio_patente = dominio_patente;
     if (nro_siniestro !== undefined) updatePayload.nro_siniestro = nro_siniestro;
@@ -176,6 +179,7 @@ export async function PATCH(
     if (linea_interno !== undefined) updatePayload.linea_interno = linea_interno;
     if (articulo !== undefined) updatePayload.articulo = articulo;
     if (intervino !== undefined) updatePayload.intervino = intervino;
+    if (lugar_atencion !== undefined) updatePayload.lugar_atencion = lugar_atencion;
     if (lesiones_ambos !== undefined) updatePayload.lesiones_ambos = lesiones_ambos;
 
     if (estado !== undefined && estado !== existing.estado) {

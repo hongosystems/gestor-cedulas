@@ -36,3 +36,7 @@ CREATE POLICY "user_mediacion_requirentes" ON mediacion_requirentes
   WITH CHECK (
     EXISTS (SELECT 1 FROM mediaciones m WHERE m.id = mediacion_requirentes.mediacion_id AND m.user_id = auth.uid())
   );
+
+-- Hecho y reclamo: horario (HH:MM) y lugar de atención (idempotente; ver también add_mediacion_horario_lugar_atencion.sql)
+ALTER TABLE mediaciones ADD COLUMN IF NOT EXISTS horario_hecho TEXT;
+ALTER TABLE mediaciones ADD COLUMN IF NOT EXISTS lugar_atencion TEXT;

@@ -108,11 +108,13 @@ function buildCartaDocumentoPdf(mediacion: any, requeridos: any[], requirentesRo
   fmt("Objeto del reclamo", mediacion.objeto_reclamo);
   fmt("Fecha hecho", mediacion.fecha_hecho);
   fmt("Lugar", mediacion.lugar_hecho);
+  fmt("Horario (HH:MM)", mediacion.horario_hecho);
   fmt("Vehículo", mediacion.vehiculo);
   fmt("Dominio/Patente", mediacion.dominio_patente);
   fmt("Nº Siniestro", mediacion.nro_siniestro);
   fmt("Nº Póliza", mediacion.nro_poliza);
   fmt("Mecánica del hecho", mediacion.mecanica_hecho);
+  fmt("Lugar de atención", mediacion.lugar_atencion);
   y += 4;
 
   if (requeridos && requeridos.length > 0) {

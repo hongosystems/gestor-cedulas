@@ -165,6 +165,7 @@ function buildFormularioMediacionPdf(mediacion: any, requeridos: any[], requiren
   line(`Objeto del reclamo: ${v(mediacion.objeto_reclamo)}`, false, 11);
   line(`Fecha del Hecho: ${isoToDDMMAAAA(mediacion.fecha_hecho)}`, false, 11);
   line(`Lugar del Hecho: ${v(mediacion.lugar_hecho)}`, false, 11);
+  line(`Horario (HH:MM): ${v(mediacion.horario_hecho)}`, false, 11);
   line(`Vehiculo: ${v(mediacion.vehiculo)}`, false, 11);
   line(`(Colectivo agregar Línea e interno): ${v(mediacion.linea_interno)}`, false, 11);
   line(`Dominio: ${v(mediacion.dominio_patente)}`, false, 11);
@@ -179,6 +180,8 @@ function buildFormularioMediacionPdf(mediacion: any, requeridos: any[], requiren
   line(`Mecánica: ${v(mediacion.mecanica_hecho)}`, false, 11);
   y += 2;
   line(`Intervino: ${v(mediacion.intervino)}`, false, 11);
+  y += 2;
+  line(`Lugar de Atención: ${v(mediacion.lugar_atencion)}`, false, 11);
   y += 2;
   line(`Lesiones de ambos: ${v(mediacion.lesiones_ambos)}`, false, 11);
 

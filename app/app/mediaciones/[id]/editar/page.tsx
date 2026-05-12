@@ -19,6 +19,20 @@ function formatDateInput(value: string): string {
   return formatted;
 }
 
+function formatTime24Input(value: string): string {
+  let d = value.replace(/\D/g, "").slice(0, 4);
+  if (d.length >= 2) {
+    const hh = Math.min(23, parseInt(d.slice(0, 2), 10) || 0);
+    d = String(hh).padStart(2, "0") + d.slice(2);
+  }
+  if (d.length >= 4) {
+    const mm = Math.min(59, parseInt(d.slice(2, 4), 10) || 0);
+    d = d.slice(0, 2) + String(mm).padStart(2, "0");
+  }
+  if (d.length <= 2) return d;
+  return d.slice(0, 2) + ":" + d.slice(2);
+}
+
 function isoToDDMMAAAA(iso: string | null): string {
   if (!iso) return "";
   const d = iso.substring(0, 10);
@@ -80,6 +94,7 @@ export default function EditarMediacionPage() {
   const [objeto_reclamo, setObjeto_reclamo] = useState("");
   const [fecha_hecho, setFecha_hecho] = useState("");
   const [lugar_hecho, setLugar_hecho] = useState("");
+  const [horario_hecho, setHorario_hecho] = useState("");
   const [vehiculo, setVehiculo] = useState("");
   const [dominio_patente, setDominio_patente] = useState("");
   const [nro_siniestro, setNro_siniestro] = useState("");
@@ -88,6 +103,7 @@ export default function EditarMediacionPage() {
   const [linea_interno, setLinea_interno] = useState("");
   const [articulo, setArticulo] = useState("");
   const [intervino, setIntervino] = useState("");
+  const [lugar_atencion, setLugar_atencion] = useState("");
   const [lesiones_ambos, setLesiones_ambos] = useState("");
   const [requeridos, setRequeridos] = useState<Requerido[]>([]);
 
@@ -141,6 +157,7 @@ export default function EditarMediacionPage() {
       setObjeto_reclamo(m.objeto_reclamo || "");
       setFecha_hecho(isoToDDMMAAAA(m.fecha_hecho));
       setLugar_hecho(m.lugar_hecho || "");
+      setHorario_hecho(m.horario_hecho || "");
       setVehiculo(m.vehiculo || "");
       setDominio_patente(m.dominio_patente || "");
       setNro_siniestro(m.nro_siniestro || "");
@@ -149,6 +166,7 @@ export default function EditarMediacionPage() {
       setLinea_interno(m.linea_interno || "");
       setArticulo(m.articulo || "");
       setIntervino(m.intervino || "");
+      setLugar_atencion(m.lugar_atencion || "");
       setLesiones_ambos(m.lesiones_ambos || "");
       setRequeridos(
         (m.requeridos || []).length > 0
@@ -215,6 +233,7 @@ export default function EditarMediacionPage() {
       objeto_reclamo: objeto_reclamo.trim() || null,
       fecha_hecho: ddmmaaaaToISO(fecha_hecho) || null,
       lugar_hecho: lugar_hecho.trim() || null,
+      horario_hecho: horario_hecho.trim() || null,
       vehiculo: vehiculo.trim() || null,
       linea_interno: linea_interno.trim() || null,
       dominio_patente: dominio_patente.trim() || null,
@@ -223,6 +242,7 @@ export default function EditarMediacionPage() {
       articulo: articulo.trim() || null,
       mecanica_hecho: mecanica_hecho.trim() || null,
       intervino: intervino.trim() || null,
+      lugar_atencion: lugar_atencion.trim() || null,
       lesiones_ambos: lesiones_ambos.trim() || null,
       requeridos: requeridos
         .filter((r) => r.nombre.trim() || r.empresa_nombre_razon_social.trim())
@@ -329,7 +349,10 @@ export default function EditarMediacionPage() {
             <h3 style={{ marginTop: 24, marginBottom: 12 }}>Hecho</h3>
             <div className="field"><label className="label">Objeto del reclamo</label><textarea className="input" rows={3} value={objeto_reclamo} onChange={(e) => setObjeto_reclamo(e.target.value)} /></div>
             <div className="field"><label className="label">Fecha hecho (DD/MM/AAAA)</label><input className="input" value={fecha_hecho} onChange={(e) => setFecha_hecho(formatDateInput(e.target.value))} placeholder="DD/MM/AAAA" /></div>
-            <div className="field"><label className="label">Lugar</label><input className="input" value={lugar_hecho} onChange={(e) => setLugar_hecho(e.target.value)} /></div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div className="field"><label className="label">Lugar</label><input className="input" value={lugar_hecho} onChange={(e) => setLugar_hecho(e.target.value)} /></div>
+              <div className="field"><label className="label">Horario: HH:MM</label><input className="input" value={horario_hecho} onChange={(e) => setHorario_hecho(formatTime24Input(e.target.value))} placeholder="24 hrs" inputMode="numeric" /></div>
+            </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <div className="field"><label className="label">Vehículo</label><input className="input" value={vehiculo} onChange={(e) => setVehiculo(e.target.value)} /></div>
               <div className="field"><label className="label">Colectivo — Línea e interno</label><input className="input" value={linea_interno} onChange={(e) => setLinea_interno(e.target.value)} /></div>
@@ -344,6 +367,7 @@ export default function EditarMediacionPage() {
             </div>
             <div className="field"><label className="label">Mecánica del hecho</label><textarea className="input" rows={2} value={mecanica_hecho} onChange={(e) => setMecanica_hecho(e.target.value)} /></div>
             <div className="field"><label className="label">Intervino</label><input className="input" value={intervino} onChange={(e) => setIntervino(e.target.value)} placeholder="Ej: policía, ambulancia, bomberos" /></div>
+            <div className="field"><label className="label">Lugar de Atención</label><input className="input" value={lugar_atencion} onChange={(e) => setLugar_atencion(e.target.value)} placeholder="Hospital o centro de atención" /></div>
             <div className="field"><label className="label">Lesiones de ambos</label><textarea className="input" rows={3} value={lesiones_ambos} onChange={(e) => setLesiones_ambos(e.target.value)} /></div>
 
             <h3 style={{ marginTop: 24, marginBottom: 12 }}>Requeridos</h3>

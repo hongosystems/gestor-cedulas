@@ -30,6 +30,7 @@ type Mediacion = {
   objeto_reclamo: string | null;
   fecha_hecho: string | null;
   lugar_hecho: string | null;
+  horario_hecho?: string | null;
   vehiculo: string | null;
   dominio_patente: string | null;
   nro_siniestro: string | null;
@@ -38,6 +39,7 @@ type Mediacion = {
   linea_interno?: string | null;
   articulo?: string | null;
   intervino?: string | null;
+  lugar_atencion?: string | null;
   lesiones_ambos?: string | null;
   requeridos?: any[];
   requirentes?: {
@@ -490,7 +492,7 @@ export default function MediacionDetailPage() {
               <Section title="Hecho y reclamo" open={openHecho} onToggle={() => setOpenHecho(!openHecho)} editHref={((isAdminMediaciones || isSuperadmin) || (isMediador && mediacion.user_id === currentUid)) ? `/app/mediaciones/${id}/editar` : undefined}>
                 <div style={{ overflowX: "hidden", wordBreak: "break-word", overflowWrap: "break-word" }}>
                   <p><strong>Objeto:</strong> {mediacion.objeto_reclamo || "—"}</p>
-                  <p className="muted">Fecha: {formatDate(mediacion.fecha_hecho)} · Lugar: {mediacion.lugar_hecho || "—"}</p>
+                  <p className="muted">Fecha: {formatDate(mediacion.fecha_hecho)} · Lugar: {mediacion.lugar_hecho || "—"} · Horario: {mediacion.horario_hecho || "—"}</p>
                   <p className="muted">Vehículo: {mediacion.vehiculo || "—"}{mediacion.linea_interno ? ` · Línea/Interno: ${mediacion.linea_interno}` : ""} · Dominio: {mediacion.dominio_patente || "—"}</p>
                   <p className="muted">Siniestro: {mediacion.nro_siniestro || "—"} · Póliza: {mediacion.nro_poliza || "—"}</p>
                   {(mediacion.articulo || mediacion.intervino) && (
@@ -500,6 +502,7 @@ export default function MediacionDetailPage() {
                       {mediacion.intervino ? `Intervino: ${mediacion.intervino}` : ""}
                     </p>
                   )}
+                  <p className="muted">Lugar de Atención: {mediacion.lugar_atencion || "—"}</p>
                   {mediacion.mecanica_hecho && (
                     <p style={{ marginTop: 8, whiteSpace: "pre-wrap", wordBreak: "break-word", overflowWrap: "break-word" }}>{mediacion.mecanica_hecho}</p>
                   )}
