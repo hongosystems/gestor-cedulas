@@ -428,6 +428,18 @@ export async function POST(req: NextRequest) {
       console.log("[API reply] Transferencia creada exitosamente:", transferId);
     }
 
+    if (hasFile && !transferId) {
+      return NextResponse.json(
+        {
+          error:
+            "No se pudo registrar el archivo adjunto. Si usaste un .docx, reintentá el envío o respondé desde el hilo del documento en Recibidos.",
+          suggestion:
+            "Si subiste una nueva versión desde la pantalla Recibidos, la otra parte debería poder descargarla desde la notificación tras actualizar la app.",
+        },
+        { status: 400 }
+      );
+    }
+
     const isSelfReply = recipientId === user.id;
 
     // Crear la respuesta como nueva notificación

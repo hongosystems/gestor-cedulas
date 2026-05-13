@@ -58,7 +58,7 @@ export async function POST(req: Request) {
     // Check permiso: sender o recipient
     const { data: t } = await svc
       .from("file_transfers")
-      .select("id, sender_user_id, recipient_user_id, doc_type")
+      .select("id, sender_user_id, recipient_user_id, doc_type, title")
       .eq("id", transferId)
       .single();
 
@@ -121,6 +121,12 @@ export async function POST(req: Request) {
       title: `${tipoTxt} actualizada`,
       body: `${actor} subió una nueva versión (${nextVersion}).`,
       link: `/app/recibidos`,
+      metadata: {
+        transfer_id: transferId,
+        sender_id: user.id,
+        doc_type: t.doc_type,
+        ...(t.title ? { title: t.title } : {}),
+      },
     });
 
     return NextResponse.json({ ok: true, version: nextVersion });
