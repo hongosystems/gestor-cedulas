@@ -2,40 +2,40 @@
 -- Contexto: /api/transfers/upload-version insertaba notificaciones con link
 -- /app/recibidos pero sin metadata; la bandeja no podía mostrar "Descargar archivo".
 --
--- Heurística (conservadora):
---   - title exacto: Cédula / Oficio / Causas Penales + " actualizada"
---   - body contiene "subió una nueva versión (N)" — N debe coincidir con file_transfer_versions.version
---   - user_id de la notificación es quien recibe (la otra parte del transfer respecto de created_by)
---   - file_transfer_versions.created_at cercano a notifications.created_at
+-- Heurística (v2, más amplia que v1):
+--   - link /app/recibidos
+--   - title: títulos exactos conocidos O cualquier título que termine en "actualizada"
+--   - body: versión extraída con regex case-insensitive y espacios flexibles
+--   - user_id = destinatario del aviso (otra parte del transfer respecto de created_by)
+--   - created_at de la versión dentro de una ventana amplia respecto a la notificación
 --
 -- Idempotente: no toca filas que ya tienen metadata.transfer_id.
--- Ejecutar en Supabase SQL Editor (o psql) tras deploy del fix en upload-version.
+-- Si ya ejecutaste v1 y quedaron filas sin matchear, volvé a ejecutar este script completo.
 
--- Antes del UPDATE, contar candidatos (mismos filtros que "parsed"):
+-- Contar candidatos sin transfer_id (ajustá filtros si hace falta):
 -- SELECT count(*) FROM notifications n
 -- WHERE n.link = '/app/recibidos'
---   AND n.title IN ('Cédula actualizada', 'Oficio actualizada', 'Causas Penales actualizada')
 --   AND COALESCE(n.metadata, '{}'::jsonb) ->> 'transfer_id' IS NULL
---   AND n.body ~ 'subió una nueva versión \([0-9]+\)';
---
--- Después del UPDATE, ver si quedaron sin matchear (debería ser 0 o muy bajo):
--- SELECT id, title, body, created_at FROM notifications n
--- WHERE n.link = '/app/recibidos'
---   AND n.title IN ('Cédula actualizada', 'Oficio actualizada', 'Causas Penales actualizada')
---   AND COALESCE(n.metadata, '{}'::jsonb) ->> 'transfer_id' IS NULL
---   AND n.body ~ 'subió una nueva versión \([0-9]+\)';
+--   AND regexp_match(n.body, 'subió\s+una\s+nueva\s+versión\s*\(\s*([0-9]+)\s*\)', 'i') IS NOT NULL
+--   AND (
+--     n.title IN ('Cédula actualizada', 'Oficio actualizada', 'Causas Penales actualizada')
+--     OR (n.title ILIKE '%actualizada%' AND length(trim(n.title)) < 120)
+--   );
 
 WITH parsed AS (
   SELECT
     n.id,
     n.user_id,
     n.created_at,
-    (substring(n.body FROM 'subió una nueva versión \(([0-9]+)\)'))::int AS ver
+    (regexp_match(n.body, 'subió\s+una\s+nueva\s+versión\s*\(\s*([0-9]+)\s*\)', 'i'))[1]::int AS ver
   FROM notifications n
   WHERE n.link = '/app/recibidos'
-    AND n.title IN ('Cédula actualizada', 'Oficio actualizada', 'Causas Penales actualizada')
     AND COALESCE(n.metadata, '{}'::jsonb) ->> 'transfer_id' IS NULL
-    AND n.body ~ 'subió una nueva versión \([0-9]+\)'
+    AND regexp_match(n.body, 'subió\s+una\s+nueva\s+versión\s*\(\s*([0-9]+)\s*\)', 'i') IS NOT NULL
+    AND (
+      n.title IN ('Cédula actualizada', 'Oficio actualizada', 'Causas Penales actualizada')
+      OR (n.title ILIKE '%actualizada%' AND length(trim(n.title)) < 120)
+    )
 ),
 candidates AS (
   SELECT DISTINCT ON (p.id)
@@ -47,12 +47,13 @@ candidates AS (
   FROM parsed p
   INNER JOIN file_transfer_versions ftv ON ftv.version = p.ver
   INNER JOIN file_transfers ft ON ft.id = ftv.transfer_id
-  WHERE (
+  WHERE p.ver IS NOT NULL
+    AND (
       (ft.sender_user_id = p.user_id AND ftv.created_by = ft.recipient_user_id)
       OR (ft.recipient_user_id = p.user_id AND ftv.created_by = ft.sender_user_id)
     )
-    AND ftv.created_at >= p.created_at - interval '5 minutes'
-    AND ftv.created_at <= p.created_at + interval '1 minute'
+    AND ftv.created_at >= p.created_at - interval '48 hours'
+    AND ftv.created_at <= p.created_at + interval '10 minutes'
   ORDER BY p.id, abs(extract(epoch FROM (ftv.created_at - p.created_at)))
 )
 UPDATE notifications n

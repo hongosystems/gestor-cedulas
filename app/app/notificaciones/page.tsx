@@ -1681,9 +1681,13 @@ export default function NotificacionesPage() {
                   })}
                 </div>
 
-                {/* Cuerpo del email - Segunda parte: Metadata (Carátula, Juzgado, etc.) o Información de Transferencia */}
-                {selectedNotif.link === "/app/recibidos" ? (
-                  // Es una notificación de transferencia (Cédula/Oficio enviado)
+                {/* Archivo de transferencia: metadata.transfer_id puede existir con link a /superadmin/mis-juzgados (envíos con expediente_ref). */}
+                {(() => {
+                  const selMeta = parseMetadataSafe(selectedNotif.metadata);
+                  const tid = selMeta.transfer_id as string | undefined;
+                  const recibidos = selectedNotif.link === "/app/recibidos";
+                  if (!tid && !recibidos) return null;
+                  return (
                   <div style={{
                     padding: 16,
                     background: "rgba(96,141,186,.1)",
@@ -1694,10 +1698,10 @@ export default function NotificacionesPage() {
                       Archivo adjunto:
                     </div>
                     <div style={{ fontSize: 13, color: "rgba(234,243,255,.9)", lineHeight: 1.8 }}>
-                      {selectedNotif.metadata?.transfer_id ? (
+                      {tid ? (
                         <div style={{ marginBottom: 12 }}>
                           <div style={{ marginBottom: 8 }}>
-                            <strong>Tipo:</strong> {selectedNotif.metadata.doc_type === "OFICIO" ? "Oficio" : selectedNotif.metadata.doc_type === "OTROS_ESCRITOS" ? "Causas Penales" : "Cédula"}
+                            <strong>Tipo:</strong> {selMeta.doc_type === "OFICIO" ? "Oficio" : selMeta.doc_type === "OTROS_ESCRITOS" ? "Causas Penales" : "Cédula"}
                           </div>
                           {selectedNotif.title && (
                             <div style={{ marginBottom: 8 }}>
@@ -1723,7 +1727,7 @@ export default function NotificacionesPage() {
                                     "Content-Type": "application/json",
                                     "Authorization": `Bearer ${token}`,
                                   },
-                                  body: JSON.stringify({ transferId: selectedNotif.metadata?.transfer_id }),
+                                  body: JSON.stringify({ transferId: tid }),
                                 });
 
                                 const json = await res.json().catch(() => ({}));
@@ -1768,45 +1772,42 @@ export default function NotificacionesPage() {
                       )}
                     </div>
                   </div>
-                ) : (
-                  // Es una notificación de expediente/cédula normal
-                  // Solo mostrar si hay al menos un dato de expediente disponible
-                  (() => {
-                    const metadata = selectedNotif.metadata || {};
-                    const info = {
-                      caratula: metadata.caratula || expedienteInfo?.caratula || null,
-                      juzgado: metadata.juzgado || expedienteInfo?.juzgado || null,
-                      numero: metadata.numero || expedienteInfo?.numero || null,
-                    };
-                    const hasAnyInfo = info.caratula || info.juzgado || info.numero;
-                    
-                    if (!hasAnyInfo) return null;
-                    
-                    return (
-                      <div style={{
-                        padding: 16,
-                        background: "rgba(96,141,186,.1)",
-                        borderRadius: 8,
-                        border: "1px solid rgba(96,141,186,.2)"
-                      }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: "rgba(234,243,255,.8)", marginBottom: 8 }}>
-                          Información del expediente:
-                        </div>
-                        <div style={{ fontSize: 13, color: "rgba(234,243,255,.9)", lineHeight: 1.8 }}>
-                          {info.caratula && (
-                            <div style={{ marginBottom: 6 }}><strong>Carátula:</strong> {info.caratula}</div>
-                          )}
-                          {info.juzgado && (
-                            <div style={{ marginBottom: 6 }}><strong>Juzgado:</strong> {info.juzgado}</div>
-                          )}
-                          {info.numero && (
-                            <div style={{ marginBottom: 6 }}><strong>Número:</strong> {info.numero}</div>
-                          )}
-                        </div>
+                  );
+                })()}
+
+                {(() => {
+                  const metadata = parseMetadataSafe(selectedNotif.metadata) || {};
+                  const info = {
+                    caratula: metadata.caratula || expedienteInfo?.caratula || null,
+                    juzgado: metadata.juzgado || expedienteInfo?.juzgado || null,
+                    numero: metadata.numero || expedienteInfo?.numero || null,
+                  };
+                  const hasAnyInfo = info.caratula || info.juzgado || info.numero;
+                  if (!hasAnyInfo) return null;
+                  return (
+                    <div style={{
+                      padding: 16,
+                      background: "rgba(96,141,186,.1)",
+                      borderRadius: 8,
+                      border: "1px solid rgba(96,141,186,.2)"
+                    }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "rgba(234,243,255,.8)", marginBottom: 8 }}>
+                        Información del expediente:
                       </div>
-                    );
-                  })()
-                )}
+                      <div style={{ fontSize: 13, color: "rgba(234,243,255,.9)", lineHeight: 1.8 }}>
+                        {info.caratula && (
+                          <div style={{ marginBottom: 6 }}><strong>Carátula:</strong> {info.caratula}</div>
+                        )}
+                        {info.juzgado && (
+                          <div style={{ marginBottom: 6 }}><strong>Juzgado:</strong> {info.juzgado}</div>
+                        )}
+                        {info.numero && (
+                          <div style={{ marginBottom: 6 }}><strong>Número:</strong> {info.numero}</div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {isAutoPericia && ordenPdfUrl && (
                   <div style={{ marginBottom: 12, padding: "0 16px" }}>
@@ -1863,7 +1864,7 @@ export default function NotificacionesPage() {
                       </div>
                       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                         {/* Campo para adjuntar archivo (solo para notificaciones de transferencia) */}
-                        {selectedNotif.link === "/app/recibidos" && (
+                        {(!!parseMetadataSafe(selectedNotif.metadata).transfer_id || selectedNotif.link === "/app/recibidos") && (
                           <div style={{ marginBottom: 12 }}>
                             <label style={{
                               display: "block",

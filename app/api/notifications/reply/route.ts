@@ -217,10 +217,14 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-    
+
+    const parentIsTransferThread =
+      parentNotif.link === "/app/recibidos" ||
+      !!(parentMetadata && typeof parentMetadata === "object" && (parentMetadata as any)?.transfer_id);
+
     // Fase 1 (init): crear la transferencia y devolver el `storage_path`, pero SIN recibir/subir el archivo.
     if (phase === "init_transfer") {
-      if (!hasFile || parentNotif.link !== "/app/recibidos") {
+      if (!hasFile || !parentIsTransferThread) {
         return NextResponse.json({ ok: true, transferNeeded: false });
       }
 
@@ -300,7 +304,7 @@ export async function POST(req: NextRequest) {
     // Si hay un archivo adjunto y la notificación padre es de transferencia, crear una nueva transferencia
     let transferId: string | null = null;
     if (phase === "commit_reply") {
-      if (parentNotif.link === "/app/recibidos") {
+      if (parentIsTransferThread) {
         if (!transfer_upload?.transferId || !transfer_upload.storage_path) {
           return NextResponse.json(
             { error: "Falta información de transferencia para commit" },
@@ -322,7 +326,7 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ error: vErr.message }, { status: 500 });
         }
       }
-    } else if (file && parentNotif.link === "/app/recibidos") {
+    } else if (file && parentIsTransferThread) {
       // Obtener el transfer_id original del metadata
       let originalTransferId: string | null = null;
       
@@ -696,7 +700,7 @@ export async function POST(req: NextRequest) {
         console.error("Error al actualizar notas:", updateError);
         // No fallar si no se puede actualizar, la respuesta ya se creó
       }
-    } else if (parentNotif.link && parentNotif.link === "/app/recibidos") {
+    } else if (parentNotif.link && parentIsTransferThread) {
       // Es una notificación de transferencia (Cédula/Oficio enviado)
       // En este caso, el mensaje ya está guardado en nota_context de la notificación de respuesta
       // No hay una cédula/oficio existente para actualizar, pero el mensaje se puede ver en la notificación
