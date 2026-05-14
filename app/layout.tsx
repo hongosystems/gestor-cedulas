@@ -1,6 +1,5 @@
 import "./globals.css";
 import NotificationBellWrapper from "./components/NotificationBellWrapper";
-import ChatWidget from "./components/ChatWidget";
 
 export const metadata = {
   title: "Gestor de Cédulas",
@@ -15,9 +14,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
         {/* Campanita de notificaciones fija en todas las páginas */}
         <NotificationBellWrapper />
-
-        {/* Widget de chat interno */}
-        <ChatWidget />
 
         {/* watermark sutil en toda la app */}
         <div className="watermark" aria-hidden="true">
