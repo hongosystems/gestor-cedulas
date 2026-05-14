@@ -5,9 +5,10 @@ import { getUserFromRequest } from "@/lib/auth-api";
 
 export const runtime = "nodejs";
 
-// Aumentar timeout para OCR (Vercel Hobby: 10s, Pro: 60s)
-// La respuesta se envía de inmediato; el trabajo pesado corre en after()
-export const maxDuration = 60;
+// Vision en Railway suele tardar 2–3+ min. En Vercel el trabajo en after() cuenta
+// contra maxDuration; si es menor, el isolate se corta y queda estado_ocr "procesando".
+// vercel.json fija el mismo tope que cargar-pjn (300s en planes que lo permitan).
+export const maxDuration = 300;
 
 async function requireAdminCedulas(
   userId: string,
