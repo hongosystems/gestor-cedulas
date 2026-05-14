@@ -1328,7 +1328,9 @@ export default function MisCedulasPage() {
       }
       setMsg("OCR en proceso. Refresca en unos segundos.");
       setCedulas((prev) =>
-        prev.map((c) => (c.id === cedulaId ? { ...c, estado_ocr: null, ocr_error: null } : c))
+        prev.map((c) =>
+          c.id === cedulaId ? { ...c, estado_ocr: "procesando", ocr_error: null } : c
+        )
       );
     } catch (err: any) {
       setMsg(err?.message || "Error al reintentar OCR");

@@ -224,6 +224,11 @@ export default function DiligenciamientoPage() {
     return r;
   }, [cedulas, filters]);
 
+  const muestraAvisoOcrColgado = useMemo(
+    () => filteredCedulas.some((c) => c.estado_ocr === "procesando"),
+    [filteredCedulas]
+  );
+
   useEffect(() => {
     if (!menuOpen) return;
     const handleClickOutside = () => setMenuOpen(false);
@@ -803,6 +808,23 @@ export default function DiligenciamientoPage() {
                 )}
               </tbody>
             </table>
+            {muestraAvisoOcrColgado && (
+              <p
+                className="muted"
+                style={{
+                  marginTop: 12,
+                  marginBottom: 0,
+                  fontSize: 12,
+                  lineHeight: 1.45,
+                  maxWidth: 720,
+                }}
+              >
+                Si una fila lleva mucho tiempo en &quot;Procesando&quot; sin expediente ni fecha, no suele
+                deberse a otro registro: el trabajo OCR puede haberse colgado o fallado al parsear la
+                respuesta del modelo. Pedí al administrador de cédulas que use &quot;Reintentar OCR&quot; en
+                el panel principal (o que revise los logs del servicio Railway).
+              </p>
+            )}
           </div>
         </div>
       </section>

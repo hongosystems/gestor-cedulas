@@ -23,6 +23,9 @@ async function requireAdminCedulas(
 
 const CARGAR_PJN_FETCH_MS = 300_000;
 
+/** Límite para POST /procesar | /procesar-oficio en Railway (Vision puede tardar varios minutos). */
+const RAILWAY_OCR_FETCH_MS = 600_000;
+
 function railwayCargarPjnBaseUrl(): string | null {
   const raw =
     process.env.PJN_LOCAL_URL?.trim() ||
@@ -200,10 +203,30 @@ async function procesarOcrEnBackground(cedulaId: string, svc: ReturnType<typeof 
 
     const ocrEndpoint = cedula.tipo === "OFICIO" ? "/procesar-oficio" : "/procesar";
 
-    const railwayRes = await fetch(`${railwayUrl.replace(/\/$/, "")}${ocrEndpoint}`, {
-      method: "POST",
-      body: formData,
-    });
+    let railwayRes: Response;
+    try {
+      railwayRes = await fetch(`${railwayUrl.replace(/\/$/, "")}${ocrEndpoint}`, {
+        method: "POST",
+        body: formData,
+        signal: AbortSignal.timeout(RAILWAY_OCR_FETCH_MS),
+      });
+    } catch (fetchErr: unknown) {
+      const name = fetchErr instanceof Error ? fetchErr.name : "";
+      const isTimeout = name === "AbortError" || name === "TimeoutError";
+      const msg = isTimeout
+        ? `Tiempo de espera (${RAILWAY_OCR_FETCH_MS / 60_000} min) agotado al llamar al OCR en Railway.`
+        : fetchErr instanceof Error
+          ? fetchErr.message
+          : String(fetchErr);
+      await svc
+        .from("cedulas")
+        .update({
+          estado_ocr: "error",
+          ocr_error: msg,
+        })
+        .eq("id", cedulaId);
+      return;
+    }
 
     if (!railwayRes.ok) {
       const errorBody = await railwayRes.text();
@@ -272,9 +295,17 @@ async function procesarOcrEnBackground(cedulaId: string, svc: ReturnType<typeof 
       const errMsg = e?.message || String(e);
       await svc.from("cedulas").update({ observaciones_pjn: errMsg }).eq("id", cedulaId);
     }
-  } catch (e: any) {
-    const errMsg = e?.message || "Error inesperado en OCR";
-    const errCause = e?.cause ? ` (causa: ${String(e.cause)})` : "";
+  } catch (e: unknown) {
+    const errMsg =
+      e instanceof Error
+        ? e.message
+        : typeof e === "string"
+          ? e
+          : "Error inesperado en OCR";
+    const errCause =
+      e instanceof Error && e.cause != null
+        ? ` (causa: ${String(e.cause)})`
+        : "";
     console.error("[procesar-ocr] Error:", errMsg, errCause, "cedulaId:", cedulaId, "railwayUrl:", railwayUrl ? `${railwayUrl.slice(0, 30)}...` : "NO_CONFIGURADA");
     await svc
       .from("cedulas")
