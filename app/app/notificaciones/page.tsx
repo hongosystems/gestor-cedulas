@@ -36,6 +36,22 @@ type Notif = {
 
 type FilterType = "all" | "unread" | "read";
 
+function getThreadRootId(n: Pick<Notif, "id" | "thread_id">) {
+  return n.thread_id || n.id;
+}
+
+function messagePreviewText(msg: Pick<Notif, "nota_context" | "body">) {
+  const t = (msg.nota_context || "").trim();
+  if (t) return t;
+  return (msg.body || "").trim();
+}
+
+function snippet(text: string, maxLen: number) {
+  const t = text.replace(/\s+/g, " ").trim();
+  if (t.length <= maxLen) return t;
+  return `${t.slice(0, maxLen - 1)}…`;
+}
+
 function fmtTime(iso: string) {
   const d = new Date(iso);
   const now = new Date();
@@ -93,6 +109,110 @@ function parseMetadataSafe(rawMetadata: unknown) {
   return {};
 }
 
+type ThreadBubbleProps = {
+  msg: Notif;
+  currentUserId: string | null;
+  threadUserNames: Record<string, string>;
+  isAutoPericiaMsg: boolean;
+  compact?: boolean;
+  onDownloadTransfer: (transferId: string) => void;
+};
+
+function ThreadMessageBubble({
+  msg,
+  currentUserId,
+  threadUserNames,
+  isAutoPericiaMsg,
+  compact,
+  onDownloadTransfer,
+}: ThreadBubbleProps) {
+  const rawMeta = msg.metadata || {};
+  const senderId =
+    (typeof rawMeta === "object" && rawMeta ? (rawMeta as any).sender_id : null) || msg.user_id;
+  const isMyMsg = senderId === currentUserId;
+  const userName =
+    (senderId ? threadUserNames[senderId] : null) || (isMyMsg ? "Tú" : "Usuario");
+  const meta = parseMetadataSafe(msg.metadata) as {
+    transfer_id?: string;
+    doc_type?: "CEDULA" | "OFICIO" | "OTROS_ESCRITOS";
+  };
+  const tid = meta?.transfer_id;
+
+  const bodyText = msg.nota_context?.trim()
+    ? msg.nota_context
+    : msg.body || "";
+
+  return (
+    <div
+      style={{
+        padding: compact ? 10 : 16,
+        background: isMyMsg ? "rgba(96,141,186,.15)" : "rgba(255,255,255,.03)",
+        borderRadius: 8,
+        border: `1px solid ${isMyMsg ? "rgba(96,141,186,.3)" : "rgba(255,255,255,.1)"}`,
+        marginLeft: compact ? 0 : isMyMsg ? "auto" : 0,
+        marginRight: compact ? 0 : isMyMsg ? 0 : "auto",
+        maxWidth: compact ? "100%" : "85%",
+        position: "relative",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 8,
+        }}
+      >
+        <div
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: isMyMsg
+              ? "rgba(96,141,186,.9)"
+              : isAutoPericiaMsg
+                ? "rgba(241,196,15,.9)"
+                : "rgba(234,243,255,.8)",
+          }}
+        >
+          {isMyMsg ? "Tú" : isAutoPericiaMsg ? "🤖 NO RESPONDER - PJN AUTOMÁTICO" : userName}
+        </div>
+        <div style={{ fontSize: 11, color: "rgba(234,243,255,.6)" }}>{fmtTime(msg.created_at)}</div>
+      </div>
+      {bodyText ? (
+        <div
+          style={{
+            fontSize: 13,
+            color: "rgba(234,243,255,.9)",
+            lineHeight: 1.6,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+            ...(compact
+              ? {
+                  display: "-webkit-box",
+                  WebkitLineClamp: 3 as unknown as number,
+                  WebkitBoxOrient: "vertical" as const,
+                  overflow: "hidden",
+                }
+              : {}),
+          }}
+        >
+          {bodyText}
+        </div>
+      ) : null}
+      {tid ? (
+        <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+          <span style={{ fontSize: 12, color: "rgba(234,243,255,.65)" }}>
+            Archivo .docx ({meta.doc_type === "OFICIO" ? "Oficio" : meta.doc_type === "OTROS_ESCRITOS" ? "Otros" : "Cédula"})
+          </span>
+          <button type="button" className="btn" style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => onDownloadTransfer(tid)}>
+            📥 Descargar
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function NotificacionesPage() {
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<Notif[]>([]);
@@ -113,6 +233,7 @@ export default function NotificacionesPage() {
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string; suggestion?: string } | null>(null);
   const [threadMessages, setThreadMessages] = useState<Notif[]>([]);
   const [threadUserNames, setThreadUserNames] = useState<Record<string, string>>({});
+  const [threadHistoryExpanded, setThreadHistoryExpanded] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -184,14 +305,6 @@ export default function NotificacionesPage() {
           // Parsear metadata si viene como string JSON
           const parsedData = (data ?? []).map((item: any) => {
             const parsedMetadata = parseMetadataSafe(item.metadata);
-            console.log("[Notificaciones] Item parseado:", {
-              id: item.id,
-              title: item.title,
-              metadata: parsedMetadata,
-              metadataType: typeof parsedMetadata,
-              nota_context: item.nota_context,
-              nota_context_length: item.nota_context?.length || 0
-            });
             return {
               ...item,
               metadata: parsedMetadata || {},
@@ -224,13 +337,57 @@ export default function NotificacionesPage() {
     };
   }, []);
 
-  const filteredItems = useMemo(() => {
-    if (filter === "all") return items;
-    if (filter === "unread") return items.filter((n) => !n.is_read);
-    return items.filter((n) => n.is_read);
-  }, [items, filter]);
+  const threadsList = useMemo(() => {
+    const map = new Map<string, Notif[]>();
+    for (const n of items) {
+      const k = getThreadRootId(n);
+      const arr = map.get(k) ?? [];
+      arr.push(n);
+      map.set(k, arr);
+    }
+    return Array.from(map.entries())
+      .map(([rootId, members]) => {
+        const sorted = [...members].sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+        const latest = sorted[0];
+        return {
+          rootId,
+          members,
+          latest,
+          hasUnread: members.some((m) => !m.is_read),
+          allRead: members.length > 0 && members.every((m) => m.is_read),
+          count: members.length,
+          lastActivity: latest.created_at,
+        };
+      })
+      .sort(
+        (a, b) =>
+          new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime()
+      );
+  }, [items]);
+
+  const filteredThreads = useMemo(() => {
+    if (filter === "all") return threadsList;
+    if (filter === "unread") return threadsList.filter((t) => t.hasUnread);
+    return threadsList.filter((t) => t.allRead);
+  }, [threadsList, filter]);
 
   const unreadCount = items.filter((n) => !n.is_read).length;
+  const unreadThreadCount = threadsList.filter((t) => t.hasUnread).length;
+  const readThreadCount = threadsList.filter((t) => t.allRead).length;
+
+  const threadSortedDesc = useMemo(() => {
+    return [...threadMessages].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+  }, [threadMessages]);
+
+  const threadSubjectTitle = useMemo(
+    () => threadSortedDesc[0]?.title || selectedNotif?.title || "",
+    [threadSortedDesc, selectedNotif]
+  );
+
   const selectedMeta = (() => {
     if (!selectedNotif?.metadata) return {};
     return parseMetadataSafe(selectedNotif.metadata);
@@ -339,6 +496,7 @@ export default function NotificacionesPage() {
   }
 
   async function handleNotificationClick(notif: Notif) {
+    setThreadHistoryExpanded(false);
     if (!notif.is_read) {
       await markRead(notif.id);
     }
@@ -404,19 +562,30 @@ export default function NotificacionesPage() {
     let contextNotif: Notif = notif;
     let resolutionThreadData: Notif[] = [notif];
 
-    // Cargar todas las notificaciones del hilo (thread_id) para mostrar el historial completo
+    const rootId = getThreadRootId(notif);
+    // Cargar todas las notificaciones del hilo (raíz: thread_id = rootId o id = rootId)
     const { data: sess } = await supabase.auth.getSession();
     const uid = sess.session?.user.id;
     
-    if (uid && notif.thread_id) {
-      // Cargar todas las notificaciones del mismo thread_id (incluyendo las que el usuario envió)
+    if (uid) {
       const { data: threadData } = await supabase
         .from("notifications")
         .select("id, title, body, link, is_read, created_at, thread_id, parent_id, expediente_id, is_pjn_favorito, nota_context, metadata, user_id")
-        .eq("thread_id", notif.thread_id)
+        .eq("user_id", uid)
+        .or(`thread_id.eq.${rootId},id.eq.${rootId}`)
         .order("created_at", { ascending: true });
       
-        if (threadData) {
+        if (threadData && threadData.length > 0) {
+        const unreadIds = threadData.filter((row: any) => !row.is_read).map((row: any) => row.id);
+        if (unreadIds.length > 0) {
+          await Promise.all(
+            unreadIds.map((id) => supabase.rpc("mark_notification_read", { p_id: id }))
+          );
+          setItems((prev) =>
+            prev.map((n) => (unreadIds.includes(n.id) ? { ...n, is_read: true } : n))
+          );
+        }
+
         // Parsear metadata para cada mensaje del hilo
         const parsedThreadData = threadData.map((item: any) => {
           const parsedMetadata = parseMetadataSafe(item.metadata);
@@ -490,15 +659,11 @@ export default function NotificacionesPage() {
       } else {
         setThreadMessages([notif]);
         resolutionThreadData = [notif];
-        setThreadUserNames({ [uid || ""]: currentUserName || "Tú" });
-      }
-    } else {
-      // Si no hay thread_id, mostrar solo esta notificación
-      setThreadMessages([notif]);
-      resolutionThreadData = [notif];
-      if (uid) {
         setThreadUserNames({ [uid]: currentUserName || "Tú" });
       }
+    } else {
+      setThreadMessages([notif]);
+      resolutionThreadData = [notif];
     }
 
     if (expedienteInfoResolvedByCaseRef) {
@@ -518,7 +683,7 @@ export default function NotificacionesPage() {
           },
           body: JSON.stringify({
             notification_id: notif.id,
-            thread_id: notif.thread_id || null,
+            thread_id: rootId,
           }),
         });
         const json = await res.json().catch(() => ({}));
@@ -901,9 +1066,44 @@ export default function NotificacionesPage() {
     }
   }
 
+  async function downloadTransfer(transferId: string) {
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess.session?.access_token;
+      if (!token) {
+        setToast({ type: "error", message: "No hay sesión activa. Por favor, recarga la página." });
+        return;
+      }
+      const res = await fetch("/api/transfers/sign-download", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ transferId }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setToast({ type: "error", message: json?.error || "No se pudo descargar el archivo." });
+        setTimeout(() => setToast(null), 6000);
+        return;
+      }
+      if (json.url) {
+        window.open(json.url, "_blank");
+        setToast({ type: "success", message: "Descargando archivo..." });
+        setTimeout(() => setToast(null), 3000);
+      }
+    } catch (err) {
+      console.error("Error al descargar:", err);
+      setToast({ type: "error", message: "Error al descargar el archivo." });
+      setTimeout(() => setToast(null), 6000);
+    }
+  }
+
   async function handleReply() {
     if (!selectedNotif || !replyText.trim()) return;
-    
+    const parentForReply = threadSortedDesc[0] || selectedNotif;
+
     setReplying(true);
     try {
       const { data: session, error: sessionError } = await supabase.auth.getSession();
@@ -966,10 +1166,10 @@ export default function NotificacionesPage() {
           },
           body: JSON.stringify({
             phase: "init_transfer",
-            parent_notification_id: selectedNotif.id,
+            parent_notification_id: parentForReply.id,
             message: messageTrimmed,
-            expediente_id: selectedNotif.expediente_id,
-            is_pjn_favorito: selectedNotif.is_pjn_favorito,
+            expediente_id: parentForReply.expediente_id,
+            is_pjn_favorito: parentForReply.is_pjn_favorito,
             has_file: true,
           }),
         });
@@ -1024,10 +1224,10 @@ export default function NotificacionesPage() {
           },
           body: JSON.stringify({
             phase: "commit_reply",
-            parent_notification_id: selectedNotif.id,
+            parent_notification_id: parentForReply.id,
             message: messageTrimmed,
-            expediente_id: selectedNotif.expediente_id,
-            is_pjn_favorito: selectedNotif.is_pjn_favorito,
+            expediente_id: parentForReply.expediente_id,
+            is_pjn_favorito: parentForReply.is_pjn_favorito,
             has_file: true,
             ...(transfer ? { transfer } : {}),
           }),
@@ -1040,10 +1240,10 @@ export default function NotificacionesPage() {
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({
-            parent_notification_id: selectedNotif.id,
+            parent_notification_id: parentForReply.id,
             message: messageTrimmed,
-            expediente_id: selectedNotif.expediente_id,
-            is_pjn_favorito: selectedNotif.is_pjn_favorito,
+            expediente_id: parentForReply.expediente_id,
+            is_pjn_favorito: parentForReply.is_pjn_favorito,
           }),
         });
       }
@@ -1068,22 +1268,23 @@ export default function NotificacionesPage() {
           
           // Agregar la respuesta del usuario al hilo inmediatamente (antes de recargar)
           // Esto permite que el usuario vea su respuesta de inmediato
-          if (selectedNotif && selectedNotif.thread_id && currentUserId) {
+          const threadKey = parentForReply.thread_id || parentForReply.id;
+          if (selectedNotif && threadKey && currentUserId) {
             const myReply: Notif = {
               id: `temp-${Date.now()}`,
-              title: `Re: ${selectedNotif.title}`,
+              title: `Re: ${parentForReply.title}`,
               body: replyFile 
                 ? `${currentUserName} respondió con archivo adjunto: ${messageText}`
                 : `${currentUserName} respondió: ${messageText}`,
-              link: selectedNotif.link,
+              link: parentForReply.link,
               is_read: true,
               created_at: new Date().toISOString(),
-              thread_id: selectedNotif.thread_id,
-              parent_id: selectedNotif.id,
-              expediente_id: selectedNotif.expediente_id,
-              is_pjn_favorito: selectedNotif.is_pjn_favorito,
+              thread_id: threadKey,
+              parent_id: parentForReply.id,
+              expediente_id: parentForReply.expediente_id,
+              is_pjn_favorito: parentForReply.is_pjn_favorito,
               nota_context: messageText,
-              metadata: selectedNotif.metadata || {},
+              metadata: parentForReply.metadata || {},
             };
             setThreadMessages(prev => [...prev, myReply]);
             // Actualizar nombres si es necesario
@@ -1108,12 +1309,6 @@ export default function NotificacionesPage() {
               // Parsear metadata si viene como string JSON
               const parsedData = data.map((item: any) => {
                 const parsedMetadata = parseMetadataSafe(item.metadata);
-                console.log("[Notificaciones] Item recargado después de responder:", {
-                  id: item.id,
-                  title: item.title,
-                  nota_context: item.nota_context,
-                  nota_context_length: item.nota_context?.length || 0
-                });
                 return {
                   ...item,
                   metadata: parsedMetadata || {},
@@ -1125,13 +1320,14 @@ export default function NotificacionesPage() {
             
             // Si hay una notificación seleccionada con thread_id, recargar el hilo completo
             // Esto reemplazará el mensaje temporal con el real de la base de datos
-            if (selectedNotif && selectedNotif.thread_id) {
-              // Esperar un momento para que la base de datos se actualice
+            if (selectedNotif) {
+              const tr = getThreadRootId(parentForReply);
               setTimeout(async () => {
                 const { data: threadData } = await supabase
                   .from("notifications")
                   .select("id, title, body, link, is_read, created_at, thread_id, parent_id, expediente_id, is_pjn_favorito, nota_context, metadata, user_id")
-                  .eq("thread_id", selectedNotif.thread_id)
+                  .eq("user_id", uid)
+                  .or(`thread_id.eq.${tr},id.eq.${tr}`)
                   .order("created_at", { ascending: true });
                 
                 if (threadData) {
@@ -1379,7 +1575,7 @@ export default function NotificacionesPage() {
                   transition: "all 0.2s ease",
                 }}
               >
-                Todas ({items.length})
+                Todas ({threadsList.length})
               </button>
               <button
                 onClick={() => setFilter("unread")}
@@ -1395,7 +1591,7 @@ export default function NotificacionesPage() {
                   transition: "all 0.2s ease",
                 }}
               >
-                No leídas ({unreadCount})
+                No leídas ({unreadThreadCount})
               </button>
               <button
                 onClick={() => setFilter("read")}
@@ -1411,7 +1607,7 @@ export default function NotificacionesPage() {
                   transition: "all 0.2s ease",
                 }}
               >
-                Leídas ({items.length - unreadCount})
+                Leídas ({readThreadCount})
               </button>
             </div>
 
@@ -1451,39 +1647,44 @@ export default function NotificacionesPage() {
           <div style={{ display: "grid", gridTemplateColumns: selectedNotif ? "1fr 2fr" : "1fr", gap: 16 }}>
             {/* Lista de notificaciones (inbox) */}
             <div style={{ display: "grid", gap: 12, maxHeight: "70vh", overflowY: "auto" }}>
-              {filteredItems.map((n) => (
+              {filteredThreads.map((row) => {
+                const n = row.latest;
+                const selectedRoot =
+                  selectedNotif && getThreadRootId(selectedNotif) === row.rootId;
+                const dim = row.allRead;
+                return (
               <div
-                key={n.id}
+                key={row.rootId}
                 style={{
-                  border: n.is_read 
+                  border: dim
                     ? "1px solid rgba(255,255,255,.15)" 
                     : "1px solid rgba(96,141,186,.4)",
                   borderRadius: 12,
                   padding: 16,
-                  background: n.is_read 
+                  background: dim
                     ? "rgba(255,255,255,.04)" 
                     : "rgba(96,141,186,.15)",
                   transition: "all 0.2s ease",
                   position: "relative",
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = n.is_read 
+                  e.currentTarget.style.background = dim
                     ? "rgba(255,255,255,.08)" 
                     : "rgba(96,141,186,.25)";
-                  e.currentTarget.style.borderColor = n.is_read 
+                  e.currentTarget.style.borderColor = dim
                     ? "rgba(255,255,255,.25)" 
                     : "rgba(96,141,186,.5)";
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = n.is_read 
+                  e.currentTarget.style.background = dim
                     ? "rgba(255,255,255,.04)" 
                     : "rgba(96,141,186,.15)";
-                  e.currentTarget.style.borderColor = n.is_read 
+                  e.currentTarget.style.borderColor = dim
                     ? "rgba(255,255,255,.15)" 
                     : "rgba(96,141,186,.4)";
                 }}
               >
-                {!n.is_read && (
+                {row.hasUnread && (
                   <div
                     style={{
                       position: "absolute",
@@ -1510,16 +1711,35 @@ export default function NotificacionesPage() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div 
                       style={{ 
-                        fontWeight: selectedNotif?.id === n.id ? 700 : 600, 
+                        fontWeight: selectedRoot ? 700 : 600, 
                         fontSize: 14, 
-                        color: selectedNotif?.id === n.id ? "var(--text)" : (n.is_read ? "rgba(234,243,255,.7)" : "var(--text)"), 
+                        color: selectedRoot ? "var(--text)" : (dim ? "rgba(234,243,255,.7)" : "var(--text)"), 
                         marginBottom: 4,
                         overflow: "hidden",
                         textOverflow: "ellipsis",
-                        whiteSpace: "nowrap"
+                        whiteSpace: "nowrap",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
                       }}
                     >
-                      {n.title}
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{n.title}</span>
+                      {row.count > 1 && (
+                        <span
+                          style={{
+                            flexShrink: 0,
+                            fontSize: 11,
+                            fontWeight: 600,
+                            padding: "2px 8px",
+                            borderRadius: 999,
+                            background: "rgba(96,141,186,.25)",
+                            border: "1px solid rgba(96,141,186,.35)",
+                            color: "rgba(234,243,255,.85)",
+                          }}
+                        >
+                          {row.count}
+                        </span>
+                      )}
                     </div>
                     <div 
                       style={{ 
@@ -1531,20 +1751,21 @@ export default function NotificacionesPage() {
                         whiteSpace: "nowrap"
                       }}
                     >
-                      {n.body}
+                      {snippet(messagePreviewText(n), 140)}
                     </div>
                     <div style={{ 
                       fontSize: 11, 
                       color: "rgba(234,243,255,.5)"
                     }}>
-                      {fmtTime(n.created_at)}
+                      {fmtTime(row.lastActivity)}
                     </div>
                   </div>
                 </div>
               </div>
-            ))}
+            );
+            })}
 
-              {filteredItems.length === 0 && (
+              {filteredThreads.length === 0 && (
                 <div style={{ 
                   padding: 40, 
                   textAlign: "center", 
@@ -1552,10 +1773,10 @@ export default function NotificacionesPage() {
                   fontSize: 14 
                 }}>
                   {filter === "all" 
-                    ? "No hay notificaciones." 
+                    ? "No hay conversaciones." 
                     : filter === "unread"
-                    ? "No hay notificaciones no leídas."
-                    : "No hay notificaciones leídas."}
+                    ? "No hay conversaciones con mensajes sin leer."
+                    : "No hay conversaciones totalmente leídas."}
                 </div>
               )}
             </div>
@@ -1573,16 +1794,16 @@ export default function NotificacionesPage() {
                 maxHeight: "70vh",
                 overflowY: "auto"
               }}>
-                {/* Header del email */}
+                {/* Header del hilo (asunto = mensaje más reciente) */}
                 <div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 18, fontWeight: 700, color: "var(--text)", marginBottom: 8 }}>
-                        {selectedNotif.title}
+                        {threadSubjectTitle}
                       </div>
                       {threadMessages.length > 1 && (
                         <div style={{ fontSize: 12, color: "rgba(234,243,255,.7)", marginBottom: 4 }}>
-                          {threadMessages.length} mensaje{threadMessages.length > 1 ? 's' : ''} en esta conversación
+                          {threadMessages.length} mensajes · orden tipo correo (más reciente arriba)
                         </div>
                       )}
                     </div>
@@ -1591,6 +1812,7 @@ export default function NotificacionesPage() {
                         setSelectedNotif(null);
                         setThreadMessages([]);
                         setThreadUserNames({});
+                        setThreadHistoryExpanded(false);
                       }}
                       className="btn"
                       style={{ padding: "6px 12px", fontSize: 12 }}
@@ -1600,180 +1822,99 @@ export default function NotificacionesPage() {
                   </div>
                 </div>
 
-                {/* Hilo de conversación - Mostrar todos los mensajes */}
+                {/* Hilo: reciente arriba, mensaje previo, luego historial expandible */}
                 <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
-                  {threadMessages.map((msg, index) => {
-                    // Determinar el sender real usando metadata.sender_id (fallback a user_id)
-                    const rawMeta = msg.metadata || {};
-                    const senderId =
-                      (typeof rawMeta === "object" && rawMeta
-                        ? (rawMeta as any).sender_id
-                        : null) || msg.user_id;
-
-                    const isMyMsg = senderId === currentUserId;
-                    const userName =
-                      (senderId ? threadUserNames[senderId] : null) ||
-                      (isMyMsg ? "Tú" : "Usuario");
-                    
-                    return (
-                      <div 
-                        key={msg.id} 
+                  {threadSortedDesc[0] ? (
+                    <ThreadMessageBubble
+                      key={threadSortedDesc[0].id}
+                      msg={threadSortedDesc[0]}
+                      currentUserId={currentUserId}
+                      threadUserNames={threadUserNames}
+                      isAutoPericiaMsg={(parseMetadataSafe(threadSortedDesc[0].metadata) as any)?.source === "auto_pericia"}
+                      onDownloadTransfer={downloadTransfer}
+                    />
+                  ) : null}
+                  {threadSortedDesc[1] ? (
+                    <div
+                      style={{
+                        borderLeft: "3px solid rgba(96,141,186,.35)",
+                        paddingLeft: 12,
+                        opacity: 0.95,
+                      }}
+                    >
+                      <div
                         style={{
-                          padding: 16,
-                          background: isMyMsg 
-                            ? "rgba(96,141,186,.15)" 
-                            : "rgba(255,255,255,.03)",
-                          borderRadius: 8,
-                          border: `1px solid ${isMyMsg ? "rgba(96,141,186,.3)" : "rgba(255,255,255,.1)"}`,
-                          marginLeft: isMyMsg ? "auto" : 0,
-                          marginRight: isMyMsg ? 0 : "auto",
-                          maxWidth: "85%",
-                          position: "relative"
+                          fontSize: 11,
+                          color: "rgba(234,243,255,.55)",
+                          marginBottom: 6,
+                          fontWeight: 600,
+                          letterSpacing: 0.02,
                         }}
                       >
-                        <div style={{ 
-                          display: "flex", 
-                          justifyContent: "space-between", 
-                          alignItems: "center",
-                          marginBottom: 8
-                        }}>
-                          <div style={{ 
-                            fontSize: 12, 
-                            fontWeight: 600, 
-                            color: isMyMsg
-                              ? "rgba(96,141,186,.9)"
-                              : (isAutoPericia ? "rgba(241,196,15,.9)" : "rgba(234,243,255,.8)"),
-                          }}>
-                            {isMyMsg
-                              ? "Tú"
-                              : (isAutoPericia ? "🤖 NO RESPONDER - PJN AUTOMÁTICO" : userName)}
-                          </div>
-                          <div style={{ 
-                            fontSize: 11, 
-                            color: "rgba(234,243,255,.6)" 
-                          }}>
-                            {fmtTime(msg.created_at)}
-                          </div>
-                        </div>
-                        {msg.nota_context ? (
-                          <div style={{ 
-                            fontSize: 13, 
-                            color: "rgba(234,243,255,.9)", 
-                            lineHeight: 1.6, 
-                            whiteSpace: "pre-wrap", 
-                            wordBreak: "break-word" 
-                          }}>
-                            {msg.nota_context}
-                          </div>
-                        ) : msg.body ? (
-                          <div style={{ 
-                            fontSize: 13, 
-                            color: "rgba(234,243,255,.9)", 
-                            lineHeight: 1.6, 
-                            whiteSpace: "pre-wrap", 
-                            wordBreak: "break-word" 
-                          }}>
-                            {msg.body}
-                          </div>
-                        ) : null}
+                        En respuesta a
                       </div>
-                    );
-                  })}
-                </div>
-
-                {/* Archivo de transferencia: metadata.transfer_id puede existir con link a /superadmin/mis-juzgados (envíos con expediente_ref). */}
-                {(() => {
-                  const selMeta = parseMetadataSafe(selectedNotif.metadata);
-                  const tid = selMeta.transfer_id as string | undefined;
-                  const recibidos = selectedNotif.link === "/app/recibidos";
-                  if (!tid && !recibidos) return null;
-                  return (
-                  <div style={{
-                    padding: 16,
-                    background: "rgba(96,141,186,.1)",
-                    borderRadius: 8,
-                    border: "1px solid rgba(96,141,186,.2)"
-                  }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: "rgba(234,243,255,.8)", marginBottom: 8 }}>
-                      Archivo adjunto:
+                      <ThreadMessageBubble
+                        key={threadSortedDesc[1].id}
+                        msg={threadSortedDesc[1]}
+                        currentUserId={currentUserId}
+                        threadUserNames={threadUserNames}
+                        isAutoPericiaMsg={(parseMetadataSafe(threadSortedDesc[1].metadata) as any)?.source === "auto_pericia"}
+                        compact
+                        onDownloadTransfer={downloadTransfer}
+                      />
                     </div>
-                    <div style={{ fontSize: 13, color: "rgba(234,243,255,.9)", lineHeight: 1.8 }}>
-                      {tid ? (
-                        <div style={{ marginBottom: 12 }}>
-                          <div style={{ marginBottom: 8 }}>
-                            <strong>Tipo:</strong> {selMeta.doc_type === "OFICIO" ? "Oficio" : selMeta.doc_type === "OTROS_ESCRITOS" ? "Causas Penales" : "Cédula"}
+                  ) : null}
+                  {threadSortedDesc.length > 2 ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => setThreadHistoryExpanded((v) => !v)}
+                        style={{
+                          alignSelf: "flex-start",
+                          padding: "8px 14px",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          opacity: 0.95,
+                        }}
+                      >
+                        {threadHistoryExpanded
+                          ? "Ocultar mensajes anteriores"
+                          : `··· Ver ${threadSortedDesc.length - 2} mensaje(s) anteriores (desde el inicio)`}
+                      </button>
+                      {threadHistoryExpanded ? (
+                        <div
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 10,
+                            padding: "12px 0 4px",
+                            borderTop: "1px solid rgba(255,255,255,.08)",
+                          }}
+                        >
+                          <div style={{ fontSize: 11, color: "rgba(234,243,255,.5)", fontWeight: 600 }}>
+                            Historial (del más antiguo al más reciente dentro de este bloque)
                           </div>
-                          {selectedNotif.title && (
-                            <div style={{ marginBottom: 8 }}>
-                              <strong>Título:</strong> {selectedNotif.title}
-                            </div>
-                          )}
-                          <button
-                            onClick={async () => {
-                              try {
-                                const { data: sess } = await supabase.auth.getSession();
-                                const token = sess.session?.access_token;
-                                if (!token) {
-                                  setToast({
-                                    type: "error",
-                                    message: "No hay sesión activa. Por favor, recarga la página."
-                                  });
-                                  return;
-                                }
-
-                                const res = await fetch("/api/transfers/sign-download", {
-                                  method: "POST",
-                                  headers: {
-                                    "Content-Type": "application/json",
-                                    "Authorization": `Bearer ${token}`,
-                                  },
-                                  body: JSON.stringify({ transferId: tid }),
-                                });
-
-                                const json = await res.json().catch(() => ({}));
-                                if (!res.ok) {
-                                  setToast({
-                                    type: "error",
-                                    message: json?.error || "No se pudo descargar el archivo."
-                                  });
-                                  return;
-                                }
-
-                                if (json.url) {
-                                  window.open(json.url, "_blank");
-                                  setToast({
-                                    type: "success",
-                                    message: "Descargando archivo..."
-                                  });
-                                  setTimeout(() => setToast(null), 3000);
-                                }
-                              } catch (err) {
-                                console.error("Error al descargar:", err);
-                                setToast({
-                                  type: "error",
-                                  message: "Error al descargar el archivo."
-                                });
-                              }
-                            }}
-                            className="btn"
-                            style={{
-                              padding: "8px 16px",
-                              fontSize: 13,
-                              marginTop: 8
-                            }}
-                          >
-                            📥 Descargar archivo
-                          </button>
+                          {[...threadSortedDesc.slice(2)]
+                            .sort(
+                              (a, b) =>
+                                new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+                            )
+                            .map((msg) => (
+                              <ThreadMessageBubble
+                                key={msg.id}
+                                msg={msg}
+                                currentUserId={currentUserId}
+                                threadUserNames={threadUserNames}
+                                isAutoPericiaMsg={(parseMetadataSafe(msg.metadata) as any)?.source === "auto_pericia"}
+                                onDownloadTransfer={downloadTransfer}
+                              />
+                            ))}
                         </div>
-                      ) : (
-                        <div style={{ color: "rgba(234,243,255,.5)", fontStyle: "italic" }}>
-                          No se encontró información del archivo adjunto.
-                        </div>
-                      )}
+                      ) : null}
                     </div>
-                  </div>
-                  );
-                })()}
+                  ) : null}
+                </div>
 
                 {(() => {
                   const metadata = parseMetadataSafe(selectedNotif.metadata) || {};
@@ -1862,45 +2003,41 @@ export default function NotificacionesPage() {
                           }}
                         />
                       </div>
-                      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                        {/* Campo para adjuntar archivo (solo para notificaciones de transferencia) */}
-                        {(!!parseMetadataSafe(selectedNotif.metadata).transfer_id || selectedNotif.link === "/app/recibidos") && (
-                          <div style={{ marginBottom: 12 }}>
-                            <label style={{
-                              display: "block",
-                              fontSize: 12,
-                              fontWeight: 600,
-                              color: "rgba(234,243,255,.8)",
-                              marginBottom: 6
-                            }}>
-                              Adjuntar archivo (.docx) - Opcional
-                            </label>
-                            <input
-                              type="file"
-                              accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                              onChange={(e) => setReplyFile(e.target.files?.[0] ?? null)}
-                              style={{
-                                width: "100%",
-                                padding: 8,
-                                background: "rgba(255,255,255,.05)",
-                                border: "1px solid rgba(255,255,255,.15)",
-                                borderRadius: 8,
-                                color: "var(--text)",
-                                fontSize: 13,
-                                fontFamily: "inherit",
-                              }}
-                            />
-                            {replyFile && (
-                              <div style={{
-                                marginTop: 6,
-                                fontSize: 12,
-                                color: "rgba(234,243,255,.7)"
-                              }}>
-                                Archivo seleccionado: {replyFile.name}
-                              </div>
-                            )}
+                      <div style={{ marginBottom: 12 }}>
+                        <label style={{
+                          display: "block",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          color: "rgba(234,243,255,.8)",
+                          marginBottom: 6
+                        }}>
+                          Adjuntar archivo (.docx) — opcional
+                        </label>
+                        <input
+                          type="file"
+                          accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                          onChange={(e) => setReplyFile(e.target.files?.[0] ?? null)}
+                          style={{
+                            width: "100%",
+                            padding: 8,
+                            background: "rgba(255,255,255,.05)",
+                            border: "1px solid rgba(255,255,255,.15)",
+                            borderRadius: 8,
+                            color: "var(--text)",
+                            fontSize: 13,
+                            fontFamily: "inherit",
+                          }}
+                        />
+                        {replyFile && (
+                          <div style={{
+                            marginTop: 6,
+                            fontSize: 12,
+                            color: "rgba(234,243,255,.7)"
+                          }}>
+                            Archivo seleccionado: {replyFile.name}
                           </div>
                         )}
+                      </div>
                         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                           <button
                             onClick={() => {
@@ -1927,7 +2064,6 @@ export default function NotificacionesPage() {
                             {replying ? "Enviando..." : replyFile ? "Responder con archivo" : "Responder"}
                           </button>
                         </div>
-                      </div>
                     </>
                   )}
                 </div>

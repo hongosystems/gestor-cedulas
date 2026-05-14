@@ -224,7 +224,7 @@ export async function POST(req: NextRequest) {
 
     // Fase 1 (init): crear la transferencia y devolver el `storage_path`, pero SIN recibir/subir el archivo.
     if (phase === "init_transfer") {
-      if (!hasFile || !parentIsTransferThread) {
+      if (!hasFile) {
         return NextResponse.json({ ok: true, transferNeeded: false });
       }
 
@@ -235,7 +235,7 @@ export async function POST(req: NextRequest) {
       }
 
       // Si no hay transfer_id en metadata, buscar la transferencia más reciente entre el remitente y el destinatario
-      if (!originalTransferId) {
+      if (parentIsTransferThread && !originalTransferId) {
         const { data: recentTransfer } = await svc
           .from("file_transfers")
           .select("id, doc_type")
@@ -253,19 +253,20 @@ export async function POST(req: NextRequest) {
 
       // Determinar el tipo de documento (CEDULA, OFICIO u OTROS_ESCRITOS) basado en el título de la notificación padre
       let docType: "CEDULA" | "OFICIO" | "OTROS_ESCRITOS" = "CEDULA";
-      if (parentNotif.title.toLowerCase().includes("oficio")) {
-        docType = "OFICIO";
-      } else if (parentNotif.title.toLowerCase().includes("otros escritos")) {
-        docType = "OTROS_ESCRITOS";
-      } else if (originalTransferId) {
-        // Intentar obtener el tipo del transfer original
-        const { data: originalTransfer } = await svc
-          .from("file_transfers")
-          .select("doc_type")
-          .eq("id", originalTransferId)
-          .single();
-        if (originalTransfer) {
-          docType = originalTransfer.doc_type as "CEDULA" | "OFICIO" | "OTROS_ESCRITOS";
+      if (parentIsTransferThread) {
+        if (parentNotif.title.toLowerCase().includes("oficio")) {
+          docType = "OFICIO";
+        } else if (parentNotif.title.toLowerCase().includes("otros escritos")) {
+          docType = "OTROS_ESCRITOS";
+        } else if (originalTransferId) {
+          const { data: originalTransfer } = await svc
+            .from("file_transfers")
+            .select("doc_type")
+            .eq("id", originalTransferId)
+            .single();
+          if (originalTransfer) {
+            docType = originalTransfer.doc_type as "CEDULA" | "OFICIO" | "OTROS_ESCRITOS";
+          }
         }
       }
 
@@ -304,17 +305,9 @@ export async function POST(req: NextRequest) {
     // Si hay un archivo adjunto y la notificación padre es de transferencia, crear una nueva transferencia
     let transferId: string | null = null;
     if (phase === "commit_reply") {
-      if (parentIsTransferThread) {
-        if (!transfer_upload?.transferId || !transfer_upload.storage_path) {
-          return NextResponse.json(
-            { error: "Falta información de transferencia para commit" },
-            { status: 400 }
-          );
-        }
-
+      if (transfer_upload?.transferId && transfer_upload.storage_path) {
         transferId = transfer_upload.transferId;
 
-        // Commit: insertar versión, pero el archivo ya fue subido directo a Storage desde el cliente.
         const { error: vErr } = await svc.from("file_transfer_versions").insert({
           transfer_id: transferId,
           version: transfer_upload.version || 1,
@@ -326,7 +319,7 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ error: vErr.message }, { status: 500 });
         }
       }
-    } else if (file && parentIsTransferThread) {
+    } else if (file) {
       // Obtener el transfer_id original del metadata
       let originalTransferId: string | null = null;
       
