@@ -135,6 +135,23 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    // Abrir vía URL firmada: evita blob: en el visor PDF de Chrome, donde "Descargar"
+    // suele fallar con un error genérico de red.
+    if (req.nextUrl.searchParams.get("signed") === "1") {
+      const { data: signed, error: signErr } = await supabaseAdmin.storage
+        .from("cedulas")
+        .createSignedUrl(path, 60 * 60);
+
+      if (signErr || !signed?.signedUrl) {
+        return new NextResponse(
+          signErr?.message || "No se pudo generar el enlace de acceso",
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.redirect(signed.signedUrl);
+    }
+
     // Descargar el archivo desde Supabase
     const { data, error } = await supabaseAdmin.storage
       .from("cedulas")

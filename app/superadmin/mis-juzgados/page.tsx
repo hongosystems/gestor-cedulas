@@ -2577,32 +2577,8 @@ export default function MisJuzgadosPage() {
         }
       }
 
-      // Usar el endpoint API que sirve el archivo con headers para abrirlo en el navegador
-      const url = `/api/open-file?path=${encodeURIComponent(path)}&token=${encodeURIComponent(sessionData.session.access_token)}`;
-      
-      // Obtener el archivo y crear un blob URL para abrirlo directamente en el navegador
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        setMsg("No se pudo abrir el archivo: " + errorText);
-        return;
-      }
-
-      // Obtener el Content-Type del response
-      const contentType = response.headers.get("Content-Type") || "application/octet-stream";
-      
-      // Obtener el blob y crear uno nuevo con el tipo MIME explícito
-      const blob = await response.blob();
-      const typedBlob = new Blob([blob], { type: contentType });
-      const blobUrl = URL.createObjectURL(typedBlob);
-      
-      // Abrir el blob URL en una nueva pestaña - el navegador lo abrirá según el tipo MIME
-      // Para PDFs se abrirá en el visor del navegador, para otros tipos dependerá del navegador
-      window.open(blobUrl, "_blank", "noopener,noreferrer");
-      
-      // Limpiar el blob URL después de un tiempo para liberar memoria
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+      const url = `/api/open-file?path=${encodeURIComponent(path)}&token=${encodeURIComponent(sessionData.session.access_token)}&signed=1`;
+      window.open(url, "_blank", "noopener,noreferrer");
     } catch (error: any) {
       console.error("Error al abrir archivo:", error);
       setMsg("Error al abrir el archivo: " + (error?.message || "Error desconocido"));
