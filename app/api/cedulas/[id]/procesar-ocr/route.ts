@@ -252,6 +252,14 @@ async function procesarOcrEnBackground(cedulaId: string, svc: ReturnType<typeof 
         // Mantener valor original si falla decodificación
       }
     }
+    let destinatarioOcr: string | null = railwayRes.headers.get("X-Destinatario") || railwayRes.headers.get("x-destinatario") || null;
+    if (destinatarioOcr) {
+      try {
+        destinatarioOcr = decodeURIComponent(destinatarioOcr);
+      } catch {
+        // Mantener valor original si falla decodificación
+      }
+    }
 
     const pdfResultado = await railwayRes.arrayBuffer();
     const storagePath = `acredita/${cedulaId}.pdf`;
@@ -285,6 +293,7 @@ async function procesarOcrEnBackground(cedulaId: string, svc: ReturnType<typeof 
         pdf_acredita_url: urlData.publicUrl,
         ocr_exp_nro: expNro,
         ocr_caratula: caratulaOcr,
+        ocr_destinatario: destinatarioOcr,
         ocr_procesado_at: new Date().toISOString(),
         ocr_error: null,
       })
