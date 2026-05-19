@@ -919,7 +919,7 @@ export default function MisCedulasPage() {
         return;
       }
       
-      if (isAdminExp) {
+      if (isAdminExp && !isSuperadmin) {
         window.location.href = "/app/expedientes";
         return;
       }
