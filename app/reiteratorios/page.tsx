@@ -8,6 +8,7 @@ type ReiteratorioRow = {
   ocr_exp_nro: string | null;
   ocr_caratula: string | null;
   ocr_destinatario: string | null;
+  caratula: string | null;
   juzgado: string | null;
   pjn_cargado_at: string;
 };
@@ -20,6 +21,26 @@ function diasDesde(iso: string): number {
   return Math.floor(diffMs / (1000 * 60 * 60 * 24));
 }
 
+function datosFaltantes(row: ReiteratorioRow): string[] {
+  const faltan: string[] = [];
+  if (!row.ocr_exp_nro?.trim()) faltan.push("expediente");
+  if (!row.ocr_caratula?.trim() && !row.caratula?.trim()) faltan.push("carátula");
+  if (!row.ocr_destinatario?.trim()) faltan.push("destinatario");
+  return faltan;
+}
+
+async function getFreshAccessToken(): Promise<string | null> {
+  const { data: current } = await supabase.auth.getSession();
+  if (!current.session) return null;
+
+  const { data: refreshed, error } = await supabase.auth.refreshSession();
+  if (!error && refreshed.session?.access_token) {
+    return refreshed.session.access_token;
+  }
+
+  return current.session.access_token;
+}
+
 export default function ReiteratoriosPage() {
   const [loading, setLoading] = useState(true);
   const [authChecked, setAuthChecked] = useState(false);
@@ -28,6 +49,7 @@ export default function ReiteratoriosPage() {
   const [msg, setMsg] = useState("");
   const [msgOk, setMsgOk] = useState(false);
   const [enProcesoId, setEnProcesoId] = useState<string | null>(null);
+  const [previewId, setPreviewId] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -56,7 +78,7 @@ export default function ReiteratoriosPage() {
       const { data, error } = await supabase
         .from("cedulas")
         .select(
-          "id, ocr_exp_nro, ocr_caratula, ocr_destinatario, juzgado, pjn_cargado_at"
+          "id, ocr_exp_nro, ocr_caratula, ocr_destinatario, caratula, juzgado, pjn_cargado_at"
         )
         .eq("tipo_documento", "OFICIO")
         .eq("estado_ocr", "listo")
@@ -85,8 +107,7 @@ export default function ReiteratoriosPage() {
     setMsgOk(false);
     setEnProcesoId(id);
     try {
-      const { data: sess } = await supabase.auth.getSession();
-      const token = sess.session?.access_token;
+      const token = await getFreshAccessToken();
       if (!token) {
         setMsg("Sesión expirada");
         return;
@@ -116,6 +137,50 @@ export default function ReiteratoriosPage() {
       setMsgOk(false);
     } finally {
       setEnProcesoId(null);
+    }
+  }
+
+  async function verPdf(id: string) {
+    setMsg("");
+    setMsgOk(false);
+    setPreviewId(id);
+    try {
+      const token = await getFreshAccessToken();
+      if (!token) {
+        setMsg("Sesión expirada");
+        return;
+      }
+
+      const res = await fetch(`/api/reiteratorios/${id}/presentar`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ soloPreview: true }),
+      });
+
+      if (!res.ok) {
+        let errMsg = `No se pudo generar la vista previa (${res.status})`;
+        try {
+          const data = (await res.json()) as { error?: string };
+          if (data?.error) errMsg = data.error;
+        } catch {
+          // respuesta no JSON: dejamos el mensaje genérico
+        }
+        setMsg(errMsg);
+        setMsgOk(false);
+        return;
+      }
+
+      const blob = await res.blob();
+      window.open(URL.createObjectURL(blob));
+    } catch (e: unknown) {
+      const m = e instanceof Error ? e.message : "Error inesperado";
+      setMsg(m);
+      setMsgOk(false);
+    } finally {
+      setPreviewId(null);
     }
   }
 
@@ -171,7 +236,7 @@ export default function ReiteratoriosPage() {
                   <th style={{ minWidth: 220 }}>Juzgado</th>
                   <th style={{ width: 160 }}>Días sin respuesta</th>
                   <th style={{ width: 140 }}>Alerta</th>
-                  <th style={{ width: 230 }}>Acción</th>
+                  <th style={{ width: 330 }}>Acción</th>
                 </tr>
               </thead>
               <tbody>
@@ -190,6 +255,8 @@ export default function ReiteratoriosPage() {
                     const alertaClass =
                       r.dias >= 21 ? "badge badge--rojo" : "badge badge--amarillo";
                     const alertaLabel = r.dias >= 21 ? "3 semanas" : "2 semanas";
+                    const faltan = datosFaltantes(r);
+                    const puedeGenerarPdf = faltan.length === 0;
                     return (
                       <tr key={r.id}>
                         <td style={{ fontVariantNumeric: "tabular-nums" }}>
@@ -221,17 +288,37 @@ export default function ReiteratoriosPage() {
                           </span>
                         </td>
                         <td>
-                          <button
-                            type="button"
-                            className="btn primary"
-                            disabled={enProcesoId === r.id}
-                            onClick={() => void presentar(r.id)}
-                            style={{ fontSize: 13 }}
-                          >
-                            {enProcesoId === r.id
-                              ? "Presentando…"
-                              : "Presentar Reiteratorio"}
-                          </button>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                              <button
+                                type="button"
+                                className="btn"
+                                disabled={!puedeGenerarPdf || previewId === r.id || enProcesoId === r.id}
+                                onClick={() => void verPdf(r.id)}
+                                style={{ fontSize: 13 }}
+                                title={!puedeGenerarPdf ? "Faltan datos del OCR para generar el PDF" : undefined}
+                              >
+                                {previewId === r.id ? "Generando…" : "Ver PDF"}
+                              </button>
+                              <button
+                                type="button"
+                                className="btn primary"
+                                disabled={!puedeGenerarPdf || enProcesoId === r.id || previewId === r.id}
+                                onClick={() => void presentar(r.id)}
+                                style={{ fontSize: 13 }}
+                                title={!puedeGenerarPdf ? "Faltan datos del OCR para presentar el reiteratorio" : undefined}
+                              >
+                                {enProcesoId === r.id
+                                  ? "Presentando…"
+                                  : "Presentar Reiteratorio"}
+                              </button>
+                            </div>
+                            {!puedeGenerarPdf && (
+                              <span className="muted" style={{ fontSize: 11 }}>
+                                Faltan datos OCR: {faltan.join(", ")}
+                              </span>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );

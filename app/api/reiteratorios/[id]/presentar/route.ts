@@ -56,10 +56,18 @@ export async function POST(
     return NextResponse.json({ error: "ID de cédula requerido" }, { status: 400 });
   }
 
+  let soloPreview = false;
+  try {
+    const body = (await req.json()) as { soloPreview?: boolean } | null;
+    soloPreview = body?.soloPreview === true;
+  } catch {
+    soloPreview = false;
+  }
+
   const { data: cedula, error: fetchErr } = await svc
     .from("cedulas")
     .select(
-      "id, ocr_exp_nro, ocr_caratula, ocr_destinatario, pjn_cargado_at, tipo_documento, juzgado"
+      "id, ocr_exp_nro, ocr_caratula, ocr_destinatario, caratula, pjn_cargado_at, tipo_documento, juzgado"
     )
     .eq("id", cedulaId)
     .single();
@@ -76,14 +84,22 @@ export async function POST(
   }
 
   const expNro = (cedula.ocr_exp_nro || "").trim();
-  const caratula = (cedula.ocr_caratula || "").trim();
+  // Fallback: si el OCR no extrajo la carátula, usamos la carátula manual de la cédula.
+  const caratula =
+    (cedula.ocr_caratula || "").trim() || (cedula.caratula || "").trim();
   const destinatario = (cedula.ocr_destinatario || "").trim();
 
-  if (!expNro || !caratula || !destinatario) {
+  const faltantes: string[] = [];
+  if (!expNro) faltantes.push("expediente (ocr_exp_nro)");
+  if (!caratula) faltantes.push("carátula (ocr_caratula/caratula)");
+  if (!destinatario) faltantes.push("destinatario (ocr_destinatario)");
+
+  if (faltantes.length > 0) {
     return NextResponse.json(
       {
-        error:
-          "Faltan datos del OCR (expediente, carátula o destinatario) para generar el reiteratorio",
+        error: `Faltan datos para generar el reiteratorio: ${faltantes.join(
+          ", "
+        )}. Reprocesá el OCR de esta cédula.`,
       },
       { status: 400 }
     );
@@ -132,6 +148,20 @@ export async function POST(
   }
 
   const pdfBuffer = Buffer.from(await railwayRes.arrayBuffer());
+
+  // Modo preview: devolver el PDF generado por Railway directamente,
+  // sin subirlo a Supabase ni encolar la presentación en el VPS PJN.
+  if (soloPreview) {
+    return new NextResponse(new Uint8Array(pdfBuffer), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `inline; filename="reiteratorio-${cedulaId}.pdf"`,
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+
   const storagePath = `reiteratorios/${cedulaId}.pdf`;
 
   // 2. Subir el PDF generado al bucket de Supabase.
