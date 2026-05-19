@@ -907,7 +907,9 @@ export default function MisCedulasPage() {
       
       const isAdminExp = !roleErr && roleData?.is_admin_expedientes === true;
       const isSuperadmin = !roleErr && roleData?.is_superadmin === true;
-      setIsAdminCedulas(!roleErr && roleData?.is_admin_cedulas === true);
+      // Superadmin opera con los mismos controles que Admin Cédulas en esta vista
+      // (botones En Trámite/Completa, búsqueda, columna Responsable, click en filas).
+      setIsAdminCedulas((!roleErr && roleData?.is_admin_cedulas === true) || isSuperadmin);
       setIsAdminMediaciones(!roleErr && roleData?.is_admin_mediaciones === true);
       const isMediador = !roleErr && roleData?.is_mediador === true;
       const onlyMediador = isMediador && !isSuperadmin && !isAdminExp && !(roleData?.is_admin_cedulas === true) && !(roleData?.is_admin_mediaciones === true);
@@ -923,38 +925,34 @@ export default function MisCedulasPage() {
       }
 
       // listar cédulas: intento completo (PJN), luego fallbacks que conservan columnas usadas en UI
+      // Superadmin: ve TODAS las cédulas (sin filtro por usuario). Resto: solo las propias.
       let cs: any[] | null = null;
       let cErr = null as { message?: string } | null;
 
-      ({ data: cs, error: cErr } = await supabase
-        .from("cedulas")
-        .select(CEDULAS_SELECT_WITH_PJN)
-        .eq("owner_user_id", uid)
+      const baseCedulasQuery = (selectCols: string) => {
+        const q = supabase
+          .from("cedulas")
+          .select(selectCols);
+        return isSuperadmin ? q : q.eq("owner_user_id", uid);
+      };
+
+      ({ data: cs, error: cErr } = await baseCedulasQuery(CEDULAS_SELECT_WITH_PJN)
         .order("fecha_carga", { ascending: false }));
 
       if (cErr && cedulasErrorMentionsMissingPjn(cErr.message)) {
-        ({ data: cs, error: cErr } = await supabase
-          .from("cedulas")
-          .select(CEDULAS_SELECT_NO_PJN)
-          .eq("owner_user_id", uid)
+        ({ data: cs, error: cErr } = await baseCedulasQuery(CEDULAS_SELECT_NO_PJN)
           .order("fecha_carga", { ascending: false }));
         if (!cErr) cs = padCedulasNoPjn(cs as unknown[] | null);
       }
 
       if (cErr && cedulasErrorSuggestsOptionalColumns(cErr.message)) {
-        ({ data: cs, error: cErr } = await supabase
-          .from("cedulas")
-          .select(CEDULAS_SELECT_READBY_ADMIN)
-          .eq("owner_user_id", uid)
+        ({ data: cs, error: cErr } = await baseCedulasQuery(CEDULAS_SELECT_READBY_ADMIN)
           .order("fecha_carga", { ascending: false }));
         if (!cErr) cs = padCedulasReadbyAdmin(cs as unknown[] | null);
       }
 
       if (cErr && cedulasErrorSuggestsOptionalColumns(cErr.message)) {
-        ({ data: cs, error: cErr } = await supabase
-          .from("cedulas")
-          .select(CEDULAS_SELECT_MINIMAL)
-          .eq("owner_user_id", uid)
+        ({ data: cs, error: cErr } = await baseCedulasQuery(CEDULAS_SELECT_MINIMAL)
           .order("fecha_carga", { ascending: false }));
         if (!cErr) cs = padCedulasMinimal(cs as unknown[] | null);
       }
