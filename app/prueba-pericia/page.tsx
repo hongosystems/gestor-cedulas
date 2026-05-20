@@ -46,6 +46,8 @@ type Expediente = {
   created_by_user_id: string | null;
   created_by_name: string | null;
   is_pjn_favorito?: boolean;
+  semaforo_congelado?: boolean;
+  fecha_semaforo_congelado?: string | null;
 };
 
 type PjnFavorito = {
@@ -320,6 +322,18 @@ function semaforoByAgePruebaPericia(dias: number): Semaforo {
   return "VERDE";
 }
 
+function isRenunciadoObservaciones(obs: string | null | undefined): boolean {
+  return (obs || "").trim().toUpperCase().startsWith("RENUNCIADO");
+}
+
+function renunciadoRowStyle(isRenunciado: boolean): React.CSSProperties | undefined {
+  if (!isRenunciado) return undefined;
+  return {
+    background: "rgba(100, 0, 0, 0.22)",
+    borderLeft: "3px solid rgba(231, 76, 60, 0.85)",
+  };
+}
+
 function SemaforoChip({ value }: { value: Semaforo }) {
   const style: React.CSSProperties =
     value === "VERDE"
@@ -397,6 +411,11 @@ const ESTADO_GESTION_STYLES: Record<string, React.CSSProperties> = {
     border: "1px solid rgba(127, 140, 141, 0.5)",
     color: "rgba(200, 215, 220, 0.9)",
   },
+  RENUNCIADO: {
+    background: "rgba(231, 76, 60, 0.28)",
+    border: "1px solid rgba(231, 76, 60, 0.65)",
+    color: "rgba(255, 220, 216, 1)",
+  },
 };
 
 // Labels legibles para mostrar en lugar del código
@@ -408,7 +427,124 @@ const ESTADO_GESTION_LABELS: Record<string, string> = {
   SEGUIMIENTO_PRE_TURNO: "Seguimiento pre-turno",
   ESTUDIO_REALIZADO: "Estudio realizado",
   CANCELADA: "Cancelada",
+  RENUNCIADO: "Renunciado",
 };
+
+function RenunciarModal({
+  open,
+  caseRef,
+  caratula,
+  razon,
+  onRazonChange,
+  onConfirm,
+  onCancel,
+  confirming,
+}: {
+  open: boolean;
+  caseRef: string;
+  caratula: string;
+  razon: string;
+  onRazonChange: (v: string) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+  confirming: boolean;
+}) {
+  if (!open) return null;
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.65)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 3000,
+      }}
+      onClick={() => !confirming && onCancel()}
+    >
+      <div
+        style={{
+          background: "linear-gradient(180deg, rgba(11,47,85,.98), rgba(7,28,46,.98))",
+          border: "1px solid rgba(255,255,255,.2)",
+          borderRadius: 16,
+          padding: 24,
+          maxWidth: 480,
+          width: "92%",
+          boxShadow: "0 12px 40px rgba(0,0,0,.5)",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 style={{ margin: "0 0 8px", fontSize: 18 }}>¿Desea renunciar al cliente?</h3>
+        <p style={{ color: "var(--muted)", fontSize: 13, margin: "0 0 4px" }}>
+          <strong>Expediente:</strong> {caseRef}
+        </p>
+        <p style={{ color: "var(--muted)", fontSize: 13, margin: "0 0 16px" }}>
+          <strong>Carátula:</strong> {caratula?.trim() || "Sin carátula"}
+        </p>
+        <label style={{ display: "block", fontSize: 13, marginBottom: 6, color: "rgba(234,243,255,.9)" }}>
+          Ingrese la razón de la renuncia <span style={{ color: "rgba(231,76,60,.9)" }}>*</span>
+        </label>
+        <textarea
+          value={razon}
+          onChange={(e) => onRazonChange(e.target.value)}
+          rows={4}
+          placeholder="Motivo de la renuncia..."
+          style={{
+            width: "100%",
+            boxSizing: "border-box",
+            padding: "10px 12px",
+            borderRadius: 8,
+            border: "1px solid rgba(255,255,255,.15)",
+            background: "rgba(0,0,0,.2)",
+            color: "var(--text)",
+            fontSize: 13,
+            resize: "vertical",
+            marginBottom: 16,
+          }}
+        />
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={confirming || !razon.trim()}
+            style={{
+              padding: "8px 16px",
+              background: razon.trim() ? "rgba(192, 57, 43, 0.85)" : "rgba(127, 140, 141, 0.35)",
+              border: "1px solid rgba(231, 76, 60, 0.7)",
+              borderRadius: 8,
+              color: "#fff",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: razon.trim() && !confirming ? "pointer" : "not-allowed",
+              opacity: confirming ? 0.7 : 1,
+            }}
+          >
+            {confirming ? "Procesando..." : "Confirmar Renuncia"}
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={confirming}
+            style={{
+              padding: "8px 16px",
+              background: "rgba(255,255,255,.06)",
+              border: "1px solid rgba(255,255,255,.2)",
+              borderRadius: 8,
+              color: "var(--text)",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: confirming ? "not-allowed" : "pointer",
+            }}
+          >
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function EstadoGestionBubble({ estado }: { estado: string | null | undefined }) {
   if (!estado || estado === "Sin gestión") {
@@ -1313,6 +1449,14 @@ export default function PruebaPericiaPage() {
   const [savingTurno, setSavingTurno] = useState(false);
   const [creatingGestion, setCreatingGestion] = useState(false);
 
+  const [renunciaModal, setRenunciaModal] = useState<{
+    case_ref: string;
+    caratula: string;
+    orden_id?: string;
+  } | null>(null);
+  const [renunciaRazon, setRenunciaRazon] = useState("");
+  const [renunciando, setRenunciando] = useState(false);
+
   // Cerrar menú al hacer clic fuera
   useEffect(() => {
     if (!menuOpen) return;
@@ -1390,7 +1534,7 @@ export default function PruebaPericiaPage() {
       // Cargar expedientes
       const { data: expedientesData, error: expError } = await supabase
         .from("expedientes")
-        .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado, observaciones, notas, created_by_user_id")
+        .select("id, owner_user_id, caratula, juzgado, numero_expediente, fecha_ultima_modificacion, estado, observaciones, notas, created_by_user_id, semaforo_congelado, fecha_semaforo_congelado")
         .eq("estado", "ABIERTO")
         .order("fecha_ultima_modificacion", { ascending: true });
 
@@ -1898,9 +2042,23 @@ export default function PruebaPericiaPage() {
         }
       }
       
-      const dias = fechaParaCalcularDias ? daysSince(fechaParaCalcularDias) : null;
-      const semaforo = dias !== null ? semaforoByAgePruebaPericia(dias) : "VERDE" as Semaforo;
-      
+      const isRenunciado =
+        isRenunciadoObservaciones(e.observaciones) || e.semaforo_congelado === true;
+      let dias = fechaParaCalcularDias ? daysSince(fechaParaCalcularDias) : null;
+      if (isRenunciado && e.fecha_semaforo_congelado && fechaParaCalcularDias) {
+        const fin = new Date(e.fecha_semaforo_congelado);
+        const inicio = new Date(fechaParaCalcularDias);
+        dias = Math.max(
+          0,
+          Math.floor((fin.getTime() - inicio.getTime()) / (1000 * 60 * 60 * 24))
+        );
+      }
+      const semaforo: Semaforo = isRenunciado
+        ? "ROJO"
+        : dias !== null
+          ? semaforoByAgePruebaPericia(dias)
+          : "VERDE";
+
       return {
         type: "expediente" as const,
         id: e.id,
@@ -1914,8 +2072,9 @@ export default function PruebaPericiaPage() {
         is_pjn_favorito: e.is_pjn_favorito === true,
         observaciones: e.observaciones,
         notas: e.notas || null,
-        dias: dias,
+        dias: isRenunciado ? dias : dias,
         semaforo: semaforo,
+        isRenunciado,
       };
     });
   }, [expedientesFiltrados]);
@@ -2026,6 +2185,98 @@ export default function PruebaPericiaPage() {
     } else {
       setSortField(field);
       setSortDirection("asc");
+    }
+  };
+
+  const abrirModalRenuncia = (payload: {
+    case_ref: string;
+    caratula: string;
+    orden_id?: string;
+  }) => {
+    setRenunciaRazon("");
+    setRenunciaModal(payload);
+  };
+
+  const confirmarRenuncia = async () => {
+    if (!renunciaModal || !renunciaRazon.trim()) return;
+    setRenunciando(true);
+    try {
+      const session = await requireSessionOrRedirect();
+      if (!session) return;
+
+      const observacionesRenuncia = `RENUNCIADO: ${renunciaRazon.trim()}`;
+      const caseRef = renunciaModal.case_ref;
+
+      const res = await fetch("/api/prueba-pericia/renunciar", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          case_ref: caseRef,
+          orden_id: renunciaModal.orden_id,
+          razon: renunciaRazon.trim(),
+          caratula: renunciaModal.caratula,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Error desconocido" }));
+        setMsg("Error al renunciar: " + (err.error || res.statusText));
+        return;
+      }
+
+      setExpedientes((prev) =>
+        prev.map((e) =>
+          e.numero_expediente === caseRef
+            ? {
+                ...e,
+                observaciones: observacionesRenuncia,
+                semaforo_congelado: true,
+              }
+            : e
+        )
+      );
+      setPjnFavoritos((prev) =>
+        prev.map((f) => {
+          const numExp = `${f.numero}/${f.anio}`;
+          if (numExp === caseRef || f.id === caseRef) {
+            return { ...f, observaciones: observacionesRenuncia };
+          }
+          return f;
+        })
+      );
+      setOrdenesData((prev) =>
+        prev.map((o) => {
+          if (o.case_ref !== caseRef && o.id !== renunciaModal.orden_id) return o;
+          return {
+            ...o,
+            estado: "RENUNCIADO",
+            semaforo: "ROJO",
+            gestion: o.gestion
+              ? {
+                  ...o.gestion,
+                  estado: "RENUNCIADO",
+                  semaforo_congelado: true,
+                }
+              : { estado: "RENUNCIADO", semaforo_congelado: true },
+          };
+        })
+      );
+
+      setMsg("Renuncia registrada correctamente");
+      setRenunciaModal(null);
+      setRenunciaRazon("");
+      await loadData();
+      if (FEATURE_ORDENES_SEGUIMIENTO && activeTab === "ordenes") {
+        await loadOrdenes();
+      }
+    } catch (err) {
+      console.error("Error en renuncia:", err);
+      setMsg("Error al procesar la renuncia");
+    } finally {
+      setRenunciando(false);
     }
   };
 
@@ -2796,10 +3047,18 @@ export default function PruebaPericiaPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {ordenesFiltered.map((orden: any) => (
-                    <tr key={orden.id} style={{ verticalAlign: "top" }}>
+                  {ordenesFiltered.map((orden: any) => {
+                    const isRenunciadoOrden =
+                      orden.estado === "RENUNCIADO" ||
+                      orden.gestion?.estado === "RENUNCIADO" ||
+                      orden.gestion?.semaforo_congelado === true;
+                    return (
+                    <tr
+                      key={orden.id}
+                      style={{ verticalAlign: "top", ...renunciadoRowStyle(isRenunciadoOrden) }}
+                    >
                       <td>
-                        <SemaforoChip value={orden.semaforo as Semaforo} />
+                        <SemaforoChip value={(isRenunciadoOrden ? "ROJO" : orden.semaforo) as Semaforo} />
                       </td>
                       <td style={{ fontWeight: 650 }}>
                         {orden.case_ref || <span className="muted">—</span>}
@@ -2812,7 +3071,12 @@ export default function PruebaPericiaPage() {
                         )}
                       </td>
                       <td>
-                        <EstadoGestionBubble estado={orden.gestion?.estado} />
+                        <EstadoGestionBubble
+                          estado={
+                            orden.gestion?.estado ||
+                            (orden.estado === "RENUNCIADO" ? "RENUNCIADO" : undefined)
+                          }
+                        />
                       </td>
                       <td>
                         {orden.gestion?.centro_medico || <span className="muted">—</span>}
@@ -2833,27 +3097,57 @@ export default function PruebaPericiaPage() {
                         {orden.dias_sin_contacto !== null ? orden.dias_sin_contacto : <span className="muted">—</span>}
                       </td>
                       <td>
-                        <button
-                          onClick={() => {
-                            setSelectedOrden(orden);
-                            setDrawerOpen(true);
-                          }}
-                          style={{
-                            padding: "6px 12px",
-                            background: "rgba(96,141,186,.2)",
-                            border: "1px solid rgba(96,141,186,.4)",
-                            borderRadius: 6,
-                            color: "var(--text)",
-                            fontSize: 12,
-                            fontWeight: 600,
-                            cursor: "pointer",
-                          }}
-                        >
-                          Abrir
-                        </button>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          <button
+                            onClick={() => {
+                              setSelectedOrden(orden);
+                              setDrawerOpen(true);
+                            }}
+                            style={{
+                              padding: "6px 12px",
+                              background: "rgba(96,141,186,.2)",
+                              border: "1px solid rgba(96,141,186,.4)",
+                              borderRadius: 6,
+                              color: "var(--text)",
+                              fontSize: 12,
+                              fontWeight: 600,
+                              cursor: "pointer",
+                            }}
+                          >
+                            Abrir
+                          </button>
+                          {userRoles.isSuperadmin && !isRenunciadoOrden && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                abrirModalRenuncia({
+                                  case_ref: orden.case_ref || "",
+                                  caratula:
+                                    orden.expedientes?.caratula ||
+                                    orden.caratula ||
+                                    "",
+                                  orden_id: orden.id,
+                                })
+                              }
+                              style={{
+                                padding: "6px 12px",
+                                background: "rgba(192, 57, 43, 0.75)",
+                                border: "1px solid rgba(231, 76, 60, 0.7)",
+                                borderRadius: 6,
+                                color: "#fff",
+                                fontSize: 12,
+                                fontWeight: 600,
+                                cursor: "pointer",
+                              }}
+                            >
+                              Renunciar
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
-                  ))}
+                  );
+                  })}
                   {ordenesFiltered.length === 0 && (
                     <tr>
                       <td colSpan={9} className="muted">
@@ -3204,10 +3498,16 @@ export default function PruebaPericiaPage() {
           <tbody>
             {paginatedItems.map((item: any) => {
               const dias = item.dias ?? null;
-              const sem = item.semaforo || (dias !== null ? semaforoByAgePruebaPericia(dias) : "VERDE");
-              
+              const isRenunciado = item.isRenunciado === true;
+              const sem = isRenunciado
+                ? "ROJO"
+                : item.semaforo || (dias !== null ? semaforoByAgePruebaPericia(dias) : "VERDE");
+
               return (
-                <tr key={item.id} style={{ verticalAlign: "top" }}>
+                <tr
+                  key={item.id}
+                  style={{ verticalAlign: "top", ...renunciadoRowStyle(isRenunciado) }}
+                >
                   <td>
                     <SemaforoChip value={sem as Semaforo} />
                   </td>
@@ -3275,9 +3575,35 @@ export default function PruebaPericiaPage() {
                     const caseRef = item.numero || item.caratula || "Sin referencia";
                     const tieneOrden = ordenesExistentes[caseRef] || (!item.is_pjn_favorito && ordenesExistentes[item.id]);
                     const isUploading = uploadingOrden[item.id] === true;
-                    
+
                     return (
                       <td style={{ textAlign: "center", padding: "11px 12px" }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "center" }}>
+                        {userRoles.isSuperadmin && !isRenunciado && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              abrirModalRenuncia({
+                                case_ref: caseRef,
+                                caratula: item.caratula || "",
+                              })
+                            }
+                            style={{
+                              padding: "6px 12px",
+                              background: "rgba(192, 57, 43, 0.75)",
+                              border: "1px solid rgba(231, 76, 60, 0.7)",
+                              borderRadius: 6,
+                              color: "#fff",
+                              fontSize: 12,
+                              fontWeight: 600,
+                              cursor: "pointer",
+                              width: "100%",
+                              maxWidth: 140,
+                            }}
+                          >
+                            Renunciar
+                          </button>
+                        )}
                         <button
                           onClick={async () => {
                             const input = document.createElement("input");
@@ -3373,10 +3699,10 @@ export default function PruebaPericiaPage() {
                             };
                             input.click();
                           }}
-                          disabled={isUploading}
+                          disabled={isUploading || isRenunciado}
                           style={{
                             padding: "6px 12px",
-                            background: isUploading 
+                            background: isUploading || isRenunciado
                               ? "rgba(255,255,255,.1)" 
                               : tieneOrden 
                                 ? "rgba(255,193,7,.3)" // Amarillo cuando tiene orden
@@ -3392,6 +3718,7 @@ export default function PruebaPericiaPage() {
                         >
                           {isUploading ? "Subiendo..." : tieneOrden ? "Orden Creada" : "Crear Orden"}
                         </button>
+                        </div>
                       </td>
                     );
                   })()}
@@ -4552,6 +4879,22 @@ export default function PruebaPericiaPage() {
           </div>
         </div>
       )}
+
+      <RenunciarModal
+        open={renunciaModal !== null}
+        caseRef={renunciaModal?.case_ref || ""}
+        caratula={renunciaModal?.caratula || ""}
+        razon={renunciaRazon}
+        onRazonChange={setRenunciaRazon}
+        onConfirm={confirmarRenuncia}
+        onCancel={() => {
+          if (!renunciando) {
+            setRenunciaModal(null);
+            setRenunciaRazon("");
+          }
+        }}
+        confirming={renunciando}
+      />
     </div>
   );
 }

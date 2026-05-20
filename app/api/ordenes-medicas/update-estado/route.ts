@@ -66,6 +66,7 @@ export async function POST(req: NextRequest) {
       "SEGUIMIENTO_PRE_TURNO",
       "ESTUDIO_REALIZADO",
       "CANCELADA",
+      "RENUNCIADO",
     ];
 
     if (!estadosValidos.includes(estado)) {

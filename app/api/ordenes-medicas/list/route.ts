@@ -158,6 +158,8 @@ export async function GET(req: NextRequest) {
           centro_medico,
           turno_fecha_hora,
           fecha_estudio_realizado,
+          semaforo_congelado,
+          fecha_semaforo_congelado,
           responsable_user_id,
           created_at,
           updated_at
@@ -320,9 +322,25 @@ export async function GET(req: NextRequest) {
       let diasSinContacto: number | null = null;
       let turnoVencido = false;
 
-      if (item.gestion) {
-        // ESTUDIO_REALIZADO: congelar reloj, días y semáforo en el valor del día de cierre
-        if (item.gestion.estado === "ESTUDIO_REALIZADO") {
+      if (item.estado === "RENUNCIADO") {
+        semaforo = "ROJO";
+        horasSinContacto = null;
+        const fechaFin = item.updated_at || item.created_at;
+        const fechaInicio = item.created_at;
+        diasSinContacto = daysBetween(fechaInicio, fechaFin);
+      } else if (item.gestion) {
+        // RENUNCIADO: semáforo ROJO fijo, días congelados
+        if (
+          item.gestion.estado === "RENUNCIADO" ||
+          item.gestion.semaforo_congelado === true
+        ) {
+          const fechaFin =
+            item.gestion.fecha_semaforo_congelado || item.gestion.updated_at;
+          const fechaInicio = item.gestion.created_at || item.created_at;
+          diasSinContacto = daysBetween(fechaInicio, fechaFin);
+          semaforo = "ROJO";
+          horasSinContacto = null;
+        } else if (item.gestion.estado === "ESTUDIO_REALIZADO") {
           const fechaFin = item.gestion.fecha_estudio_realizado || item.gestion.updated_at;
           const fechaInicio = item.gestion.created_at || item.created_at;
           diasSinContacto = daysBetween(fechaInicio, fechaFin);
