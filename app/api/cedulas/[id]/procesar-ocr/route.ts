@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { after } from "next/server";
 import { supabaseService } from "@/lib/supabase-server";
 import { getUserFromRequest } from "@/lib/auth-api";
+import {
+  buildPjnDiligenciamientoPayload,
+  logPjnPayload,
+  pjnVpsBaseUrl,
+} from "@/lib/pjn-payload";
 
 export const runtime = "nodejs";
 
@@ -27,24 +32,13 @@ const CARGAR_PJN_FETCH_MS = 300_000;
 /** Límite para POST /procesar | /procesar-oficio en Railway (Vision puede tardar varios minutos). */
 const RAILWAY_OCR_FETCH_MS = 600_000;
 
-function railwayCargarPjnBaseUrl(): string | null {
-  const raw =
-    process.env.PJN_LOCAL_URL?.trim() ||
-    process.env.RAILWAY_CARGAR_PJN_URL?.trim() ||
-    process.env.RAILWAY_OCR_URL?.trim();
-  if (!raw) return null;
-  let u = raw.replace(/\/$/, "");
-  u = u.replace(/\/cargar-pjn\/?$/i, "");
-  return u;
-}
-
 async function invocarCargarPjnTrasOcr(
   svc: ReturnType<typeof supabaseService>,
   cedulaId: string,
   expNro: string | null,
-  tipo: string | null | undefined
+  tipo_documento: string | null | undefined
 ) {
-  const base = railwayCargarPjnBaseUrl();
+  const base = pjnVpsBaseUrl();
   if (!base || !expNro?.trim()) {
     return;
   }
@@ -80,12 +74,25 @@ async function invocarCargarPjnTrasOcr(
   }
   const jurisdiccion = favoritoJurisdiccion ?? "CIV";
 
+  let pjnPayload;
+  try {
+    pjnPayload = buildPjnDiligenciamientoPayload({
+      cedulaId,
+      expNro: expNro.trim(),
+      jurisdiccion,
+      pdfUrl: signedData.signedUrl,
+      tipo_documento,
+    });
+  } catch (e: unknown) {
+    const msg =
+      e instanceof Error ? e.message : "tipo_documento inválido para carga PJN";
+    await svc.from("cedulas").update({ observaciones_pjn: msg }).eq("id", cedulaId);
+    return;
+  }
+
+  logPjnPayload({ tipo_documento }, pjnPayload);
+
   const internalSecret = process.env.RAILWAY_INTERNAL_SECRET;
-  console.log("[procesar-ocr cargar-pjn] tipo:", tipo);
-  const descripcion =
-    tipo === "OFICIO"
-      ? "Acredita Diligenciamiento Oficio"
-      : "Acredita Diligenciamiento Cedula";
 
   let railwayRes: Response;
   try {
@@ -95,13 +102,7 @@ async function invocarCargarPjnTrasOcr(
         "Content-Type": "application/json",
         ...(internalSecret ? { "X-Internal-Secret": internalSecret } : {}),
       },
-      body: JSON.stringify({
-        expNro: expNro.trim(),
-        jurisdiccion,
-        cedulaId,
-        pdfUrl: signedData.signedUrl,
-        descripcion,
-      }),
+      body: JSON.stringify(pjnPayload),
       signal: AbortSignal.timeout(CARGAR_PJN_FETCH_MS),
     });
   } catch (e: any) {

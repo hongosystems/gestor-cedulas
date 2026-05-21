@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseService } from "@/lib/supabase-server";
 import { getUserFromRequest } from "@/lib/auth-api";
+import {
+  logPjnPayload,
+  normalizeTipoDocumentoPjn,
+  pjnLocalBaseUrl,
+  type PjnCargarPayload,
+} from "@/lib/pjn-payload";
 
 export const runtime = "nodejs";
 
@@ -22,16 +28,6 @@ async function requireSuperadmin(
     .eq("user_id", userId)
     .maybeSingle();
   return data?.is_superadmin === true;
-}
-
-function pjnBaseUrl(): string | null {
-  const raw = process.env.PJN_LOCAL_URL?.trim();
-  if (!raw) return null;
-  // Quita slash final y un eventual sufijo /cargar-pjn ya presente para evitar
-  // que terminemos haciendo POST a .../cargar-pjn/cargar-pjn.
-  let u = raw.replace(/\/$/, "");
-  u = u.replace(/\/cargar-pjn\/?$/i, "");
-  return u;
 }
 
 export async function POST(
@@ -195,13 +191,32 @@ export async function POST(
   }
 
   // 3. Encolar la presentación del reiteratorio en el VPS PJN.
-  const pjnBase = pjnBaseUrl();
+  const pjnBase = pjnLocalBaseUrl();
   if (!pjnBase) {
     return NextResponse.json(
       { error: "PJN_LOCAL_URL no configurada" },
       { status: 503 }
     );
   }
+
+  let tipoDocumento: PjnCargarPayload["tipoDocumento"];
+  try {
+    tipoDocumento = normalizeTipoDocumentoPjn(cedula.tipo_documento);
+  } catch (e: unknown) {
+    const msg =
+      e instanceof Error ? e.message : "tipo_documento inválido para presentación PJN";
+    return NextResponse.json({ error: msg }, { status: 400 });
+  }
+
+  const pjnPayload: PjnCargarPayload = {
+    cedulaId,
+    expNro,
+    jurisdiccion: "CIV",
+    pdfUrl: signedData.signedUrl,
+    tipoDocumento,
+    descripcion: "Solicita Oficio Reiteratorio",
+  };
+  logPjnPayload(cedula, pjnPayload);
 
   let pjnRes: Response;
   try {
@@ -211,14 +226,7 @@ export async function POST(
         "Content-Type": "application/json",
         ...(internalSecret ? { "X-Internal-Secret": internalSecret } : {}),
       },
-      body: JSON.stringify({
-        expNro,
-        jurisdiccion: "CIV",
-        cedulaId,
-        pdfUrl: signedData.signedUrl,
-        tipo: "OFICIO",
-        descripcion: "Solicita Oficio Reiteratorio",
-      }),
+      body: JSON.stringify(pjnPayload),
       signal: AbortSignal.timeout(PJN_FETCH_MS),
     });
   } catch (e: unknown) {

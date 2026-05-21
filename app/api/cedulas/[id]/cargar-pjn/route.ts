@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseService } from "@/lib/supabase-server";
 import { getUserFromRequest } from "@/lib/auth-api";
+import {
+  buildPjnDiligenciamientoPayload,
+  logPjnPayload,
+  pjnVpsBaseUrl,
+} from "@/lib/pjn-payload";
 
 export const runtime = "nodejs";
 
@@ -33,18 +38,6 @@ async function requireAbogado(
     .eq("user_id", userId)
     .maybeSingle();
   return data?.is_abogado === true || data?.is_superadmin === true;
-}
-
-function railwayBaseUrl(): string | null {
-  const raw =
-    process.env.PJN_LOCAL_URL?.trim() ||
-    process.env.RAILWAY_CARGAR_PJN_URL?.trim() ||
-    process.env.RAILWAY_OCR_URL?.trim();
-  if (!raw) return null;
-  // Solo la base (origen), sin /cargar-pjn: si no, fetch hace .../cargar-pjn/cargar-pjn → 404
-  let u = raw.replace(/\/$/, "");
-  u = u.replace(/\/cargar-pjn\/?$/i, "");
-  return u;
 }
 
 export async function POST(
@@ -152,7 +145,7 @@ export async function POST(
     exp_anio: expAnioStr ?? "",
   };
 
-  const base = railwayBaseUrl();
+  const base = pjnVpsBaseUrl();
   if (!base) {
     const msg =
       "No hay URL de Railway para carga PJN (definí RAILWAY_CARGAR_PJN_URL o RAILWAY_OCR_URL).";
@@ -185,19 +178,25 @@ export async function POST(
     console.error("[cargar-pjn] jurisdiccion ausente antes de enviar a Railway");
   }
 
-  console.log("[cargar-pjn] enviando a Railway:", {
-    expNro: cedula.ocr_exp_nro,
-    jurisdiccion: expData.jurisdiccion,
-    cedulaId,
-    pdfUrl: signedData.signedUrl,
-  });
+  let pjnPayload;
+  try {
+    pjnPayload = buildPjnDiligenciamientoPayload({
+      cedulaId,
+      expNro: cedula.ocr_exp_nro ?? "",
+      jurisdiccion: expData.jurisdiccion,
+      pdfUrl: signedData.signedUrl,
+      tipo_documento: cedula.tipo_documento,
+    });
+  } catch (e: unknown) {
+    const msg =
+      e instanceof Error ? e.message : "tipo_documento inválido para carga PJN";
+    await persistPjnFallo(svc, cedulaId, msg);
+    return NextResponse.json({ error: msg }, { status: 400 });
+  }
+
+  logPjnPayload(cedula, pjnPayload);
 
   const internalSecret = process.env.RAILWAY_INTERNAL_SECRET;
-  console.log("[cargar-pjn] tipo:", cedula.tipo_documento);
-  const descripcion =
-    cedula.tipo_documento === "OFICIO"
-      ? "Acredita Diligenciamiento Oficio"
-      : "Acredita Diligenciamiento Cedula";
 
   let railwayRes: Response;
   try {
@@ -207,14 +206,7 @@ export async function POST(
         "Content-Type": "application/json",
         ...(internalSecret ? { "X-Internal-Secret": internalSecret } : {}),
       },
-      body: JSON.stringify({
-        expNro: cedula.ocr_exp_nro,
-        jurisdiccion: expData.jurisdiccion,
-        cedulaId,
-        pdfUrl: signedData.signedUrl,
-        tipo: cedula.tipo_documento,
-        descripcion,
-      }),
+      body: JSON.stringify(pjnPayload),
       signal: AbortSignal.timeout(RAILWAY_FETCH_MS),
     });
   } catch (e: any) {
