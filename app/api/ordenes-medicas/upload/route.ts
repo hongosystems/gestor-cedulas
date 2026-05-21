@@ -120,14 +120,15 @@ export async function POST(req: NextRequest) {
         // Verificar si es admin o superadmin
         const { data: roleData } = await svc
           .from("user_roles")
-          .select("is_superadmin, is_admin_expedientes")
+          .select("is_superadmin, is_admin_expedientes, is_admin_ordenes_medicas")
           .eq("user_id", user.id)
           .maybeSingle();
 
         const isSuperadmin = roleData?.is_superadmin === true;
         const isAdminExp = roleData?.is_admin_expedientes === true;
+        const isAdminOrdenes = roleData?.is_admin_ordenes_medicas === true;
 
-        if (!isSuperadmin && !isAdminExp) {
+        if (!isSuperadmin && !isAdminExp && !isAdminOrdenes) {
           return NextResponse.json(
             { error: "No autorizado para este expediente" },
             { status: 403 }
