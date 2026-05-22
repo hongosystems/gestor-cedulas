@@ -156,8 +156,13 @@ export async function invocarProcesarOficio(
   | { ok: false; error: string; status?: number }
 > {
   const base = railwayUrl.replace(/\/$/, "");
+  const arrayBuffer = pdfBuffer.buffer.slice(
+    pdfBuffer.byteOffset,
+    pdfBuffer.byteOffset + pdfBuffer.byteLength
+  ) as ArrayBuffer;
+  const blob = new Blob([arrayBuffer], { type: "application/pdf" });
   const formData = new FormData();
-  formData.append("pdf", new Blob([pdfBuffer], { type: "application/pdf" }), "oficio.pdf");
+  formData.append("pdf", blob, "oficio.pdf");
 
   let railwayRes: Response;
   try {
