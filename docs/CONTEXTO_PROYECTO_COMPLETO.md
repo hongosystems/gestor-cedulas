@@ -166,6 +166,43 @@ Flujo:
 
 **Endpoint:** `app/api/cedulas/[id]/procesar-ocr/route.ts`
 
+### 4.8 Prueba/Pericia y órdenes médicas
+
+**UI:** `app/prueba-pericia/page.tsx` (feature flag `NEXT_PUBLIC_FEATURE_ORDENES_SEGUIMIENTO`)
+
+Capacidades:
+
+- **Detección:** expedientes con movimientos de Prueba/Pericia (tabla `expedientes` + casos PJN desde scraper `cases`).
+- **Órdenes/Seguimiento:** workflow de órdenes médicas (subida PDF, gestión de estudio, comunicaciones).
+- Botón **Crear Orden** por fila (hasta 5 archivos, máx. 4 MB total por request).
+- Renuncia (solo superadmin): congela semáforo y estado `RENUNCIADO` en orden.
+
+**Endpoints relevantes:**
+
+- `app/api/ordenes-medicas/upload/route.ts` — creación/subida de archivos y orden
+- `app/api/ordenes-medicas/list/route.ts`
+- `app/api/ordenes-medicas/download/route.ts`
+- `app/api/ordenes-medicas/update-estado/route.ts`
+- `app/api/ordenes-medicas/create-gestion/route.ts`
+- `app/api/ordenes-medicas/comunicacion/route.ts`
+
+**Migraciones:** `migrations/create_ordenes_medicas_tables.sql`, `migrations/add_admin_ordenes_medicas.sql`, `migrations/add_ordenes_medicas_archivos_table.sql`, `migrations/add_renuncia_pericia_estados.sql`
+
+**Documentación operativa:** `docs/ordenes-seguimiento-mvp.md`, `docs/flujo-ux-ordenes-medicas.md`
+
+#### Permisos en upload vs. visibilidad de expedientes
+
+- La grilla de Detección puede mostrar expedientes que el usuario **no posee** (RLS: abogado por `user_juzgados`, o lectura amplia según rol).
+- Al subir desde un expediente en `expedientes` (no favorito PJN puro), el front envía `expediente_id` y el API valida acceso al expediente.
+- Quién puede subir/crear orden en expediente ajeno (además del `owner_user_id`):
+  - `is_superadmin`
+  - `is_admin_expedientes`
+  - **`is_admin_ordenes_medicas`** (rol pensado para operadores del circuito de órdenes, p. ej. Andrea)
+- Favoritos PJN **sin** fila en `expedientes`: no se envía `expediente_id`; no aplica chequeo de dueño (solo `case_ref`).
+- Si el mismo número existe en `expedientes` y en PJN, prevalece la fila de `expedientes` (`is_pjn_favorito: false`) y sí se exige permiso de upload.
+
+**Usuario de referencia (órdenes):** `andreaestudio24@gmail.com` — `is_admin_ordenes_medicas=true`, `is_admin_cedulas=true`, `is_admin_expedientes=false` (evita pantalla select-role de admin expedientes).
+
 ## 5) Autenticación, autorización y roles
 
 ### Autenticación
@@ -181,8 +218,19 @@ Roles observados:
 - `is_superadmin`
 - `is_admin_cedulas`
 - `is_admin_expedientes`
+- `is_admin_ordenes_medicas` — ver/listar/operar órdenes médicas en cualquier expediente; **no** implica admin de expedientes ni select-role de ese módulo (`migrations/add_admin_ordenes_medicas.sql`)
 - `is_admin_mediaciones`
 - `is_abogado`
+
+#### Matriz rápida: órdenes médicas (APIs `app/api/ordenes-medicas/*`)
+
+| Acción | Owner expediente | Emisor orden | `is_admin_ordenes_medicas` | `is_admin_expedientes` | `is_superadmin` |
+|--------|------------------|--------------|----------------------------|------------------------|-----------------|
+| Listar todas las órdenes | — | — | sí | sí | sí |
+| Upload / crear orden (con `expediente_id`) | sí | — | sí | sí | sí |
+| Download, update-estado, gestión, comunicación | según orden/expediente | sí (emisión) | sí | sí | sí |
+
+Todas las rutas del módulo deben incluir `is_admin_ordenes_medicas` donde aplique bypass por rol (upload alineado desde commit `fix(ordenes-medicas): permitir upload con is_admin_ordenes_medicas`).
 
 ### Segmentación por juzgado
 
@@ -266,6 +314,15 @@ Roles observados:
 
 - `/api/transfers/**`
 
+### Órdenes médicas / Prueba-Pericia
+
+- `/api/ordenes-medicas/upload`
+- `/api/ordenes-medicas/list`
+- `/api/ordenes-medicas/download`
+- `/api/ordenes-medicas/update-estado`
+- `/api/ordenes-medicas/create-gestion`
+- `/api/ordenes-medicas/comunicacion`
+
 ### Administración
 
 - `/api/webmaster/users`
@@ -340,7 +397,8 @@ Roles observados:
 ### Medio impacto
 
 - Compatibilidad de esquema por fallbacks de columnas puede complejizar mantenimiento.
-- Varias rutas con lógicas similares de permisos/actualización.
+- Varias rutas con lógicas similares de permisos/actualización (mitigado en órdenes médicas: unificar siempre `is_admin_ordenes_medicas` en nuevas rutas del módulo).
+- Desfase posible entre **ver** expediente en Prueba/Pericia y **subir** orden si falta el rol o el expediente pasó de solo-PJN a fila en `expedientes`.
 
 ### Recomendaciones inmediatas
 
@@ -363,6 +421,10 @@ Roles observados:
 - `app/api/mediaciones/lotes/send/route.ts`
 - `app/api/transfers/send/route.ts`
 - `app/api/open-file/route.ts`
+- `app/prueba-pericia/page.tsx`
+- `app/api/ordenes-medicas/upload/route.ts`
+- `migrations/add_admin_ordenes_medicas.sql`
+- `docs/ordenes-seguimiento-mvp.md`
 - `lib/auth-api.ts`
 - `lib/supabase.ts`
 - `lib/supabase-server.ts`
