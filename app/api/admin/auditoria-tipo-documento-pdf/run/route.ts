@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseService } from "@/lib/supabase-server";
 import { getUserFromRequest } from "@/lib/auth-api";
 import {
+  clasificacionExtraccionFallida,
   clasificarTextoPdf,
   descargarPdfDesdeStorage,
   extraerTextoPdfLocal,
@@ -233,34 +234,27 @@ async function procesarCedula(
     };
   }
 
-  // 2) Extraer texto con pdf-parse (método barato local).
-  //    Si falla, queda registrado pero NO se llama Railway (decisión de scope).
-  let paginas: string[];
-  try {
-    const extracted = await extraerTextoPdfLocal(downloadResult.buffer);
-    paginas = extracted.paginas;
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.warn("[tipo-doc-audit][run] pdf-parse falló", {
+  // 2) Extraer texto con pdf-parse (método barato local, con polyfills DOM
+  //    para Node en Vercel). NO llama Railway en esta fase.
+  //
+  //    Si la extracción falla, el ítem se reporta OK (ok:true) con
+  //    clasificacion=INDETERMINADO y razón "No se pudo extraer texto
+  //    localmente del PDF" — siguiendo la regla "solo ok:false si no se pudo
+  //    descargar/leer el archivo".
+  const extracted = await extraerTextoPdfLocal(downloadResult.buffer);
+
+  let clasificado: ClasificacionResultado;
+  if (!extracted.ok) {
+    console.warn("[tipo-doc-audit][run] extracción local falló (continuamos como INDETERMINADO)", {
       cedula_id: cedula.id,
       pdf_path: pdfPath,
-      error: msg,
+      error: extracted.error,
     });
-    return {
-      cedula_id: cedula.id,
-      ok: false,
-      tipo_documento_actual: cedula.tipo_documento,
-      clasificacion_pdf: null,
-      confianza: null,
-      razones_count: 0,
-      audit_id: null,
-      mismatch: false,
-      error: `Extracción local falló: ${msg}`,
-    };
+    clasificado = clasificacionExtraccionFallida(extracted.error);
+  } else {
+    // 3) Clasificar
+    clasificado = clasificarTextoPdf({ paginas: extracted.paginas });
   }
-
-  // 3) Clasificar
-  const clasificado = clasificarTextoPdf({ paginas });
 
   const mismatch = calcularMismatch(cedula.tipo_documento, clasificado.clasificacion);
 

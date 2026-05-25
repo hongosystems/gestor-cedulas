@@ -5,7 +5,8 @@ import { supabase } from "@/lib/supabase";
 
 type Razon = {
   patron: string;
-  clasificacion: "CEDULA" | "OFICIO";
+  /** null indica una razón "meta" (ej: extracción fallida), sin peso en scoring. */
+  clasificacion: "CEDULA" | "OFICIO" | null;
   peso: number;
   pagina: number | null;
 };
@@ -341,29 +342,39 @@ export default function AuditoriaTipoDocumentoPage() {
                                 maxWidth: 360,
                               }}
                             >
-                              {r.razones.slice(0, 8).map((rz, i) => (
-                                <span
-                                  key={`${r.id}-${i}`}
-                                  title={`peso ${rz.peso}${rz.pagina ? ` · pág ${rz.pagina}` : ""}`}
-                                  style={{
-                                    fontSize: 10,
-                                    padding: "2px 6px",
-                                    borderRadius: 4,
-                                    background:
-                                      rz.clasificacion === "OFICIO"
-                                        ? "rgba(168,85,247,.18)"
-                                        : "rgba(59,130,246,.18)",
-                                    border:
-                                      rz.clasificacion === "OFICIO"
-                                        ? "1px solid rgba(168,85,247,.4)"
-                                        : "1px solid rgba(59,130,246,.4)",
-                                    color: "rgba(234,243,255,.92)",
-                                    fontWeight: 600,
-                                  }}
-                                >
-                                  {rz.patron}
-                                </span>
-                              ))}
+                              {r.razones.slice(0, 8).map((rz, i) => {
+                                const isMeta = rz.clasificacion == null;
+                                const bg = isMeta
+                                  ? "rgba(234,179,8,.16)"
+                                  : rz.clasificacion === "OFICIO"
+                                    ? "rgba(168,85,247,.18)"
+                                    : "rgba(59,130,246,.18)";
+                                const border = isMeta
+                                  ? "1px solid rgba(234,179,8,.4)"
+                                  : rz.clasificacion === "OFICIO"
+                                    ? "1px solid rgba(168,85,247,.4)"
+                                    : "1px solid rgba(59,130,246,.4)";
+                                const titulo = isMeta
+                                  ? "nota (no contribuye al scoring)"
+                                  : `peso ${rz.peso}${rz.pagina ? ` · pág ${rz.pagina}` : ""}`;
+                                return (
+                                  <span
+                                    key={`${r.id}-${i}`}
+                                    title={titulo}
+                                    style={{
+                                      fontSize: 10,
+                                      padding: "2px 6px",
+                                      borderRadius: 4,
+                                      background: bg,
+                                      border,
+                                      color: "rgba(234,243,255,.92)",
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    {rz.patron}
+                                  </span>
+                                );
+                              })}
                               {r.razones.length > 8 && (
                                 <span className="muted" style={{ fontSize: 10 }}>
                                   +{r.razones.length - 8}

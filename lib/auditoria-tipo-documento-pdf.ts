@@ -33,9 +33,15 @@ const CONFIANZA_COTA = 9;
 
 export type ClasificacionPdf = "CEDULA" | "OFICIO" | "INDETERMINADO";
 
+/**
+ * Una razón puede ser:
+ *   - "evidencia" (clasificacion CEDULA u OFICIO con peso >= 1)
+ *   - "meta" (clasificacion null, peso 0) — ej. "No se pudo extraer texto del PDF"
+ * Las razones meta NO contribuyen al scoring; sólo documentan el resultado.
+ */
 export type RazonClasificacion = {
   patron: string;
-  clasificacion: "CEDULA" | "OFICIO";
+  clasificacion: "CEDULA" | "OFICIO" | null;
   peso: number;
   pagina: number | null;
 };
@@ -46,6 +52,33 @@ export type ClasificacionResultado = {
   razones: RazonClasificacion[];
   texto_detectado: string;
 };
+
+export const RAZON_EXTRACCION_FALLIDA = "No se pudo extraer texto localmente del PDF";
+
+/**
+ * Construye el resultado de clasificación cuando no se pudo extraer texto del PDF.
+ * Por contrato (ver /run/route.ts) el ítem queda OK pero INDETERMINADO.
+ */
+export function clasificacionExtraccionFallida(
+  detalle?: string
+): ClasificacionResultado {
+  const patron = detalle
+    ? `${RAZON_EXTRACCION_FALLIDA}: ${detalle}`
+    : RAZON_EXTRACCION_FALLIDA;
+  return {
+    clasificacion: "INDETERMINADO",
+    confianza: 0,
+    razones: [
+      {
+        patron,
+        clasificacion: null,
+        peso: 0,
+        pagina: null,
+      },
+    ],
+    texto_detectado: "",
+  };
+}
 
 type PatronDef = {
   patron: string;
@@ -120,23 +153,248 @@ export function normalizarTextoPdf(s: string): string {
     .toUpperCase();
 }
 
+// =============================================================================
+// Polyfills DOM mínimos para pdf-parse @ pdfjs-dist@5 en runtime Node (Vercel)
+// -----------------------------------------------------------------------------
+// pdfjs-dist@5 referencia DOMMatrix, Path2D, ImageData y OffscreenCanvas como
+// globals. En Node 20/22 (Vercel) estos no existen y pdf-parse lanza
+// "DOMMatrix is not defined" al ejecutar getText() sobre PDFs reales.
+//
+// Para la extracción de texto NO se requieren las matemáticas reales de estas
+// APIs — sólo que las clases existan. Stubs mínimos son suficientes y no
+// afectan a ningún otro flujo (no hay otro uso de DOMMatrix en el repo).
+// =============================================================================
+
+type PdfPolyfillGlobals = {
+  DOMMatrix?: unknown;
+  Path2D?: unknown;
+  ImageData?: unknown;
+  OffscreenCanvas?: unknown;
+};
+
+let polyfillsAplicados = false;
+
+function aplicarPdfPolyfills(): void {
+  if (polyfillsAplicados) return;
+  const g = globalThis as unknown as PdfPolyfillGlobals;
+
+  if (typeof g.DOMMatrix === "undefined") {
+    class DOMMatrixStub {
+      a = 1;
+      b = 0;
+      c = 0;
+      d = 1;
+      e = 0;
+      f = 0;
+      m11 = 1;
+      m12 = 0;
+      m13 = 0;
+      m14 = 0;
+      m21 = 0;
+      m22 = 1;
+      m23 = 0;
+      m24 = 0;
+      m31 = 0;
+      m32 = 0;
+      m33 = 1;
+      m34 = 0;
+      m41 = 0;
+      m42 = 0;
+      m43 = 0;
+      m44 = 1;
+      is2D = true;
+      isIdentity = true;
+      constructor(_init?: unknown) {
+        // Stub: no parsea init real. Sólo expone el shape.
+      }
+      multiply(_o?: unknown): DOMMatrixStub {
+        return this;
+      }
+      multiplySelf(_o?: unknown): DOMMatrixStub {
+        return this;
+      }
+      preMultiplySelf(_o?: unknown): DOMMatrixStub {
+        return this;
+      }
+      translate(_x?: number, _y?: number): DOMMatrixStub {
+        return this;
+      }
+      translateSelf(_x?: number, _y?: number): DOMMatrixStub {
+        return this;
+      }
+      scale(_x?: number, _y?: number): DOMMatrixStub {
+        return this;
+      }
+      scaleSelf(_x?: number, _y?: number): DOMMatrixStub {
+        return this;
+      }
+      scaleNonUniformSelf(_x?: number, _y?: number): DOMMatrixStub {
+        return this;
+      }
+      rotate(_a?: number): DOMMatrixStub {
+        return this;
+      }
+      rotateSelf(_a?: number): DOMMatrixStub {
+        return this;
+      }
+      rotateFromVectorSelf(_x?: number, _y?: number): DOMMatrixStub {
+        return this;
+      }
+      flipX(): DOMMatrixStub {
+        return this;
+      }
+      flipY(): DOMMatrixStub {
+        return this;
+      }
+      inverse(): DOMMatrixStub {
+        return this;
+      }
+      invertSelf(): DOMMatrixStub {
+        return this;
+      }
+      skewXSelf(_a?: number): DOMMatrixStub {
+        return this;
+      }
+      skewYSelf(_a?: number): DOMMatrixStub {
+        return this;
+      }
+      transformPoint(p?: unknown): unknown {
+        return p ?? { x: 0, y: 0, z: 0, w: 1 };
+      }
+      setMatrixValue(_s?: string): DOMMatrixStub {
+        return this;
+      }
+      toFloat32Array(): Float32Array {
+        return new Float32Array(16);
+      }
+      toFloat64Array(): Float64Array {
+        return new Float64Array(16);
+      }
+      toString(): string {
+        return "matrix(1, 0, 0, 1, 0, 0)";
+      }
+      static fromMatrix(_o?: unknown): DOMMatrixStub {
+        return new DOMMatrixStub();
+      }
+      static fromFloat32Array(_a?: unknown): DOMMatrixStub {
+        return new DOMMatrixStub();
+      }
+      static fromFloat64Array(_a?: unknown): DOMMatrixStub {
+        return new DOMMatrixStub();
+      }
+    }
+    g.DOMMatrix = DOMMatrixStub;
+  }
+
+  if (typeof g.Path2D === "undefined") {
+    class Path2DStub {
+      constructor(_init?: unknown) {}
+      addPath(_p?: unknown, _t?: unknown): void {}
+      closePath(): void {}
+      moveTo(_x?: number, _y?: number): void {}
+      lineTo(_x?: number, _y?: number): void {}
+      bezierCurveTo(): void {}
+      quadraticCurveTo(): void {}
+      arc(): void {}
+      arcTo(): void {}
+      ellipse(): void {}
+      rect(): void {}
+      roundRect(): void {}
+    }
+    g.Path2D = Path2DStub;
+  }
+
+  if (typeof g.ImageData === "undefined") {
+    class ImageDataStub {
+      data: Uint8ClampedArray;
+      width: number;
+      height: number;
+      colorSpace = "srgb" as const;
+      constructor(
+        arg1: number | Uint8ClampedArray,
+        arg2?: number,
+        arg3?: number
+      ) {
+        if (arg1 instanceof Uint8ClampedArray) {
+          this.data = arg1;
+          this.width = arg2 ?? 1;
+          this.height = arg3 ?? Math.max(1, Math.floor(this.data.length / 4 / this.width));
+        } else {
+          this.width = arg1;
+          this.height = arg2 ?? 1;
+          this.data = new Uint8ClampedArray(this.width * this.height * 4);
+        }
+      }
+    }
+    g.ImageData = ImageDataStub;
+  }
+
+  if (typeof g.OffscreenCanvas === "undefined") {
+    class OffscreenCanvasStub {
+      width: number;
+      height: number;
+      constructor(width: number, height: number) {
+        this.width = width;
+        this.height = height;
+      }
+      getContext(_id?: string): null {
+        // No tenemos canvas real; devolver null fuerza a pdfjs a saltar el
+        // render path. La extracción de texto no necesita contexto.
+        return null;
+      }
+      transferToImageBitmap(): null {
+        return null;
+      }
+      convertToBlob(): Promise<null> {
+        return Promise.resolve(null);
+      }
+    }
+    g.OffscreenCanvas = OffscreenCanvasStub;
+  }
+
+  polyfillsAplicados = true;
+}
+
+// Aplicamos al cargar el módulo para que ningún consumer tenga que invocarlo.
+aplicarPdfPolyfills();
+
+export type ExtraccionResultado =
+  | { ok: true; paginas: string[]; texto_concatenado: string }
+  | { ok: false; error: string };
+
 /**
  * Extrae el texto de las primeras N páginas del PDF usando pdf-parse@2.x.
- * Lo usa preview (verificación) y run (clasificación).
+ *
+ * NUNCA lanza: si la extracción falla devuelve { ok: false, error }.
+ * El caller debe decidir cómo reportar (ver /run/route.ts: extracción fallida ⇒
+ * clasificación INDETERMINADO con ok:true).
+ *
+ * Aplica polyfills DOM mínimos en runtime Node antes de cargar pdf-parse.
  */
 export async function extraerTextoPdfLocal(
   buf: Buffer,
   maxPages: number = PDF_AUDIT_MAX_PAGES
-): Promise<{ paginas: string[]; texto_concatenado: string }> {
-  const { PDFParse } = await import("pdf-parse");
-  const parser = new PDFParse({ data: new Uint8Array(buf) });
+): Promise<ExtraccionResultado> {
+  aplicarPdfPolyfills();
   try {
-    const result = await parser.getText({ first: maxPages });
-    const paginas = result.pages.slice(0, maxPages).map((p) => p.text ?? "");
-    const texto_concatenado = paginas.join("\n");
-    return { paginas, texto_concatenado };
-  } finally {
-    await parser.destroy();
+    const { PDFParse } = await import("pdf-parse");
+    const parser = new PDFParse({ data: new Uint8Array(buf) });
+    try {
+      const result = await parser.getText({ first: maxPages });
+      const paginas = result.pages.slice(0, maxPages).map((p) => p.text ?? "");
+      const texto_concatenado = paginas.join("\n");
+      return { ok: true, paginas, texto_concatenado };
+    } finally {
+      try {
+        await parser.destroy();
+      } catch {
+        // destroy() puede fallar si el parser nunca abrió el PDF — lo ignoramos
+        // a propósito: cualquier error real ya quedó atrapado en el try externo.
+      }
+    }
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: msg };
   }
 }
 
