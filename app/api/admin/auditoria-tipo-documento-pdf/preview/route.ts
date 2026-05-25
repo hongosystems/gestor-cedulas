@@ -20,8 +20,10 @@ type MuestraItem = {
   pdf_path: string | null;
   pdf_disponible: boolean;
   caratula: string | null;
+  ocr_caratula: string | null;
   juzgado: string | null;
   ocr_exp_nro: string | null;
+  ocr_destinatario: string | null;
   estado_ocr: string | null;
   pjn_cargado_at: string | null;
 };
@@ -70,8 +72,10 @@ export async function GET(req: NextRequest) {
     pdf_path: c.pdf_path,
     pdf_disponible: !!c.pdf_path?.trim(),
     caratula: c.caratula?.trim() || null,
+    ocr_caratula: c.ocr_caratula?.trim() || null,
     juzgado: c.juzgado?.trim() || null,
     ocr_exp_nro: c.ocr_exp_nro?.trim() || null,
+    ocr_destinatario: c.ocr_destinatario?.trim() || null,
     estado_ocr: c.estado_ocr,
     pjn_cargado_at: c.pjn_cargado_at,
   }));

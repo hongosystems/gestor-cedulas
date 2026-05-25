@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
     .from("cedulas_tipo_documento_pdf_audit")
     .select(
       "id, cedula_id, tipo_documento_actual, clasificacion_pdf, confianza, razones, archivo_origen, aplicado, created_at, " +
-        "cedulas:cedulas!cedulas_tipo_documento_pdf_audit_cedula_id_fkey(caratula, juzgado, ocr_exp_nro, pdf_path, estado_ocr, pjn_cargado_at, tipo_documento)"
+        "cedulas:cedulas!cedulas_tipo_documento_pdf_audit_cedula_id_fkey(caratula, ocr_caratula, juzgado, ocr_exp_nro, ocr_destinatario, pdf_path, estado_ocr, pjn_cargado_at, tipo_documento)"
     )
     .order("created_at", { ascending: false })
     .limit(limit);
@@ -69,8 +69,10 @@ export async function GET(req: NextRequest) {
     created_at: string;
     cedulas: {
       caratula: string | null;
+      ocr_caratula: string | null;
       juzgado: string | null;
       ocr_exp_nro: string | null;
+      ocr_destinatario: string | null;
       pdf_path: string | null;
       estado_ocr: string | null;
       pjn_cargado_at: string | null;
@@ -98,8 +100,10 @@ export async function GET(req: NextRequest) {
       aplicado: r.aplicado,
       created_at: r.created_at,
       caratula: r.cedulas?.caratula ?? null,
+      ocr_caratula: r.cedulas?.ocr_caratula ?? null,
       juzgado: r.cedulas?.juzgado ?? null,
       ocr_exp_nro: r.cedulas?.ocr_exp_nro ?? null,
+      ocr_destinatario: r.cedulas?.ocr_destinatario ?? null,
       pdf_path: r.cedulas?.pdf_path ?? null,
       estado_ocr: r.cedulas?.estado_ocr ?? null,
       pjn_cargado_at: r.cedulas?.pjn_cargado_at ?? null,

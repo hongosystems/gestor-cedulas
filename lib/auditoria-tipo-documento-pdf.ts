@@ -1518,6 +1518,8 @@ export type CedulaCandidato = {
   id: string;
   tipo_documento: string | null;
   pdf_path: string | null;
+  ocr_caratula: string | null;
+  ocr_destinatario: string | null;
   pdf_acredita_url: string | null;
   estado_ocr: string | null;
   pjn_cargado_at: string | null;
@@ -1527,7 +1529,7 @@ export type CedulaCandidato = {
 };
 
 const COLS_CANDIDATO =
-  "id, tipo_documento, pdf_path, pdf_acredita_url, estado_ocr, pjn_cargado_at, caratula, juzgado, ocr_exp_nro";
+  "id, tipo_documento, pdf_path, pdf_acredita_url, estado_ocr, pjn_cargado_at, caratula, juzgado, ocr_exp_nro, ocr_caratula, ocr_destinatario";
 
 export type FetchCandidatosOptions = {
   ids?: string[];

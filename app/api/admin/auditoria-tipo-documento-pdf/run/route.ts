@@ -53,6 +53,16 @@ type RunItemResult = {
   max_pages?: number | null;
   error: string | null;
   /**
+   * Contexto del expediente para revisión humana en UI. Solo se rellena en la
+   * respuesta del endpoint; NO se persiste en cedulas_tipo_documento_pdf_audit.
+   */
+  ocr_exp_nro: string | null;
+  caratula: string | null;
+  ocr_caratula: string | null;
+  juzgado: string | null;
+  ocr_destinatario: string | null;
+  pdf_path: string | null;
+  /**
    * Muestra sanitizada del texto usado para clasificar (máx
    * PDF_AUDIT_DEBUG_TEXT_MAX caracteres). Solo presente cuando el caller pidió
    * `dry_run=true&debug_text=true`. NUNCA se persiste.
@@ -300,12 +310,32 @@ type ProcesarOpts = {
   gptClient?: GptVisionClient | null;
 };
 
+/**
+ * Contexto del expediente para mostrar en UI. Se añade a cada `RunItemResult`
+ * (response del endpoint) pero NUNCA se persiste en
+ * `cedulas_tipo_documento_pdf_audit`. Solo lectura de `cedulas`.
+ */
+function contextoCedula(cedula: CedulaCandidato): Pick<
+  RunItemResult,
+  "ocr_exp_nro" | "caratula" | "ocr_caratula" | "juzgado" | "ocr_destinatario" | "pdf_path"
+> {
+  return {
+    ocr_exp_nro: cedula.ocr_exp_nro,
+    caratula: cedula.caratula,
+    ocr_caratula: cedula.ocr_caratula,
+    juzgado: cedula.juzgado,
+    ocr_destinatario: cedula.ocr_destinatario,
+    pdf_path: cedula.pdf_path,
+  };
+}
+
 async function procesarCedula(
   svc: ReturnType<typeof supabaseService>,
   cedula: CedulaCandidato,
   opts: ProcesarOpts
 ): Promise<RunItemResult> {
   const { dryRun, onlyMismatches, useOcr, debugText, maxPages, userId, gptClient } = opts;
+  const ctx = contextoCedula(cedula);
 
   const pdfPath = cedula.pdf_path?.trim();
   if (!pdfPath) {
@@ -320,6 +350,7 @@ async function procesarCedula(
       mismatch: false,
       fuente_texto: "sin_texto",
       texto_chars: 0,
+      ...ctx,
       error: "pdf_path vacío",
     };
   }
@@ -343,6 +374,7 @@ async function procesarCedula(
       mismatch: false,
       fuente_texto: "sin_texto",
       texto_chars: 0,
+      ...ctx,
       error: `No se pudo descargar PDF: ${downloadResult.error}`,
     };
   }
@@ -431,6 +463,7 @@ async function procesarCedula(
       fuente_texto: clasif.fuente,
       texto_chars: clasif.texto_chars,
       ...gptFields,
+      ...ctx,
       error: null,
       ...debugExtra,
     };
@@ -449,6 +482,7 @@ async function procesarCedula(
       fuente_texto: clasif.fuente,
       texto_chars: clasif.texto_chars,
       ...gptFields,
+      ...ctx,
       error: null,
       ...debugExtra,
     };
@@ -486,6 +520,7 @@ async function procesarCedula(
       fuente_texto: clasif.fuente,
       texto_chars: clasif.texto_chars,
       ...gptFields,
+      ...ctx,
       error: `Insert audit falló: ${insertErr?.message ?? "desconocido"}`,
     };
   }
@@ -502,6 +537,7 @@ async function procesarCedula(
     fuente_texto: clasif.fuente,
     texto_chars: clasif.texto_chars,
     ...gptFields,
+    ...ctx,
     error: null,
   };
 }
