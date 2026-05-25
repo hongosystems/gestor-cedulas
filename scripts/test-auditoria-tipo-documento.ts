@@ -16,10 +16,13 @@
  *   9. obtenerTextoParaAuditoria: local sin texto + use_ocr=true + OCR cédula → fuente "ocr" + CEDULA
  *  10. obtenerTextoParaAuditoria: OCR falla → fuente "sin_texto" (INDETERMINADO)
  *  11. razonesMetaDeFuente / leerFuenteDeRazones (round-trip)
- *  12. clasificacion_pdf inválida en INSERT → CHECK constraint rechaza
+ *  12. sanitizarTextoParaDebug: vacío, null, undefined, sanitización, truncado, custom max
+ *  13. Guarda debug_text: solo se honra cuando dry_run=true
+ *  14. clasificacion_pdf inválida en INSERT → CHECK constraint rechaza
  */
 
 import {
+  PDF_AUDIT_DEBUG_TEXT_MAX,
   PDF_AUDIT_TEXTO_MIN_UTIL,
   RAZON_EXTRACCION_FALLIDA,
   clasificacionExtraccionFallida,
@@ -29,6 +32,7 @@ import {
   leerFuenteDeRazones,
   obtenerTextoParaAuditoria,
   razonesMetaDeFuente,
+  sanitizarTextoParaDebug,
   type ClasificacionResultado,
   type ExtractorResultado,
   type OcrClient,
@@ -462,6 +466,170 @@ function testRazonesMetaRoundTrip(): { pass: number; fail: number; total: number
   return { pass, fail, total: cases.length + 2 };
 }
 
+// =============================================================================
+// Tests del modo debug_text (sanitizador + guarda dry_run).
+// =============================================================================
+
+function testSanitizarTextoParaDebug(): { pass: number; fail: number; total: number } {
+  console.log("");
+  console.log("[tipo-doc-audit][test] sanitizarTextoParaDebug");
+  let pass = 0;
+  let fail = 0;
+
+  type Case = {
+    name: string;
+    input: string | null | undefined;
+    max?: number;
+    /** Aserciones sobre el resultado. */
+    expect: (r: { debug_text: string; debug_text_chars_originales: number }) => string | null;
+  };
+
+  const ruidoso =
+    "Hola\r\nmundo\n\n\n\n\nfin\r\n   con    espacios\t\t\tmultiples   \n\n";
+  const cases: Case[] = [
+    {
+      name: "string vacío → vacío",
+      input: "",
+      expect: (r) =>
+        r.debug_text === "" && r.debug_text_chars_originales === 0
+          ? null
+          : `got ${JSON.stringify(r)}`,
+    },
+    {
+      name: "null → vacío",
+      input: null,
+      expect: (r) =>
+        r.debug_text === "" && r.debug_text_chars_originales === 0
+          ? null
+          : `got ${JSON.stringify(r)}`,
+    },
+    {
+      name: "undefined → vacío",
+      input: undefined,
+      expect: (r) =>
+        r.debug_text === "" && r.debug_text_chars_originales === 0
+          ? null
+          : `got ${JSON.stringify(r)}`,
+    },
+    {
+      name: "colapsa saltos y espacios; preserva originalChars",
+      input: ruidoso,
+      expect: (r) => {
+        if (r.debug_text_chars_originales !== ruidoso.length) {
+          return `originalChars=${r.debug_text_chars_originales} esperado ${ruidoso.length}`;
+        }
+        if (/\n{3,}/.test(r.debug_text)) return "quedaron 3+ saltos consecutivos";
+        if (/[^\S\n]{2,}/.test(r.debug_text)) return "quedaron 2+ espacios consecutivos";
+        if (r.debug_text.startsWith(" ") || r.debug_text.endsWith(" ")) {
+          return "no se aplicó trim";
+        }
+        if (!r.debug_text.includes("Hola") || !r.debug_text.includes("fin")) {
+          return "se perdió contenido";
+        }
+        return null;
+      },
+    },
+    {
+      name: `trunca a ${PDF_AUDIT_DEBUG_TEXT_MAX} chars + marca [truncado]`,
+      input: "A".repeat(PDF_AUDIT_DEBUG_TEXT_MAX + 500),
+      expect: (r) => {
+        const limite = PDF_AUDIT_DEBUG_TEXT_MAX;
+        if (!r.debug_text.startsWith("A".repeat(limite))) {
+          return "no truncó al límite correcto";
+        }
+        if (!r.debug_text.endsWith("…[truncado]")) {
+          return `no marcó truncado, terminó en: …${JSON.stringify(r.debug_text.slice(-20))}`;
+        }
+        if (r.debug_text_chars_originales !== limite + 500) {
+          return `originalChars=${r.debug_text_chars_originales} esperado ${limite + 500}`;
+        }
+        return null;
+      },
+    },
+    {
+      name: "texto < límite NO marca [truncado]",
+      input: "OFICIO. Líbrese oficio al Banco.",
+      expect: (r) => {
+        if (r.debug_text.includes("[truncado]")) return "marcó truncado siendo corto";
+        if (r.debug_text_chars_originales !== "OFICIO. Líbrese oficio al Banco.".length) {
+          return `originalChars=${r.debug_text_chars_originales}`;
+        }
+        return null;
+      },
+    },
+    {
+      name: "max custom = 10 → trunca a 10",
+      input: "abcdefghijklmnopqrstuvwxyz",
+      max: 10,
+      expect: (r) => {
+        if (!r.debug_text.startsWith("abcdefghij")) return `prefijo erróneo: ${r.debug_text}`;
+        if (!r.debug_text.endsWith("…[truncado]")) return "no marcó truncado";
+        if (r.debug_text_chars_originales !== 26) {
+          return `originalChars=${r.debug_text_chars_originales}`;
+        }
+        return null;
+      },
+    },
+  ];
+
+  for (const tc of cases) {
+    const r = tc.max != null
+      ? sanitizarTextoParaDebug(tc.input, tc.max)
+      : sanitizarTextoParaDebug(tc.input);
+    const err = tc.expect(r);
+    if (err === null) {
+      pass++;
+      console.log(`  ✔ ${tc.name}`);
+    } else {
+      fail++;
+      console.log(`  ✘ ${tc.name}`);
+      console.log(`     → ${err}`);
+    }
+  }
+
+  return { pass, fail, total: cases.length };
+}
+
+/**
+ * Simula la guarda del endpoint: el caller calcula `debugTextEfectivo =
+ * debugText && dryRun`. Si dry_run=false, debug_text se ignora aunque se haya
+ * pedido. Verificamos esa lógica aquí — replicada como helper testeable.
+ */
+function debeIncluirDebugText(dryRun: boolean, debugText: boolean): boolean {
+  return debugText && dryRun;
+}
+
+function testGuardaDebugText(): { pass: number; fail: number; total: number } {
+  console.log("");
+  console.log("[tipo-doc-audit][test] guarda debug_text (solo con dry_run=true)");
+  let pass = 0;
+  let fail = 0;
+
+  const cases: Array<{ dryRun: boolean; debugText: boolean; expected: boolean }> = [
+    { dryRun: true, debugText: true, expected: true },
+    { dryRun: true, debugText: false, expected: false },
+    { dryRun: false, debugText: true, expected: false }, // <-- caso crítico
+    { dryRun: false, debugText: false, expected: false },
+  ];
+
+  for (const tc of cases) {
+    const got = debeIncluirDebugText(tc.dryRun, tc.debugText);
+    if (got === tc.expected) {
+      pass++;
+      console.log(
+        `  ✔ dry_run=${tc.dryRun}, debug_text=${tc.debugText} → ${got}`
+      );
+    } else {
+      fail++;
+      console.log(
+        `  ✘ dry_run=${tc.dryRun}, debug_text=${tc.debugText} → ${got} (esperaba ${tc.expected})`
+      );
+    }
+  }
+
+  return { pass, fail, total: cases.length };
+}
+
 async function run(): Promise<void> {
   let pass = 0;
   let fail = 0;
@@ -490,16 +658,34 @@ async function run(): Promise<void> {
   const ocrOrq = await testObtenerTextoParaAuditoria();
   const ocrLocal = testLocalConTextoUtil();
   const meta = testRazonesMetaRoundTrip();
+  const sanitiz = testSanitizarTextoParaDebug();
+  const guardaDbg = testGuardaDebugText();
 
-  pass += extr.pass + fallida.pass + ocrOrq.pass + ocrLocal.pass + meta.pass;
-  fail += extr.fail + fallida.fail + ocrOrq.fail + ocrLocal.fail + meta.fail;
+  pass +=
+    extr.pass +
+    fallida.pass +
+    ocrOrq.pass +
+    ocrLocal.pass +
+    meta.pass +
+    sanitiz.pass +
+    guardaDbg.pass;
+  fail +=
+    extr.fail +
+    fallida.fail +
+    ocrOrq.fail +
+    ocrLocal.fail +
+    meta.fail +
+    sanitiz.fail +
+    guardaDbg.fail;
   const total =
     TEST_CASES.length +
     extr.total +
     fallida.total +
     ocrOrq.total +
     ocrLocal.total +
-    meta.total;
+    meta.total +
+    sanitiz.total +
+    guardaDbg.total;
 
   console.log("");
   console.log(`[tipo-doc-audit][test] ${pass} OK · ${fail} fallidas · ${total} total`);
@@ -513,6 +699,8 @@ async function run(): Promise<void> {
   console.log("  • use_ocr default=false. Cuando es true y PDF_EXTRACTOR_URL no está, fuente='sin_texto'.");
   console.log("  • razonesMetaDeFuente se PREPENDA a razones de clasificación (ver run/route.ts).");
   console.log("  • /list/route.ts deriva fuente_texto y texto_chars vía leerFuenteDeRazones (compat con registros legados).");
+  console.log("  • debug_text default=false. Solo se honra cuando dry_run=true (ver debugTextEfectivo en run/route.ts).");
+  console.log(`  • debug_text NUNCA se persiste en DB; se trunca a ${PDF_AUDIT_DEBUG_TEXT_MAX} chars y se sanitiza saltos/espacios.`);
   console.log(
     "  • CHECK clasificacion_pdf IN ('CEDULA','OFICIO','INDETERMINADO'): cualquier INSERT con valor distinto es rechazado por Postgres."
   );

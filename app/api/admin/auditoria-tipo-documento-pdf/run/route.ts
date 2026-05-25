@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseService } from "@/lib/supabase-server";
 import { getUserFromRequest } from "@/lib/auth-api";
 import {
+  PDF_AUDIT_DEBUG_TEXT_MAX,
   RAZONES_MAX,
   clasificacionExtraccionFallida,
   clasificarTextoPdf,
@@ -10,6 +11,7 @@ import {
   obtenerTextoParaAuditoria,
   razonesMetaDeFuente,
   requireSuperadmin,
+  sanitizarTextoParaDebug,
   type CedulaCandidato,
   type ClasificacionResultado,
   type FuenteTexto,
@@ -28,6 +30,7 @@ type RunBody = {
   only_mismatches?: boolean;
   ids?: string[];
   use_ocr?: boolean;
+  debug_text?: boolean;
 };
 
 type RunItemResult = {
@@ -43,6 +46,13 @@ type RunItemResult = {
   fuente_texto: FuenteTexto;
   texto_chars: number;
   error: string | null;
+  /**
+   * Muestra sanitizada del texto usado para clasificar (máx
+   * PDF_AUDIT_DEBUG_TEXT_MAX caracteres). Solo presente cuando el caller pidió
+   * `dry_run=true&debug_text=true`. NUNCA se persiste.
+   */
+  debug_text?: string;
+  debug_text_chars_originales?: number;
 };
 
 function parseLimit(v: unknown): number {
@@ -76,6 +86,7 @@ async function parseRunParams(req: NextRequest): Promise<{
   dryRun: boolean;
   onlyMismatches: boolean;
   useOcr: boolean;
+  debugText: boolean;
   ids?: string[];
 }> {
   const url = req.nextUrl.searchParams;
@@ -83,6 +94,7 @@ async function parseRunParams(req: NextRequest): Promise<{
   let dryRun = parseBool(url.get("dry_run"), true);
   let onlyMismatches = parseBool(url.get("only_mismatches"), false);
   let useOcr = parseBool(url.get("use_ocr"), false);
+  let debugText = parseBool(url.get("debug_text"), false);
   let ids = parseIds(url.get("ids"));
 
   try {
@@ -93,13 +105,14 @@ async function parseRunParams(req: NextRequest): Promise<{
       if ("only_mismatches" in body)
         onlyMismatches = parseBool(body.only_mismatches, false);
       if ("use_ocr" in body) useOcr = parseBool(body.use_ocr, false);
+      if ("debug_text" in body) debugText = parseBool(body.debug_text, false);
       if ("ids" in body) ids = parseIds(body.ids);
     }
   } catch {
     /* body vacío o no JSON: usar query */
   }
 
-  return { limit, dryRun, onlyMismatches, useOcr, ids };
+  return { limit, dryRun, onlyMismatches, useOcr, debugText, ids };
 }
 
 function calcularMismatch(
@@ -140,7 +153,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { limit, dryRun, onlyMismatches, useOcr, ids } = await parseRunParams(req);
+  const { limit, dryRun, onlyMismatches, useOcr, debugText, ids } =
+    await parseRunParams(req);
+
+  // Guarda: debug_text solo se honra cuando dry_run=true. Esto preserva la
+  // promesa de "nunca se persiste". El acceso a este endpoint ya está
+  // restringido a superadmin (requireSuperadmin más arriba), pero esto
+  // refuerza que también NO se guarda en DB cuando el caller persiste.
+  const debugTextEfectivo = debugText && dryRun;
 
   console.log("[tipo-doc-audit][run] inicio", {
     userId: user.id,
@@ -148,8 +168,16 @@ export async function POST(req: NextRequest) {
     dryRun,
     onlyMismatches,
     useOcr,
+    debugText,
+    debugTextEfectivo,
     idsCount: ids?.length ?? 0,
   });
+
+  if (debugText && !dryRun) {
+    console.warn(
+      "[tipo-doc-audit][run] debug_text=true ignorado porque dry_run=false (debug_text solo se incluye en modo dry_run para no persistir muestras de texto)"
+    );
+  }
 
   if (useOcr && !process.env.PDF_EXTRACTOR_URL?.trim()) {
     console.warn(
@@ -176,6 +204,7 @@ export async function POST(req: NextRequest) {
       dryRun,
       onlyMismatches,
       useOcr,
+      debugText: debugTextEfectivo,
       userId: user.id,
     });
     resultados.push(resultado);
@@ -206,6 +235,7 @@ export async function POST(req: NextRequest) {
     dry_run: dryRun,
     only_mismatches: onlyMismatches,
     use_ocr: useOcr,
+    debug_text: debugTextEfectivo,
     generated_at: new Date().toISOString(),
     nota: dryRun
       ? "dry_run=true: se clasificaron PDFs pero NO se insertó en cedulas_tipo_documento_pdf_audit. Enviar dry_run=false para persistir."
@@ -215,6 +245,8 @@ export async function POST(req: NextRequest) {
       dry_run: dryRun,
       only_mismatches: onlyMismatches,
       use_ocr: useOcr,
+      debug_text: debugTextEfectivo,
+      debug_text_max_chars: PDF_AUDIT_DEBUG_TEXT_MAX,
       limit_max: LIMIT_MAX,
     },
     universo_con_pdf: conPdf.length,
@@ -232,6 +264,13 @@ type ProcesarOpts = {
   dryRun: boolean;
   onlyMismatches: boolean;
   useOcr: boolean;
+  /**
+   * Si true, añade `debug_text` (muestra sanitizada) y
+   * `debug_text_chars_originales` a cada item del response. El caller debe
+   * asegurar que solo es true cuando dry_run=true (la respuesta nunca toca DB
+   * y nunca se persiste).
+   */
+  debugText: boolean;
   userId: string;
   /** Opcional: cliente OCR inyectable (tests). En producción se construye desde env. */
   ocrClient?: OcrClient | null;
@@ -242,7 +281,7 @@ async function procesarCedula(
   cedula: CedulaCandidato,
   opts: ProcesarOpts
 ): Promise<RunItemResult> {
-  const { dryRun, onlyMismatches, useOcr, userId, ocrClient } = opts;
+  const { dryRun, onlyMismatches, useOcr, debugText, userId, ocrClient } = opts;
 
   const pdfPath = cedula.pdf_path?.trim();
   if (!pdfPath) {
@@ -309,6 +348,17 @@ async function procesarCedula(
     clasificado = clasificarTextoPdf({ paginas: texto.paginas });
   }
 
+  // 3.b) Muestra sanitizada para diagnóstico (solo si caller pidió debug_text;
+  //      el caller a su vez sólo lo permite cuando dry_run=true). NUNCA se
+  //      persiste en DB: este objeto se mergea sólo en los retornos en memoria.
+  const debugExtra: Pick<RunItemResult, "debug_text" | "debug_text_chars_originales"> = {};
+  if (debugText) {
+    const textoCrudo = texto.paginas.join("\n");
+    const dbg = sanitizarTextoParaDebug(textoCrudo);
+    debugExtra.debug_text = dbg.debug_text;
+    debugExtra.debug_text_chars_originales = dbg.debug_text_chars_originales;
+  }
+
   // 4) Adjuntar meta-razones de trazabilidad de fuente y longitud.
   //    Se prependen para que sean fáciles de leer en la UI.
   const razonesMeta = razonesMetaDeFuente(
@@ -348,6 +398,7 @@ async function procesarCedula(
       fuente_texto: texto.fuente,
       texto_chars: texto.texto_chars,
       error: null,
+      ...debugExtra,
     };
   }
 
@@ -364,6 +415,7 @@ async function procesarCedula(
       fuente_texto: texto.fuente,
       texto_chars: texto.texto_chars,
       error: null,
+      ...debugExtra,
     };
   }
 

@@ -668,6 +668,55 @@ export function razonesMetaDeFuente(
 }
 
 /**
+ * Largo máximo del `debug_text` expuesto en la respuesta de /run cuando se pide
+ * el modo diagnóstico. NUNCA se persiste; sólo viaja en la respuesta HTTP a un
+ * superadmin con `dry_run=true&debug_text=true`.
+ */
+export const PDF_AUDIT_DEBUG_TEXT_MAX = 1000;
+
+/**
+ * Sanitiza una muestra de texto extraído (local o OCR) para exponerla como
+ * `debug_text` en la respuesta del endpoint /run. Reglas:
+ *
+ *   - Reemplaza CR/CRLF por LF.
+ *   - Colapsa runs de 3+ saltos consecutivos en 2 (preserva separación de
+ *     párrafos pero corta espacios verticales artificiales del OCR).
+ *   - Colapsa runs de espacios/tabs en un solo espacio.
+ *   - Trim global.
+ *   - Trunca a `max` caracteres y, si hay corte, sufija " …[truncado]".
+ *
+ * Devuelve también `debug_text_chars_originales` = longitud del texto post-join
+ * pero pre-sanitización. Útil para diagnosticar cuánto texto recibió la
+ * clasificación en total versus cuánto se muestra.
+ *
+ * El método es seguro frente a `texto` undefined/null (devuelve cadena vacía).
+ */
+export function sanitizarTextoParaDebug(
+  texto: string | null | undefined,
+  max: number = PDF_AUDIT_DEBUG_TEXT_MAX
+): { debug_text: string; debug_text_chars_originales: number } {
+  const original = typeof texto === "string" ? texto : "";
+  const originalChars = original.length;
+
+  if (originalChars === 0) {
+    return { debug_text: "", debug_text_chars_originales: 0 };
+  }
+
+  let s = original.replace(/\r\n?/g, "\n");
+  s = s.replace(/\n{3,}/g, "\n\n");
+  // Whitespace horizontal: espacios, tabs y unicode whitespace excepto \n.
+  s = s.replace(/[^\S\n]{2,}/g, " ");
+  s = s.trim();
+
+  const limite = Math.max(1, Math.floor(max));
+  if (s.length > limite) {
+    s = s.slice(0, limite) + " …[truncado]";
+  }
+
+  return { debug_text: s, debug_text_chars_originales: originalChars };
+}
+
+/**
  * Helpers para parsear las razones meta desde un registro persistido.
  * Útil para /list/route.ts y la UI (compatibilidad con razones legadas).
  */
