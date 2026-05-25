@@ -14,8 +14,10 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install --production
 
-# Copiar código de la aplicación
-COPY server.js ./
+# Copiar código de la aplicación. text-util.js es un módulo helper que el
+# server.js importa (verifica utilidad semántica del texto extraído por Poppler
+# antes de decidir si activar Tesseract). Es runtime-required.
+COPY server.js text-util.js ./
 
 # Exponer puerto
 EXPOSE 3000

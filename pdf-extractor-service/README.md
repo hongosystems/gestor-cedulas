@@ -4,11 +4,27 @@ Microservicio para extraer texto de PDFs usando Poppler (pdftotext) y Tesseract 
 
 ## Características
 
-- Extrae texto de PDFs usando `pdftotext` (Poppler)
-- Si el texto es vacío o muy corto, usa OCR con Tesseract (español)
-- Extrae automáticamente **Carátula** y **Juzgado** según patrones específicos
-- Limita el OCR a las primeras N páginas (configurable, default: 5)
-- Limpieza automática de archivos temporales
+- Extrae texto de PDFs usando `pdftotext` (Poppler) — estrategias texto-plano: `-layout`, `-raw`, estándar.
+- Si el texto Poppler **no es útil** (vacío, XHTML residual, o sin léxico real), cae a OCR con Tesseract (español) sobre la primera página.
+- Validación semántica con `esTextoUtil` (módulo `text-util.js`): descarta XHTML/structure-only y exige >= 100 caracteres limpios con >= 5 palabras alfabéticas.
+- Extrae automáticamente **Carátula** y **Juzgado** según patrones específicos.
+- `raw_preview` siempre es texto plano útil o `null` — nunca XHTML residual.
+- Limpieza automática de archivos temporales.
+
+### Flujo `/extract`
+
+1. `pdftotext` con estrategias texto-plano (layout / raw / estándar).
+2. Validar el output con `esTextoUtil`:
+   - **útil** → usar texto Poppler, log `✅ texto poppler útil`.
+   - **no útil** → log `⚠️ texto poppler no útil (motivo=...)`.
+3. Si no útil → fallback a Tesseract OCR (primera página). Log `🔍 fallback OCR ejecutado`.
+4. Validar OCR con `esTextoUtil`:
+   - **útil** → usar texto OCR, `debug.ocr_used = true`.
+   - **no útil** → `extractedText = ""`, `raw_preview = null`.
+5. Aplicar regexes de carátula/juzgado sobre el texto seleccionado.
+6. Devolver respuesta con `raw_preview` (primeros 500 chars de texto plano, o `null`).
+
+> **Nota importante:** se eliminó la estrategia `pdftotext -bbox` porque devuelve XHTML estructural (no texto plano) y para PDFs sin capa de texto seleccionable (típicamente generados por PyPDF2) producía falsos positivos que bloqueaban el fallback a Tesseract. Detalle en el monorepo `gestor-cedulas`: `docs/troubleshooting/PDF_EXTRACTOR_BBOX_XHTML_BUG.md`.
 
 ## Requisitos
 
@@ -134,6 +150,27 @@ Cada vez que hagas `git push` a la rama conectada, Render desplegará automátic
 3. **Error al instalar dependencias del sistema**:
    - Verifica que el Dockerfile instale correctamente `poppler-utils` y `tesseract-ocr`
 
+## Tests unitarios
+
+El módulo `text-util.js` está cubierto por tests unitarios con el test runner built-in de Node 20+ (sin dependencias extras):
+
+```bash
+npm test
+# o equivalente:
+node --test test/
+```
+
+Tests incluidos (ver `test/test-text-util.js`):
+
+- `esTextoUtil` rechaza XHTML PyPDF2 vacío (caso real observado en producción).
+- `esTextoUtil` rechaza `<html>`, `<body>`, `<doc>`, `<page width=>`, `Producer="PyPDF2"`.
+- `esTextoUtil` acepta texto CEDULA y OFICIO reales.
+- `esTextoUtil` rechaza texto corto, sin palabras alfabéticas, o solo números.
+- `limpiarTexto` strip de tags HTML y normalización de whitespace.
+- `analizarTexto` devuelve `{ util, motivo, chars_limpio, palabras }` con motivos legibles para logs.
+
+Los tests están **excluidos del Dockerfile** (no se ejecutan en producción ni inflan la imagen).
+
 ## Testing Local
 
 ### Con curl (PowerShell):
@@ -166,9 +203,12 @@ console.log(data);
 
 ```
 pdf-extractor-service/
-├── server.js          # Servidor Express con lógica de extracción
-├── package.json       # Dependencias Node.js
-├── Dockerfile         # Configuración Docker con Poppler y Tesseract
-├── .dockerignore      # Archivos a ignorar en Docker
-└── README.md          # Esta documentación
+├── server.js                # Servidor Express con lógica de extracción
+├── text-util.js             # Helpers semánticos (esTextoUtil, analizarTexto)
+├── test/
+│   └── test-text-util.js    # Tests unitarios (node --test, sin deps extras)
+├── package.json             # Dependencias Node.js
+├── Dockerfile               # Configuración Docker con Poppler y Tesseract
+├── .dockerignore            # Archivos a ignorar en Docker (incluye test/)
+└── README.md                # Esta documentación
 ```

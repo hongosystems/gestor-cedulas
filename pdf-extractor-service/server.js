@@ -6,6 +6,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import os from "os";
+import { analizarTexto } from "./text-util.js";
 
 const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
@@ -210,16 +211,28 @@ function extractJuzgado(text) {
 }
 
 /**
- * Extrae texto de PDF usando pdftotext
- * Intenta múltiples estrategias agresivas para extraer texto embebido
- * Si Chrome puede leerlo, el texto está ahí - solo hay que extraerlo correctamente
+ * Extrae texto de PDF usando pdftotext.
+ *
+ * Estrategias soportadas (en orden, sólo texto plano):
+ *   1) -layout : preserva layout visual
+ *   2) -raw    : orden exacto del PDF
+ *   3) (sin flags): pdftotext estándar
+ *
+ * Se eliminó la estrategia `-bbox` porque devuelve XHTML estructural (no texto)
+ * y para PDFs sin capa de texto seleccionable (típicamente generados por
+ * PyPDF2) producía falsos positivos que bloqueaban el fallback a Tesseract.
+ * Ver troubleshooting/PDF_EXTRACTOR_BBOX_XHTML_BUG en gestor-cedulas.
+ *
+ * La validación final de "texto útil" se hace en el caller con `esTextoUtil`
+ * — aquí solo aplicamos un filtro rápido por longitud cruda (> 30 chars) para
+ * descartar estrategias que claramente no funcionaron.
  */
 async function extractTextWithPoppler(pdfPath) {
   // Estrategia 1: pdftotext con layout y encoding forzado
   try {
     const stdout = await execWithTimeout(
       `pdftotext -layout -nopgbrk -enc UTF-8 -f 1 -l 1 "${pdfPath}" -`,
-      8000  // 8 segundos por estrategia
+      8000
     );
     if (stdout && stdout.trim().length > 30) {
       console.log(`✅ pdftotext layout extrajo ${stdout.trim().length} caracteres`);
@@ -229,11 +242,11 @@ async function extractTextWithPoppler(pdfPath) {
     console.error("pdftotext layout falló:", error.message);
   }
 
-  // Estrategia 2: pdftotext raw (extrae orden exacto, a veces funciona mejor con texto oculto)
+  // Estrategia 2: pdftotext raw (orden exacto del PDF; a veces funciona mejor)
   try {
     const stdout = await execWithTimeout(
       `pdftotext -raw -nopgbrk -enc UTF-8 -f 1 -l 1 "${pdfPath}" -`,
-      8000  // 8 segundos por estrategia
+      8000
     );
     if (stdout && stdout.trim().length > 30) {
       console.log(`✅ pdftotext raw extrajo ${stdout.trim().length} caracteres`);
@@ -243,25 +256,11 @@ async function extractTextWithPoppler(pdfPath) {
     console.error("pdftotext raw falló:", error.message);
   }
 
-  // Estrategia 3: pdftotext con bbox (bounding box, puede extraer texto de capas ocultas)
-  try {
-    const stdout = await execWithTimeout(
-      `pdftotext -bbox -f 1 -l 1 "${pdfPath}" -`,
-      8000  // 8 segundos por estrategia
-    );
-    if (stdout && stdout.trim().length > 30) {
-      console.log(`✅ pdftotext bbox extrajo ${stdout.trim().length} caracteres`);
-      return stdout;
-    }
-  } catch (error) {
-    console.error("pdftotext bbox falló:", error.message);
-  }
-
-  // Estrategia 4: pdftotext estándar pero solo primera página
+  // Estrategia 3: pdftotext estándar (sin flags) sobre primera página
   try {
     const stdout = await execWithTimeout(
       `pdftotext -f 1 -l 1 "${pdfPath}" -`,
-      8000  // 8 segundos por estrategia
+      8000
     );
     if (stdout && stdout.trim().length > 30) {
       console.log(`✅ pdftotext estándar extrajo ${stdout.trim().length} caracteres`);
@@ -435,42 +434,64 @@ app.post("/extract", upload.single("file"), async (req, res) => {
       // Guardar archivo temporalmente
       await fs.writeFile(tempPdfPath, req.file.buffer);
 
-      // Intentar extraer texto con pdftotext primero (múltiples estrategias)
+      // 1) Intentar extraer texto con pdftotext (estrategias texto-plano)
       let extractedText = await extractTextWithPoppler(tempPdfPath);
       let usedOCR = false;
       let ocrInfo = null;
 
-      // Si el texto es vacío o muy corto, usar OCR
-      // IMPORTANTE: La información SIEMPRE está en la primera página (Cédulas y Oficios)
-      const textLength = extractedText ? extractedText.trim().length : 0;
-      if (textLength < 100) {
-        console.log(`⚠️ Texto extraído muy corto (${textLength} caracteres), intentando OCR...`);
+      // 2) Validar con esTextoUtil. Esto reemplaza el antiguo umbral
+      //    `textLength < 100` que se confundía con XHTML residual de
+      //    `pdftotext -bbox` (ya eliminada como estrategia).
+      const popplerInfo = analizarTexto(extractedText);
+      if (popplerInfo.util) {
+        console.log(
+          `✅ texto poppler útil (chars=${extractedText.length}, chars_limpio=${popplerInfo.chars_limpio}, palabras=${popplerInfo.palabras})`
+        );
+      } else {
+        console.log(
+          `⚠️ texto poppler no útil (motivo="${popplerInfo.motivo}"); fallback OCR Tesseract`
+        );
+
+        // 3) Fallback OCR Tesseract sobre la primera página
         const ocrResult = await extractTextWithOCR(tempPdfPath);
-        
-        if (ocrResult && ocrResult.text && ocrResult.text.trim().length > 30) {
-          extractedText = ocrResult.text;
+        const ocrText = ocrResult?.text ?? "";
+        const ocrInfoLocal = analizarTexto(ocrText);
+
+        console.log(
+          `🔍 fallback OCR ejecutado (chars=${ocrText.length}, util=${ocrInfoLocal.util}, motivo="${ocrInfoLocal.motivo}")`
+        );
+
+        if (ocrInfoLocal.util) {
+          extractedText = ocrText;
           usedOCR = true;
           ocrInfo = {
             pagesProcessed: ocrResult.pagesProcessed,
             totalPages: ocrResult.totalPages,
           };
         } else {
-          console.log("OCR no pudo extraer texto suficiente");
+          // Ni Poppler ni OCR dieron texto útil. Limpiamos extractedText para
+          // NUNCA exponer XHTML residual ni basura en `raw_preview`.
+          console.log(
+            "⚠️ ni poppler ni OCR extrajeron texto útil; raw_preview será null"
+          );
+          extractedText = "";
         }
       }
 
-      // Extraer Carátula y Juzgado
+      // 4) Extraer Carátula y Juzgado (solo si extractedText pasó el filtro)
       const caratula = extractCaratula(extractedText || "");
       const juzgado = extractJuzgado(extractedText || "");
 
-      // Obtener preview del texto (primeros 500 caracteres)
-      const rawPreview = extractedText 
+      // 5) Preview seguro: si extractedText es vacío (no pasó esTextoUtil ni
+      //    siquiera tras OCR), raw_preview = null. Si tiene contenido, sabemos
+      //    que NO tiene markers HTML/XML porque pasó la validación arriba.
+      const rawPreview = extractedText
         ? extractedText.substring(0, 500).replace(/\n/g, " ").trim()
         : null;
 
       clearTimeout(endpointTimeout);
 
-      // Respuesta
+      // Respuesta (mismo contrato público que antes)
       const response = {
         caratula,
         juzgado,

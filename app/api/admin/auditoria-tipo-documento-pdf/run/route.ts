@@ -2,20 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseService } from "@/lib/supabase-server";
 import { getUserFromRequest } from "@/lib/auth-api";
 import {
+  AUDIT_MAX_PAGES_DEFAULT,
+  AUDIT_MAX_PAGES_MAX,
   PDF_AUDIT_DEBUG_TEXT_MAX,
   RAZONES_MAX,
-  clasificacionExtraccionFallida,
-  clasificarTextoPdf,
   descargarPdfDesdeStorage,
   fetchCandidatosAuditoriaPdf,
-  obtenerTextoParaAuditoria,
-  razonesMetaDeFuente,
+  obtenerClasificacionAuditoria,
+  parsearMaxPages,
+  razonesMetaDeClasificacion,
   requireSuperadmin,
   sanitizarTextoParaDebug,
   type CedulaCandidato,
   type ClasificacionResultado,
   type FuenteTexto,
-  type OcrClient,
+  type GptVisionClient,
 } from "@/lib/auditoria-tipo-documento-pdf";
 
 export const runtime = "nodejs";
@@ -31,6 +32,7 @@ type RunBody = {
   ids?: string[];
   use_ocr?: boolean;
   debug_text?: boolean;
+  max_pages?: number;
 };
 
 type RunItemResult = {
@@ -45,6 +47,10 @@ type RunItemResult = {
   mismatch: boolean;
   fuente_texto: FuenteTexto;
   texto_chars: number;
+  /** Solo presente cuando fuente_texto = "gpt_vision". */
+  paginas_enviadas?: number | null;
+  /** Solo presente cuando fuente_texto = "gpt_vision". */
+  max_pages?: number | null;
   error: string | null;
   /**
    * Muestra sanitizada del texto usado para clasificar (máx
@@ -87,6 +93,7 @@ async function parseRunParams(req: NextRequest): Promise<{
   onlyMismatches: boolean;
   useOcr: boolean;
   debugText: boolean;
+  maxPages: number;
   ids?: string[];
 }> {
   const url = req.nextUrl.searchParams;
@@ -95,6 +102,7 @@ async function parseRunParams(req: NextRequest): Promise<{
   let onlyMismatches = parseBool(url.get("only_mismatches"), false);
   let useOcr = parseBool(url.get("use_ocr"), false);
   let debugText = parseBool(url.get("debug_text"), false);
+  let maxPages = parsearMaxPages(url.get("max_pages"));
   let ids = parseIds(url.get("ids"));
 
   try {
@@ -106,13 +114,14 @@ async function parseRunParams(req: NextRequest): Promise<{
         onlyMismatches = parseBool(body.only_mismatches, false);
       if ("use_ocr" in body) useOcr = parseBool(body.use_ocr, false);
       if ("debug_text" in body) debugText = parseBool(body.debug_text, false);
+      if ("max_pages" in body) maxPages = parsearMaxPages(body.max_pages);
       if ("ids" in body) ids = parseIds(body.ids);
     }
   } catch {
     /* body vacío o no JSON: usar query */
   }
 
-  return { limit, dryRun, onlyMismatches, useOcr, debugText, ids };
+  return { limit, dryRun, onlyMismatches, useOcr, debugText, maxPages, ids };
 }
 
 function calcularMismatch(
@@ -138,6 +147,12 @@ function calcularMismatch(
  *       En este endpoint se interpreta como: "calcular y guardar solo si la
  *       clasificación difiere de tipo_documento_actual".)
  *   - ids[] (opcional, IDs específicos a auditar)
+ *   - use_ocr (default false). Si true y el texto local no es útil, usa
+ *       GPT Vision (OpenAI Responses API con input_file=PDF directo).
+ *   - max_pages (default 5, clamp 1..5). Número de páginas del PDF que se
+ *       envían al modelo Vision (recortadas con pdf-lib antes del POST).
+ *   - debug_text (default false; solo se honra si dry_run=true). Devuelve
+ *       muestra sanitizada del texto considerado para clasificar.
  */
 export async function POST(req: NextRequest) {
   const user = await getUserFromRequest(req);
@@ -153,7 +168,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { limit, dryRun, onlyMismatches, useOcr, debugText, ids } =
+  const { limit, dryRun, onlyMismatches, useOcr, debugText, maxPages, ids } =
     await parseRunParams(req);
 
   // Guarda: debug_text solo se honra cuando dry_run=true. Esto preserva la
@@ -170,6 +185,7 @@ export async function POST(req: NextRequest) {
     useOcr,
     debugText,
     debugTextEfectivo,
+    maxPages,
     idsCount: ids?.length ?? 0,
   });
 
@@ -179,9 +195,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (useOcr && !process.env.PDF_EXTRACTOR_URL?.trim()) {
+  if (useOcr && !process.env.OPENAI_API_KEY?.trim()) {
     console.warn(
-      "[tipo-doc-audit][run] use_ocr=true pero PDF_EXTRACTOR_URL no está configurada — todos los ítems quedarán como sin_texto"
+      "[tipo-doc-audit][run] use_ocr=true pero OPENAI_API_KEY no está configurada — los ítems que requieran OCR quedarán como sin_texto/INDETERMINADO"
     );
   }
 
@@ -205,6 +221,7 @@ export async function POST(req: NextRequest) {
       onlyMismatches,
       useOcr,
       debugText: debugTextEfectivo,
+      maxPages,
       userId: user.id,
     });
     resultados.push(resultado);
@@ -215,6 +232,7 @@ export async function POST(req: NextRequest) {
   const inconsistencias = resultados.filter((r) => r.mismatch).length;
   const porFuente = {
     local: resultados.filter((r) => r.fuente_texto === "local").length,
+    gpt_vision: resultados.filter((r) => r.fuente_texto === "gpt_vision").length,
     ocr: resultados.filter((r) => r.fuente_texto === "ocr").length,
     sin_texto: resultados.filter((r) => r.fuente_texto === "sin_texto").length,
   };
@@ -228,6 +246,7 @@ export async function POST(req: NextRequest) {
     porFuente,
     dryRun,
     useOcr,
+    maxPages,
   });
 
   return NextResponse.json({
@@ -236,6 +255,7 @@ export async function POST(req: NextRequest) {
     only_mismatches: onlyMismatches,
     use_ocr: useOcr,
     debug_text: debugTextEfectivo,
+    max_pages: maxPages,
     generated_at: new Date().toISOString(),
     nota: dryRun
       ? "dry_run=true: se clasificaron PDFs pero NO se insertó en cedulas_tipo_documento_pdf_audit. Enviar dry_run=false para persistir."
@@ -247,6 +267,9 @@ export async function POST(req: NextRequest) {
       use_ocr: useOcr,
       debug_text: debugTextEfectivo,
       debug_text_max_chars: PDF_AUDIT_DEBUG_TEXT_MAX,
+      max_pages: maxPages,
+      max_pages_max: AUDIT_MAX_PAGES_MAX,
+      max_pages_default: AUDIT_MAX_PAGES_DEFAULT,
       limit_max: LIMIT_MAX,
     },
     universo_con_pdf: conPdf.length,
@@ -271,9 +294,10 @@ type ProcesarOpts = {
    * y nunca se persiste).
    */
   debugText: boolean;
+  maxPages: number;
   userId: string;
-  /** Opcional: cliente OCR inyectable (tests). En producción se construye desde env. */
-  ocrClient?: OcrClient | null;
+  /** Opcional: cliente GPT Vision inyectable (tests). En producción se construye desde env. */
+  gptClient?: GptVisionClient | null;
 };
 
 async function procesarCedula(
@@ -281,7 +305,7 @@ async function procesarCedula(
   cedula: CedulaCandidato,
   opts: ProcesarOpts
 ): Promise<RunItemResult> {
-  const { dryRun, onlyMismatches, useOcr, debugText, userId, ocrClient } = opts;
+  const { dryRun, onlyMismatches, useOcr, debugText, maxPages, userId, gptClient } = opts;
 
   const pdfPath = cedula.pdf_path?.trim();
   if (!pdfPath) {
@@ -323,37 +347,40 @@ async function procesarCedula(
     };
   }
 
-  // 2) Obtener texto: local primero; si no es útil y useOcr=true, OCR controlado
-  //    vía pdf-extractor-service. Nunca lanza.
-  const texto = await obtenerTextoParaAuditoria(downloadResult.buffer, {
+  // 2) Clasificar: local primero; si no es útil y useOcr=true, GPT Vision.
+  //    NUNCA lanza.
+  const clasif = await obtenerClasificacionAuditoria(downloadResult.buffer, {
     useOcr,
-    ocrClient: ocrClient ?? undefined,
+    maxPages,
+    gptClient: gptClient ?? undefined,
   });
 
-  console.log("[tipo-doc-audit][run] texto obtenido", {
+  console.log("[tipo-doc-audit][run] clasificación", {
     cedula_id: cedula.id,
-    fuente_texto: texto.fuente,
-    texto_chars: texto.texto_chars,
-    detalle: texto.detalle,
+    fuente_texto: clasif.fuente,
+    clasificacion: clasif.clasificacion,
+    confianza: clasif.confianza,
+    texto_chars: clasif.texto_chars,
+    paginas_enviadas: clasif.paginas_enviadas,
+    max_pages: clasif.max_pages,
+    detalle: clasif.detalle,
     useOcr,
   });
 
-  // 3) Clasificar
-  let clasificado: ClasificacionResultado;
-  if (texto.fuente === "sin_texto") {
-    clasificado = clasificacionExtraccionFallida(
-      texto.detalle ?? "No se pudo extraer texto del PDF"
-    );
-  } else {
-    clasificado = clasificarTextoPdf({ paginas: texto.paginas });
-  }
-
-  // 3.b) Muestra sanitizada para diagnóstico (solo si caller pidió debug_text;
-  //      el caller a su vez sólo lo permite cuando dry_run=true). NUNCA se
-  //      persiste en DB: este objeto se mergea sólo en los retornos en memoria.
+  // 3) Muestra sanitizada para diagnóstico (solo si caller pidió debug_text;
+  //    el caller a su vez sólo lo permite cuando dry_run=true). NUNCA se
+  //    persiste en DB: este objeto se mergea sólo en los retornos en memoria.
   const debugExtra: Pick<RunItemResult, "debug_text" | "debug_text_chars_originales"> = {};
   if (debugText) {
-    const textoCrudo = texto.paginas.join("\n");
+    // Para gpt_vision usamos `texto_relevante` (lo que el modelo subrayó como
+    // evidencia). Para "local" usamos el texto detectado clásico. Para
+    // "sin_texto" no hay nada útil que mostrar.
+    let textoCrudo = "";
+    if (clasif.fuente === "gpt_vision" && clasif.texto_relevante) {
+      textoCrudo = clasif.texto_relevante;
+    } else if (clasif.fuente === "local" && clasif.texto_detectado) {
+      textoCrudo = clasif.texto_detectado;
+    }
     const dbg = sanitizarTextoParaDebug(textoCrudo);
     debugExtra.debug_text = dbg.debug_text;
     debugExtra.debug_text_chars_originales = dbg.debug_text_chars_originales;
@@ -361,28 +388,34 @@ async function procesarCedula(
 
   // 4) Adjuntar meta-razones de trazabilidad de fuente y longitud.
   //    Se prependen para que sean fáciles de leer en la UI.
-  const razonesMeta = razonesMetaDeFuente(
-    texto.fuente,
-    texto.texto_chars,
-    texto.detalle
-  );
-  const razonesCompletas = [...razonesMeta, ...clasificado.razones].slice(
+  const razonesMeta = razonesMetaDeClasificacion(clasif);
+  const razonesCompletas = [...razonesMeta, ...clasif.razones].slice(
     0,
     RAZONES_MAX
   );
 
-  const mismatch = calcularMismatch(cedula.tipo_documento, clasificado.clasificacion);
+  const mismatch = calcularMismatch(cedula.tipo_documento, clasif.clasificacion);
 
   console.log("[tipo-doc-audit][classification]", {
     cedula_id: cedula.id,
     tipo_documento_actual: cedula.tipo_documento,
-    clasificacion_pdf: clasificado.clasificacion,
-    confianza: clasificado.confianza,
+    clasificacion_pdf: clasif.clasificacion,
+    confianza: clasif.confianza,
     razones_count: razonesCompletas.length,
-    fuente_texto: texto.fuente,
-    texto_chars: texto.texto_chars,
+    fuente_texto: clasif.fuente,
+    texto_chars: clasif.texto_chars,
     mismatch,
   });
+
+  // Campos visibles para fuente "gpt_vision". Para otras fuentes los omitimos
+  // (no mandamos nulls espurios).
+  const gptFields =
+    clasif.fuente === "gpt_vision"
+      ? {
+          paginas_enviadas: clasif.paginas_enviadas,
+          max_pages: clasif.max_pages,
+        }
+      : {};
 
   // 5) Persistir (sólo si dry_run=false y, si only_mismatches, sólo si hay mismatch)
   if (dryRun) {
@@ -390,13 +423,14 @@ async function procesarCedula(
       cedula_id: cedula.id,
       ok: true,
       tipo_documento_actual: cedula.tipo_documento,
-      clasificacion_pdf: clasificado.clasificacion,
-      confianza: clasificado.confianza,
+      clasificacion_pdf: clasif.clasificacion,
+      confianza: clasif.confianza,
       razones_count: razonesCompletas.length,
       audit_id: null,
       mismatch,
-      fuente_texto: texto.fuente,
-      texto_chars: texto.texto_chars,
+      fuente_texto: clasif.fuente,
+      texto_chars: clasif.texto_chars,
+      ...gptFields,
       error: null,
       ...debugExtra,
     };
@@ -407,13 +441,14 @@ async function procesarCedula(
       cedula_id: cedula.id,
       ok: true,
       tipo_documento_actual: cedula.tipo_documento,
-      clasificacion_pdf: clasificado.clasificacion,
-      confianza: clasificado.confianza,
+      clasificacion_pdf: clasif.clasificacion,
+      confianza: clasif.confianza,
       razones_count: razonesCompletas.length,
       audit_id: null,
       mismatch: false,
-      fuente_texto: texto.fuente,
-      texto_chars: texto.texto_chars,
+      fuente_texto: clasif.fuente,
+      texto_chars: clasif.texto_chars,
+      ...gptFields,
       error: null,
       ...debugExtra,
     };
@@ -424,10 +459,10 @@ async function procesarCedula(
     .insert({
       cedula_id: cedula.id,
       tipo_documento_actual: cedula.tipo_documento,
-      clasificacion_pdf: clasificado.clasificacion,
-      confianza: clasificado.confianza,
+      clasificacion_pdf: clasif.clasificacion,
+      confianza: clasif.confianza,
       razones: razonesCompletas,
-      texto_detectado: clasificado.texto_detectado,
+      texto_detectado: clasif.texto_detectado,
       archivo_origen: downloadResult.archivo_origen,
       created_by: userId,
     })
@@ -443,13 +478,14 @@ async function procesarCedula(
       cedula_id: cedula.id,
       ok: false,
       tipo_documento_actual: cedula.tipo_documento,
-      clasificacion_pdf: clasificado.clasificacion,
-      confianza: clasificado.confianza,
+      clasificacion_pdf: clasif.clasificacion,
+      confianza: clasif.confianza,
       razones_count: razonesCompletas.length,
       audit_id: null,
       mismatch,
-      fuente_texto: texto.fuente,
-      texto_chars: texto.texto_chars,
+      fuente_texto: clasif.fuente,
+      texto_chars: clasif.texto_chars,
+      ...gptFields,
       error: `Insert audit falló: ${insertErr?.message ?? "desconocido"}`,
     };
   }
@@ -458,13 +494,14 @@ async function procesarCedula(
     cedula_id: cedula.id,
     ok: true,
     tipo_documento_actual: cedula.tipo_documento,
-    clasificacion_pdf: clasificado.clasificacion,
-    confianza: clasificado.confianza,
+    clasificacion_pdf: clasif.clasificacion,
+    confianza: clasif.confianza,
     razones_count: razonesCompletas.length,
     audit_id: inserted.id,
     mismatch,
-    fuente_texto: texto.fuente,
-    texto_chars: texto.texto_chars,
+    fuente_texto: clasif.fuente,
+    texto_chars: clasif.texto_chars,
+    ...gptFields,
     error: null,
   };
 }

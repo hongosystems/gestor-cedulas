@@ -1,4 +1,5 @@
 import { supabaseService } from "@/lib/supabase-server";
+import { parseVisionOcrJson } from "@/lib/vision-json-repair";
 
 /**
  * Helper compartido por:
@@ -25,18 +26,170 @@ export const TEXTO_DETECTADO_MAX = 4000;
 export const RAZONES_MAX = 40;
 export const PDF_AUDIT_MAX_PAGES = 4;
 /**
- * Umbral en caracteres a partir del cual el texto extraído se considera "útil"
- * para clasificación. Alineado con el microservicio extractor (que activa OCR
- * internamente cuando pdftotext devuelve menos de ~100 chars; nosotros somos
- * más permisivos: con 30 chars normalizados ya suele alcanzar el header
- * "CEDULA DE NOTIFICACION" o "OFICIO").
+ * Umbral histórico (caracteres crudos). Mantenido para retrocompatibilidad de
+ * tests y diagnóstico, pero NO se usa más como criterio de utilidad — el
+ * filtro real ahora es semántico vía `esTextoJudicialUtil`. Ver doc de esa
+ * función para el racional (XHTML vacío de pdftotext -bbox supera fácilmente
+ * los 30 chars y es engañoso).
  */
 export const PDF_AUDIT_TEXTO_MIN_UTIL = 30;
+
+/**
+ * Marcadores que indican que el texto recibido NO es contenido judicial sino
+ * estructura HTML/XML residual del microservicio extractor (típicamente la
+ * estrategia `pdftotext -bbox` aplicada sobre PDFs sin texto seleccionable —
+ * ej. PDFs generados por PyPDF2). Cualquier match descarta el texto.
+ */
+const PDF_AUDIT_HTML_MARKERS: readonly RegExp[] = [
+  /<!DOCTYPE\s+html/i,
+  /<html\b/i,
+  /<\/?body\b/i,
+  /<\/?doc\b/i,
+  /<page\s+width\s*=/i,
+  /Producer["']?\s*content\s*=\s*["']?PyPDF2/i,
+];
+
+/**
+ * Palabras "ancla" del dominio judicial argentino. Si el texto limpio contiene
+ * al menos una de ellas, lo consideramos contenido legítimo aún sin matchear
+ * los patrones de scoring CEDULA/OFICIO (eso ya se decide en el clasificador).
+ *
+ * Lista referencial (no exclusiva): la utilidad también se concede si el texto
+ * tiene mucho léxico (≥ 8 palabras alfabéticas) como fallback permisivo, para
+ * evitar falsos negativos en PDFs con contenido judicial inusual.
+ */
+const PDF_AUDIT_PALABRAS_JUDICIALES: readonly string[] = [
+  "cedula",
+  "cédula",
+  "oficio",
+  "notificacion",
+  "notificación",
+  "juzgado",
+  "expediente",
+  "autos",
+  "caratula",
+  "carátula",
+  "domicilio",
+  "secretaria",
+  "secretaría",
+  "director",
+  "registro",
+  "banco",
+  "hospital",
+  "anses",
+  "afip",
+  "notifica",
+  "destinatario",
+  "líbrese",
+  "librese",
+  "tribunal",
+  "demanda",
+  "acreedor",
+  "deudor",
+  "actor",
+  "demandado",
+];
+
+/**
+ * Mínimo de caracteres alfabéticos (sin tags ni puntuación) que debe tener el
+ * texto limpio para considerarse aprovechable.
+ */
+const PDF_AUDIT_LIMPIO_MIN_CHARS = 20;
+
+/**
+ * Mínimo de "palabras" alfabéticas (≥ 3 letras) que debe tener el texto limpio
+ * para considerarse aprovechable.
+ */
+const PDF_AUDIT_LIMPIO_MIN_PALABRAS = 3;
+
+/**
+ * Si el texto NO matchea ninguna palabra judicial pero tiene al menos este
+ * número de palabras alfabéticas, igual lo aceptamos como útil (fallback
+ * permisivo: el clasificador puede no encontrar patrones y devolver
+ * INDETERMINADO con razones, pero el contenido textual es real).
+ */
+const PDF_AUDIT_LIMPIO_FALLBACK_PALABRAS = 8;
+
+/**
+ * Devuelve `true` si `texto` parece contenido judicial/documental real y `false`
+ * si es estructura HTML/XML vacía, ruido, o demasiado pobre para clasificar.
+ *
+ * Reglas (defense in depth):
+ *
+ *   1) HARD reject por marcadores HTML/XML del microservicio (PDF_AUDIT_HTML_MARKERS).
+ *   2) Strip de tags + decimales de entidades + normalización de whitespace.
+ *   3) HARD reject si el texto limpio queda con < PDF_AUDIT_LIMPIO_MIN_CHARS
+ *      caracteres alfabéticos o < PDF_AUDIT_LIMPIO_MIN_PALABRAS palabras.
+ *   4) ACCEPT si contiene alguna palabra del dominio judicial.
+ *   5) ACCEPT (fallback) si tiene >= PDF_AUDIT_LIMPIO_FALLBACK_PALABRAS palabras
+ *      alfabéticas — el clasificador puede no encontrar patrones pero el
+ *      contenido es real.
+ *   6) REJECT en cualquier otro caso.
+ *
+ * Acepta `string | null | undefined` sin lanzar (devuelve `false`).
+ */
+export function esTextoJudicialUtil(texto: string | null | undefined): boolean {
+  if (typeof texto !== "string" || texto.length === 0) return false;
+
+  for (const re of PDF_AUDIT_HTML_MARKERS) {
+    if (re.test(texto)) return false;
+  }
+
+  // Strip tags + entidades + colapsar whitespace.
+  const sinTags = texto
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&[a-z]+;/gi, " ")
+    .replace(/&#\d+;/g, " ");
+  const limpioLower = sinTags.toLowerCase();
+  const soloLetras = limpioLower
+    .replace(/[^\p{L}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (soloLetras.length < PDF_AUDIT_LIMPIO_MIN_CHARS) return false;
+
+  const palabras = soloLetras
+    .split(" ")
+    .filter((w) => /^\p{L}{3,}$/u.test(w));
+  if (palabras.length < PDF_AUDIT_LIMPIO_MIN_PALABRAS) return false;
+
+  for (const w of PDF_AUDIT_PALABRAS_JUDICIALES) {
+    // includes simple — comparamos sobre limpioLower que ya está en lowercase
+    // y sin tags pero con puntuación; alcanza para detectar "cédula", "OFICIO",
+    // "Líbrese oficio", etc.
+    if (limpioLower.includes(w)) return true;
+  }
+
+  return palabras.length >= PDF_AUDIT_LIMPIO_FALLBACK_PALABRAS;
+}
 /**
  * Timeout para llamadas al microservicio pdf-extractor-service. El microservicio
  * cancela a los 28s (ENDPOINT_TIMEOUT), así que dejamos margen para el handshake.
  */
 export const PDF_AUDIT_OCR_TIMEOUT_MS = 35_000;
+
+// =============================================================================
+// GPT Vision (auditoría documental)
+// -----------------------------------------------------------------------------
+// Cuando la extracción local con pdf-parse no da texto judicial útil, recortamos
+// el PDF a las primeras N páginas con pdf-lib y lo enviamos al modelo Vision de
+// OpenAI vía la Responses API (campo `input_file`). El modelo devuelve JSON
+// estructurado con la clasificación CEDULA/OFICIO/INDETERMINADO.
+//
+// NO se usa para flujos productivos (OCR de cédulas/oficios sigue en Railway).
+// NO se llama a /procesar ni /procesar-oficio de cedula-mvp.
+// =============================================================================
+
+/** Default y máximo absoluto de páginas que se envían al modelo Vision. */
+export const AUDIT_MAX_PAGES_DEFAULT = 5;
+export const AUDIT_MAX_PAGES_MAX = 5;
+export const AUDIT_MAX_PAGES_MIN = 1;
+
+/** Modelo OpenAI a usar para clasificación (env var `AUDIT_OPENAI_MODEL`). */
+export const AUDIT_OPENAI_DEFAULT_MODEL = "gpt-4o-mini";
+
+/** Timeout para la llamada a OpenAI Responses. Vision con 5 páginas suele tardar 3–8s. */
+export const AUDIT_GPT_TIMEOUT_MS = 60_000;
 
 /**
  * Cota usada para normalizar la confianza a [0,1].
@@ -426,7 +579,7 @@ export async function extraerTextoPdfLocal(
 // PDFs nuevos y mezclan procesamiento; no nos sirven para clasificar).
 // =============================================================================
 
-export type FuenteTexto = "local" | "ocr" | "sin_texto";
+export type FuenteTexto = "local" | "ocr" | "gpt_vision" | "sin_texto";
 
 export type ExtractorResultado =
   | { ok: true; texto: string; texto_chars: number; ocr_used: boolean }
@@ -445,8 +598,12 @@ export type OcrClient = {
  * Crea un cliente OCR contra el microservicio pdf-extractor-service.
  * Devuelve null si la env var no está configurada.
  *
- * `urlOverride` permite inyectar URL para tests (no es lo común — los tests
- * usan un OcrClient totalmente mock vía inyección).
+ * @deprecated El flujo de auditoría documental ya no usa el microservicio
+ *   pdf-extractor-service (Render) — fue reemplazado por GPT Vision a partir
+ *   de mayo 2026 porque el microservicio quedó fuera de servicio. Se conserva
+ *   este factory por si el microservicio vuelve y se quiere reactivar como
+ *   fallback alternativo. El orquestador actual `obtenerClasificacionAuditoria`
+ *   NO lo invoca. Para reactivarlo habría que editar el orquestador.
  */
 export function createPdfExtractorOcrClient(urlOverride?: string | null): OcrClient | null {
   const url = (urlOverride ?? process.env.PDF_EXTRACTOR_URL ?? "").trim();
@@ -537,19 +694,24 @@ export type ObtenerTextoOptions = {
   useOcr: boolean;
   /** Cliente OCR. Si null/undefined y useOcr=true, se crea desde env. */
   ocrClient?: OcrClient | null;
-  /** Umbral de chars para considerar el texto "útil" (default PDF_AUDIT_TEXTO_MIN_UTIL). */
-  umbralUtil?: number;
 };
 
 /**
  * Orquesta extracción local + OCR controlado.
  *
  *   1) intenta pdf-parse local.
- *   2) si la longitud (trimmed) >= umbral → fuente "local".
+ *   2) si `esTextoJudicialUtil(local)` → fuente "local".
  *   3) si no, y use_ocr=true → invoca el OcrClient.
- *      3a) si el OCR devuelve texto >= umbral → fuente "ocr".
- *      3b) si el OCR falla o devuelve texto corto → fuente "sin_texto".
+ *      3a) si `esTextoJudicialUtil(ocr)` → fuente "ocr".
+ *      3b) si el OCR falla, devuelve XHTML vacío, o texto no judicial →
+ *           fuente "sin_texto" (con detalle informativo).
  *   4) si use_ocr=false → fuente "sin_texto".
+ *
+ * IMPORTANTE: el criterio de "útil" NO es por longitud cruda — el microservicio
+ * extractor puede devolver XHTML residual de `pdftotext -bbox` (≥ 300 chars
+ * pero vacío de contenido), y los antiguos `>= 30 chars` lo confundían con
+ * texto OCR real. Ahora usamos `esTextoJudicialUtil` que descarta XHTML y
+ * exige contenido alfabético/judicial mínimo.
  *
  * NUNCA lanza. El caller distingue:
  *   - fuente "local" / "ocr" → clasificar con `clasificarTextoPdf({ paginas })`.
@@ -559,13 +721,11 @@ export async function obtenerTextoParaAuditoria(
   buf: Buffer,
   opts: ObtenerTextoOptions
 ): Promise<TextoExtraccion> {
-  const umbral = opts.umbralUtil ?? PDF_AUDIT_TEXTO_MIN_UTIL;
-
   // 1) Local
   const local = await extraerTextoPdfLocal(buf);
   if (local.ok) {
     const charsLocal = local.texto_concatenado.trim().length;
-    if (charsLocal >= umbral) {
+    if (esTextoJudicialUtil(local.texto_concatenado)) {
       return {
         fuente: "local",
         paginas: local.paginas,
@@ -578,7 +738,7 @@ export async function obtenerTextoParaAuditoria(
         fuente: "sin_texto",
         paginas: [],
         texto_chars: charsLocal,
-        detalle: `Texto local insuficiente (${charsLocal} chars; umbral ${umbral}); use_ocr=false`,
+        detalle: `Texto local no es útil judicialmente (${charsLocal} chars crudos); use_ocr=false`,
       };
     }
   } else {
@@ -614,12 +774,14 @@ export async function obtenerTextoParaAuditoria(
     };
   }
 
-  if (ocr.texto_chars < umbral) {
+  if (!esTextoJudicialUtil(ocr.texto)) {
     return {
       fuente: "sin_texto",
+      // Preservamos texto_chars original para que el operador note que el
+      // extractor SÍ devolvió bytes — solo que no es contenido judicial.
       paginas: [],
       texto_chars: ocr.texto_chars,
-      detalle: `OCR devolvió texto insuficiente (${ocr.texto_chars} chars; umbral ${umbral})`,
+      detalle: `El extractor devolvió ${ocr.texto_chars} chars sin contenido judicial útil (posible XHTML vacío de pdftotext -bbox; el microservicio no cayó a Tesseract)`,
     };
   }
 
@@ -631,6 +793,486 @@ export async function obtenerTextoParaAuditoria(
       ? "extractor remoto (pdftotext+tesseract)"
       : "extractor remoto (pdftotext)",
   };
+}
+
+// =============================================================================
+// GPT Vision: recorte PDF + cliente + orquestador
+// =============================================================================
+
+/**
+ * Clamp del parámetro `max_pages` recibido del cliente. Rango [1, 5], default 5.
+ * Acepta string|number|undefined|null|NaN.
+ */
+export function parsearMaxPages(raw: unknown): number {
+  if (raw == null) return AUDIT_MAX_PAGES_DEFAULT;
+  const n = typeof raw === "number" ? raw : parseInt(String(raw), 10);
+  if (!Number.isFinite(n)) return AUDIT_MAX_PAGES_DEFAULT;
+  if (n < AUDIT_MAX_PAGES_MIN) return AUDIT_MAX_PAGES_MIN;
+  if (n > AUDIT_MAX_PAGES_MAX) return AUDIT_MAX_PAGES_MAX;
+  return Math.floor(n);
+}
+
+/**
+ * Recorta un PDF a las primeras N páginas usando pdf-lib (puro JS, sin
+ * binarios). Si el PDF tiene menos páginas que `maxPages`, devuelve todas las
+ * disponibles. NUNCA lanza: si pdf-lib rechaza el PDF, retorna error
+ * controlado.
+ *
+ * @returns `{ ok: true, buffer, paginas_enviadas }` o `{ ok: false, error }`.
+ */
+export async function recortarPdfPrimeraPaginas(
+  buf: Buffer,
+  maxPages: number
+): Promise<
+  | { ok: true; buffer: Buffer; paginas_enviadas: number; paginas_totales: number }
+  | { ok: false; error: string }
+> {
+  try {
+    const { PDFDocument } = await import("pdf-lib");
+    // Importante: pdf-lib rechaza Encrypted PDFs por default; lo permitimos
+    // para no fallar con cédulas firmadas. Sin embargo, encrypted=true puede
+    // dar páginas con texto en blanco — Vision igual lee la imagen.
+    const src = await PDFDocument.load(buf, { ignoreEncryption: true });
+    const total = src.getPageCount();
+    if (total <= 0) {
+      return { ok: false, error: "PDF sin páginas" };
+    }
+    const take = Math.max(1, Math.min(maxPages, total));
+    const out = await PDFDocument.create();
+    const indices = Array.from({ length: take }, (_, i) => i);
+    const copied = await out.copyPages(src, indices);
+    for (const p of copied) out.addPage(p);
+    const bytes = await out.save();
+    return {
+      ok: true,
+      buffer: Buffer.from(bytes),
+      paginas_enviadas: take,
+      paginas_totales: total,
+    };
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: msg };
+  }
+}
+
+// ─── Prompt y schema ─────────────────────────────────────────────────────────
+
+const GPT_VISION_PROMPT = `Sos un clasificador de documentos judiciales argentinos.
+Analizá las imágenes del PDF y determiná si el documento completo es una CÉDULA judicial, un OFICIO judicial o INDETERMINADO.
+
+Respondé SOLO JSON válido con este formato:
+
+{
+  "tipo_documento": "CEDULA" | "OFICIO" | "INDETERMINADO",
+  "confianza": number entre 0 y 1,
+  "razones": string[],
+  "texto_relevante": string
+}
+
+Criterios:
+- CEDULA: cédula de notificación, domicilio, notificación, oficial notificador, zona, traslado, se notifica, cédula ley, constancia de diligenciamiento.
+- OFICIO: oficio judicial, dirigido a banco, hospital, registro, empleador, organismo, director, entidad, pedido de informe, líbrese oficio, mandamiento/oficio dirigido a tercero institucional.
+- INDETERMINADO: si no hay evidencia clara o la imagen no permite leer suficiente.
+
+Reglas:
+- No inventes.
+- Si no se lee bien, INDETERMINADO.
+- No clasifiques por el nombre del archivo.
+- No clasifiques por metadatos técnicos.
+- Clasificá por contenido visible del documento.
+- Si hay varias páginas, evaluá el conjunto.
+- "texto_relevante" debe ser breve: solo frases o palabras que justifiquen la clasificación, no transcripción completa.`;
+
+// ─── Tipos del cliente Vision ────────────────────────────────────────────────
+
+export type GptVisionRespuesta = {
+  tipo_documento: "CEDULA" | "OFICIO" | "INDETERMINADO";
+  confianza: number;
+  razones: string[];
+  texto_relevante: string;
+};
+
+export type GptVisionResultado =
+  | {
+      ok: true;
+      respuesta: GptVisionRespuesta;
+      modelo: string;
+    }
+  | { ok: false; error: string };
+
+export type GptVisionClient = {
+  invocar: (pdfBuf: Buffer, modelo: string) => Promise<GptVisionResultado>;
+};
+
+/**
+ * Crea un cliente Vision contra la Responses API de OpenAI. Devuelve null si
+ * `OPENAI_API_KEY` no está configurada en el entorno.
+ *
+ * NOTA: La clave es server-side (process.env, jamás expuesta al cliente).
+ * NUNCA usar `NEXT_PUBLIC_OPENAI_API_KEY`.
+ */
+export function createGptVisionClient(): GptVisionClient | null {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey) return null;
+
+  return {
+    async invocar(pdfBuf: Buffer, modelo: string): Promise<GptVisionResultado> {
+      try {
+        const { default: OpenAI } = await import("openai");
+        const client = new OpenAI({ apiKey, timeout: AUDIT_GPT_TIMEOUT_MS });
+
+        const b64 = pdfBuf.toString("base64");
+        const fileData = `data:application/pdf;base64,${b64}`;
+
+        const response = await client.responses.create({
+          model: modelo,
+          input: [
+            {
+              role: "user",
+              content: [
+                { type: "input_text", text: GPT_VISION_PROMPT },
+                {
+                  type: "input_file",
+                  filename: "documento.pdf",
+                  file_data: fileData,
+                },
+              ],
+            },
+          ],
+          text: { format: { type: "json_object" } },
+        });
+
+        const raw = response.output_text ?? "";
+        if (!raw) {
+          return { ok: false, error: "GPT Vision devolvió respuesta vacía" };
+        }
+
+        const parsed = parsearRespuestaGptVision(raw);
+        if (!parsed.ok) return parsed;
+
+        return { ok: true, respuesta: parsed.respuesta, modelo };
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { ok: false, error: msg };
+      }
+    },
+  };
+}
+
+/**
+ * Parsea y valida la respuesta JSON de GPT Vision. Usa `parseVisionOcrJson`
+ * (helper existente para reparar JSON roto típico de LLMs) y aplica una
+ * validación estricta del shape.
+ */
+export function parsearRespuestaGptVision(
+  raw: string
+):
+  | { ok: true; respuesta: GptVisionRespuesta }
+  | { ok: false; error: string } {
+  let parsed: unknown;
+  try {
+    parsed = parseVisionOcrJson(raw);
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: `JSON inválido: ${msg}` };
+  }
+
+  if (!parsed || typeof parsed !== "object") {
+    return { ok: false, error: "respuesta no es un objeto JSON" };
+  }
+
+  const o = parsed as Record<string, unknown>;
+
+  const tipoRaw = typeof o.tipo_documento === "string" ? o.tipo_documento.toUpperCase() : "";
+  if (tipoRaw !== "CEDULA" && tipoRaw !== "OFICIO" && tipoRaw !== "INDETERMINADO") {
+    return {
+      ok: false,
+      error: `tipo_documento inválido: "${o.tipo_documento ?? ""}"`,
+    };
+  }
+
+  let confianza = typeof o.confianza === "number" ? o.confianza : NaN;
+  if (!Number.isFinite(confianza)) confianza = 0;
+  if (confianza < 0) confianza = 0;
+  if (confianza > 1) confianza = 1;
+
+  const razones: string[] = Array.isArray(o.razones)
+    ? o.razones
+        .filter((r): r is string => typeof r === "string")
+        .map((r) => r.trim())
+        .filter((r) => r.length > 0)
+        .slice(0, 20)
+    : [];
+
+  const texto_relevante =
+    typeof o.texto_relevante === "string" ? o.texto_relevante : "";
+
+  return {
+    ok: true,
+    respuesta: {
+      tipo_documento: tipoRaw as GptVisionRespuesta["tipo_documento"],
+      confianza,
+      razones,
+      texto_relevante,
+    },
+  };
+}
+
+
+// ─── Tipos del orquestador ───────────────────────────────────────────────────
+
+/**
+ * Resultado canónico del orquestador de auditoría documental. A diferencia de
+ * `TextoExtraccion`, este puede traer la clasificación ya hecha (cuando viene
+ * de GPT Vision el modelo decide directamente, no extraemos texto para
+ * pasarlo a un clasificador local).
+ */
+export type ClasificacionAuditoria = {
+  fuente: FuenteTexto;
+  clasificacion: ClasificacionResultado["clasificacion"];
+  confianza: number;
+  /** Razones de scoring (CEDULA/OFICIO) + meta (fuente, chars, etc). */
+  razones: RazonClasificacion[];
+  /** Snippet preview del texto detectado (puede ser local concatenado o texto_relevante). */
+  texto_detectado: string | null;
+  /** Longitud del texto considerado (local: chars del texto; gpt_vision: chars de texto_relevante). */
+  texto_chars: number;
+  /** Solo para fuente="gpt_vision". */
+  paginas_enviadas: number | null;
+  /** Solo para fuente="gpt_vision". */
+  max_pages: number | null;
+  /** Solo para fuente="gpt_vision": texto_relevante completo del modelo. */
+  texto_relevante: string | null;
+  /** Modelo usado (gpt_vision) o descriptor de fuente (local/sin_texto). */
+  detalle: string | null;
+};
+
+export type ObtenerClasificacionOptions = {
+  /** Si true, intenta GPT Vision cuando local no da texto útil. */
+  useOcr: boolean;
+  /** Páginas máximas que se envían al modelo Vision. Clamp [1,5]. */
+  maxPages?: number;
+  /** Modelo OpenAI; default `AUDIT_OPENAI_DEFAULT_MODEL`. */
+  modelo?: string;
+  /** Cliente Vision inyectable (tests). Si null/undefined, se crea desde env. */
+  gptClient?: GptVisionClient | null;
+};
+
+/**
+ * Orquesta extracción local + GPT Vision (cuando aplica).
+ *
+ *   1) intenta pdf-parse local.
+ *   2) si `esTextoJudicialUtil(local)` → fuente "local" + clasificar con
+ *      `clasificarTextoPdf` (igual que antes).
+ *   3) si no, y use_ocr=true:
+ *      3a) recortar PDF a max_pages con pdf-lib.
+ *      3b) invocar GPT Vision client.
+ *      3c) éxito → fuente "gpt_vision" + clasificación del modelo.
+ *      3d) error / sin API key / JSON inválido → fuente "sin_texto",
+ *           INDETERMINADO, ok:true, razón explícita.
+ *   4) use_ocr=false → fuente "sin_texto".
+ *
+ * NUNCA lanza. Único caso de error es el de descarga (manejado por el caller,
+ * no por este orquestador).
+ */
+export async function obtenerClasificacionAuditoria(
+  buf: Buffer,
+  opts: ObtenerClasificacionOptions
+): Promise<ClasificacionAuditoria> {
+  const maxPages = parsearMaxPages(opts.maxPages);
+  const modelo = (opts.modelo ?? process.env.AUDIT_OPENAI_MODEL ?? "").trim() || AUDIT_OPENAI_DEFAULT_MODEL;
+
+  // 1) Local
+  const local = await extraerTextoPdfLocal(buf);
+  if (local.ok) {
+    const charsLocal = local.texto_concatenado.trim().length;
+    if (esTextoJudicialUtil(local.texto_concatenado)) {
+      const clas = clasificarTextoPdf({ paginas: local.paginas });
+      return {
+        fuente: "local",
+        clasificacion: clas.clasificacion,
+        confianza: clas.confianza,
+        razones: clas.razones,
+        texto_detectado: clas.texto_detectado,
+        texto_chars: charsLocal,
+        paginas_enviadas: null,
+        max_pages: null,
+        texto_relevante: null,
+        detalle: null,
+      };
+    }
+    if (!opts.useOcr) {
+      const clas = clasificacionExtraccionFallida(
+        `Texto local no es útil judicialmente (${charsLocal} chars); use_ocr=false`
+      );
+      return {
+        fuente: "sin_texto",
+        clasificacion: clas.clasificacion,
+        confianza: clas.confianza,
+        razones: clas.razones,
+        texto_detectado: clas.texto_detectado,
+        texto_chars: charsLocal,
+        paginas_enviadas: null,
+        max_pages: null,
+        texto_relevante: null,
+        detalle: `Texto local no es útil; use_ocr=false`,
+      };
+    }
+  } else {
+    if (!opts.useOcr) {
+      const clas = clasificacionExtraccionFallida(
+        `Extracción local falló: ${local.error}; use_ocr=false`
+      );
+      return {
+        fuente: "sin_texto",
+        clasificacion: clas.clasificacion,
+        confianza: clas.confianza,
+        razones: clas.razones,
+        texto_detectado: clas.texto_detectado,
+        texto_chars: 0,
+        paginas_enviadas: null,
+        max_pages: null,
+        texto_relevante: null,
+        detalle: `Extracción local falló; use_ocr=false`,
+      };
+    }
+  }
+
+  // 2) GPT Vision
+  const gptClient = opts.gptClient ?? createGptVisionClient();
+  if (!gptClient) {
+    const clas = clasificacionExtraccionFallida(
+      "OPENAI_API_KEY no configurada"
+    );
+    return {
+      fuente: "sin_texto",
+      clasificacion: clas.clasificacion,
+      confianza: clas.confianza,
+      razones: clas.razones,
+      texto_detectado: clas.texto_detectado,
+      texto_chars: 0,
+      paginas_enviadas: null,
+      max_pages: maxPages,
+      texto_relevante: null,
+      detalle: "OPENAI_API_KEY no configurada",
+    };
+  }
+
+  // 2.a) Recortar PDF a primeras max_pages
+  const recortado = await recortarPdfPrimeraPaginas(buf, maxPages);
+  if (!recortado.ok) {
+    const clas = clasificacionExtraccionFallida(
+      `PDF inválido para recortar: ${recortado.error}`
+    );
+    return {
+      fuente: "sin_texto",
+      clasificacion: clas.clasificacion,
+      confianza: clas.confianza,
+      razones: clas.razones,
+      texto_detectado: clas.texto_detectado,
+      texto_chars: 0,
+      paginas_enviadas: 0,
+      max_pages: maxPages,
+      texto_relevante: null,
+      detalle: `pdf-lib: ${recortado.error}`,
+    };
+  }
+
+  // 2.b) Llamar GPT Vision
+  const gptRes = await gptClient.invocar(recortado.buffer, modelo);
+
+  if (!gptRes.ok) {
+    const clas = clasificacionExtraccionFallida(
+      `GPT Vision falló o no devolvió JSON válido (${gptRes.error})`
+    );
+    return {
+      fuente: "sin_texto",
+      clasificacion: clas.clasificacion,
+      confianza: clas.confianza,
+      razones: clas.razones,
+      texto_detectado: clas.texto_detectado,
+      texto_chars: 0,
+      paginas_enviadas: recortado.paginas_enviadas,
+      max_pages: maxPages,
+      texto_relevante: null,
+      detalle: `GPT Vision: ${gptRes.error}`,
+    };
+  }
+
+  // 2.c) Éxito GPT
+  const r = gptRes.respuesta;
+  const razonesScoring: RazonClasificacion[] = r.razones.map((txt) => ({
+    patron: txt.length > 200 ? `${txt.slice(0, 197)}...` : txt,
+    clasificacion: r.tipo_documento === "INDETERMINADO" ? null : r.tipo_documento,
+    peso: 0,
+    pagina: null,
+  }));
+
+  return {
+    fuente: "gpt_vision",
+    clasificacion: r.tipo_documento,
+    confianza: r.confianza,
+    razones: razonesScoring,
+    texto_detectado:
+      r.texto_relevante.length > TEXTO_DETECTADO_MAX
+        ? r.texto_relevante.slice(0, TEXTO_DETECTADO_MAX)
+        : r.texto_relevante,
+    texto_chars: r.texto_relevante.length,
+    paginas_enviadas: recortado.paginas_enviadas,
+    max_pages: maxPages,
+    texto_relevante: r.texto_relevante,
+    detalle: `modelo=${gptRes.modelo}`,
+  };
+}
+
+/**
+ * Razones meta extendidas con info de GPT Vision (paginas_enviadas, max_pages).
+ * Compatible con `razonesMetaDeFuente` para fuentes "local"/"ocr"/"sin_texto".
+ */
+export function razonesMetaDeClasificacion(
+  c: ClasificacionAuditoria
+): RazonClasificacion[] {
+  const out: RazonClasificacion[] = [
+    {
+      patron: `Fuente texto: ${c.fuente}`,
+      clasificacion: null,
+      peso: 0,
+      pagina: null,
+    },
+    {
+      patron: `Texto chars: ${c.texto_chars}`,
+      clasificacion: null,
+      peso: 0,
+      pagina: null,
+    },
+  ];
+  if (c.fuente === "gpt_vision") {
+    if (c.paginas_enviadas != null) {
+      out.push({
+        patron: `Páginas enviadas: ${c.paginas_enviadas}`,
+        clasificacion: null,
+        peso: 0,
+        pagina: null,
+      });
+    }
+    if (c.max_pages != null) {
+      out.push({
+        patron: `Max pages: ${c.max_pages}`,
+        clasificacion: null,
+        peso: 0,
+        pagina: null,
+      });
+    }
+  }
+  if (c.detalle) {
+    out.push({
+      patron: `Detalle fuente: ${c.detalle}`,
+      clasificacion: null,
+      peso: 0,
+      pagina: null,
+    });
+  }
+  return out;
 }
 
 /**

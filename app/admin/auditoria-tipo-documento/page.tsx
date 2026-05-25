@@ -11,7 +11,7 @@ type Razon = {
   pagina: number | null;
 };
 
-type FuenteTexto = "local" | "ocr" | "sin_texto";
+type FuenteTexto = "local" | "ocr" | "gpt_vision" | "sin_texto";
 
 type AuditRow = {
   id: string;
@@ -73,10 +73,33 @@ function fuenteBadge(fuente: FuenteTexto | null | undefined) {
   if (fuente === "ocr") {
     return { label: "OCR", bg: "rgba(14,165,233,.18)", border: "rgba(14,165,233,.45)", color: "rgba(224,242,254,.96)" };
   }
+  if (fuente === "gpt_vision") {
+    return { label: "GPT Vision", bg: "rgba(217,70,239,.18)", border: "rgba(217,70,239,.45)", color: "rgba(245,208,254,.96)" };
+  }
   if (fuente === "sin_texto") {
     return { label: "sin texto", bg: "rgba(234,179,8,.18)", border: "rgba(234,179,8,.45)", color: "rgba(254,243,199,.96)" };
   }
   return { label: "—", bg: "rgba(255,255,255,.06)", border: "rgba(255,255,255,.18)", color: "rgba(234,243,255,.65)" };
+}
+
+/**
+ * Lee meta-razones de fuente GPT Vision: "Páginas enviadas: N" y "Max pages: N".
+ * Vienen prefijadas en `razones` (JSONB) por `razonesMetaDeClasificacion`.
+ */
+function leerMetadataGptDeRazones(razones: Razon[] | null | undefined): {
+  paginasEnviadas: number | null;
+  maxPages: number | null;
+} {
+  const out = { paginasEnviadas: null as number | null, maxPages: null as number | null };
+  if (!razones || razones.length === 0) return out;
+  for (const r of razones) {
+    if (typeof r.patron !== "string") continue;
+    const m1 = r.patron.match(/^Páginas enviadas:\s*(\d+)/i);
+    if (m1) out.paginasEnviadas = parseInt(m1[1], 10);
+    const m2 = r.patron.match(/^Max pages:\s*(\d+)/i);
+    if (m2) out.maxPages = parseInt(m2[1], 10);
+  }
+  return out;
 }
 
 export default function AuditoriaTipoDocumentoPage() {
@@ -355,6 +378,30 @@ export default function AuditoriaTipoDocumentoPage() {
                               {r.texto_chars} chars
                             </div>
                           )}
+                          {r.fuente_texto === "gpt_vision" && (() => {
+                            const meta = leerMetadataGptDeRazones(r.razones);
+                            if (meta.paginasEnviadas == null && meta.maxPages == null) return null;
+                            const label = meta.paginasEnviadas != null && meta.maxPages != null
+                              ? `${meta.paginasEnviadas}/${meta.maxPages} pág`
+                              : meta.paginasEnviadas != null
+                                ? `${meta.paginasEnviadas} pág`
+                                : `máx ${meta.maxPages}`;
+                            const tooltip = `Páginas enviadas a GPT Vision: ${meta.paginasEnviadas ?? "—"} (max_pages=${meta.maxPages ?? "—"})`;
+                            return (
+                              <div
+                                className="muted"
+                                style={{
+                                  fontSize: 10,
+                                  marginTop: 2,
+                                  fontVariantNumeric: "tabular-nums",
+                                  color: "rgba(245,208,254,.75)",
+                                }}
+                                title={tooltip}
+                              >
+                                {label}
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td style={{ fontWeight: 600 }}>
                           {r.caratula?.trim() || <span className="muted">—</span>}
