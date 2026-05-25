@@ -11,6 +11,8 @@ type Razon = {
   pagina: number | null;
 };
 
+type FuenteTexto = "local" | "ocr" | "sin_texto";
+
 type AuditRow = {
   id: string;
   cedula_id: string;
@@ -29,6 +31,8 @@ type AuditRow = {
   estado_ocr: string | null;
   pjn_cargado_at: string | null;
   mismatch: boolean;
+  fuente_texto: FuenteTexto | null;
+  texto_chars: number | null;
 };
 
 type PreviewBreakdown = {
@@ -60,6 +64,19 @@ function tipoBadge(tipo: string | null | undefined) {
   if (t === "CEDULA") return { label: "CEDULA", bg: "rgba(59,130,246,.18)", border: "rgba(59,130,246,.45)", color: "rgba(219,234,254,.96)" };
   if (t === "INDETERMINADO") return { label: "INDETERMINADO", bg: "rgba(234,179,8,.18)", border: "rgba(234,179,8,.45)", color: "rgba(254,243,199,.96)" };
   return { label: tipo ? String(tipo) : "—", bg: "rgba(255,255,255,.06)", border: "rgba(255,255,255,.18)", color: "rgba(234,243,255,.85)" };
+}
+
+function fuenteBadge(fuente: FuenteTexto | null | undefined) {
+  if (fuente === "local") {
+    return { label: "local", bg: "rgba(34,197,94,.18)", border: "rgba(34,197,94,.45)", color: "rgba(220,252,231,.96)" };
+  }
+  if (fuente === "ocr") {
+    return { label: "OCR", bg: "rgba(14,165,233,.18)", border: "rgba(14,165,233,.45)", color: "rgba(224,242,254,.96)" };
+  }
+  if (fuente === "sin_texto") {
+    return { label: "sin texto", bg: "rgba(234,179,8,.18)", border: "rgba(234,179,8,.45)", color: "rgba(254,243,199,.96)" };
+  }
+  return { label: "—", bg: "rgba(255,255,255,.06)", border: "rgba(255,255,255,.18)", color: "rgba(234,243,255,.65)" };
 }
 
 export default function AuditoriaTipoDocumentoPage() {
@@ -273,12 +290,13 @@ export default function AuditoriaTipoDocumentoPage() {
           </div>
 
           <div className="tableWrap">
-            <table className="table" style={{ minWidth: 1100 }}>
+            <table className="table" style={{ minWidth: 1200 }}>
               <thead>
                 <tr>
                   <th style={{ width: 130 }}>Tipo actual</th>
                   <th style={{ width: 150 }}>Tipo detectado</th>
                   <th style={{ width: 90 }}>Confianza</th>
+                  <th style={{ width: 110 }}>Fuente</th>
                   <th style={{ minWidth: 220 }}>Carátula</th>
                   <th style={{ width: 120 }}>Exp. Nro</th>
                   <th style={{ minWidth: 180 }}>Juzgado</th>
@@ -290,7 +308,7 @@ export default function AuditoriaTipoDocumentoPage() {
               <tbody>
                 {filteredRows.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="muted" style={{ padding: 24, textAlign: "center" }}>
+                    <td colSpan={10} className="muted" style={{ padding: 24, textAlign: "center" }}>
                       No hay registros auditados todavía.
                     </td>
                   </tr>
@@ -300,6 +318,7 @@ export default function AuditoriaTipoDocumentoPage() {
                       r.tipo_documento_actual_cedulas ?? r.tipo_documento_actual
                     );
                     const detectadoBadge = tipoBadge(r.clasificacion_pdf);
+                    const fBadge = fuenteBadge(r.fuente_texto);
                     const revisado = revisados.has(r.id);
                     return (
                       <tr key={r.id} style={{ opacity: revisado ? 0.55 : 1 }}>
@@ -324,6 +343,18 @@ export default function AuditoriaTipoDocumentoPage() {
                         </td>
                         <td style={{ fontVariantNumeric: "tabular-nums" }}>
                           {r.confianza != null ? r.confianza.toFixed(2) : "—"}
+                        </td>
+                        <td>
+                          <Badge {...fBadge} />
+                          {r.texto_chars != null && (
+                            <div
+                              className="muted"
+                              style={{ fontSize: 10, marginTop: 2, fontVariantNumeric: "tabular-nums" }}
+                              title="Caracteres de texto detectado (post-extracción)"
+                            >
+                              {r.texto_chars} chars
+                            </div>
+                          )}
                         </td>
                         <td style={{ fontWeight: 600 }}>
                           {r.caratula?.trim() || <span className="muted">—</span>}

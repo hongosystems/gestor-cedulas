@@ -24,6 +24,19 @@ export const STORAGE_BUCKET = "cedulas";
 export const TEXTO_DETECTADO_MAX = 4000;
 export const RAZONES_MAX = 40;
 export const PDF_AUDIT_MAX_PAGES = 4;
+/**
+ * Umbral en caracteres a partir del cual el texto extraído se considera "útil"
+ * para clasificación. Alineado con el microservicio extractor (que activa OCR
+ * internamente cuando pdftotext devuelve menos de ~100 chars; nosotros somos
+ * más permisivos: con 30 chars normalizados ya suele alcanzar el header
+ * "CEDULA DE NOTIFICACION" o "OFICIO").
+ */
+export const PDF_AUDIT_TEXTO_MIN_UTIL = 30;
+/**
+ * Timeout para llamadas al microservicio pdf-extractor-service. El microservicio
+ * cancela a los 28s (ENDPOINT_TIMEOUT), así que dejamos margen para el handshake.
+ */
+export const PDF_AUDIT_OCR_TIMEOUT_MS = 35_000;
 
 /**
  * Cota usada para normalizar la confianza a [0,1].
@@ -396,6 +409,300 @@ export async function extraerTextoPdfLocal(
     const msg = e instanceof Error ? e.message : String(e);
     return { ok: false, error: msg };
   }
+}
+
+// =============================================================================
+// OCR controlado vía microservicio pdf-extractor-service (POST /extract)
+// -----------------------------------------------------------------------------
+// El microservicio expone:
+//   POST {PDF_EXTRACTOR_URL}  con multipart/form-data, campo "file" (PDF)
+//   → { caratula, juzgado, raw_preview, debug?: { ocr_used, ... } }
+//
+// raw_preview = primeros 500 caracteres del texto extraído (pdftotext o
+// Tesseract OCR si el PDF es escaneado). Es suficiente para detectar el header
+// del documento (CEDULA / OFICIO / etc.) que vive en la primera página.
+//
+// NO llamamos /procesar ni /procesar-oficio del flujo Railway (esos generan
+// PDFs nuevos y mezclan procesamiento; no nos sirven para clasificar).
+// =============================================================================
+
+export type FuenteTexto = "local" | "ocr" | "sin_texto";
+
+export type ExtractorResultado =
+  | { ok: true; texto: string; texto_chars: number; ocr_used: boolean }
+  | { ok: false; error: string };
+
+export type OcrClient = {
+  /**
+   * Recibe el buffer del PDF y devuelve texto plano (raw_preview + carátula +
+   * juzgado, cuando estén disponibles). Nunca lanza: encapsula errores en
+   * `{ ok: false, error }`.
+   */
+  invocar: (buf: Buffer) => Promise<ExtractorResultado>;
+};
+
+/**
+ * Crea un cliente OCR contra el microservicio pdf-extractor-service.
+ * Devuelve null si la env var no está configurada.
+ *
+ * `urlOverride` permite inyectar URL para tests (no es lo común — los tests
+ * usan un OcrClient totalmente mock vía inyección).
+ */
+export function createPdfExtractorOcrClient(urlOverride?: string | null): OcrClient | null {
+  const url = (urlOverride ?? process.env.PDF_EXTRACTOR_URL ?? "").trim();
+  if (!url) return null;
+
+  return {
+    async invocar(buf: Buffer): Promise<ExtractorResultado> {
+      try {
+        const form = new FormData();
+        const ab = buf.buffer.slice(
+          buf.byteOffset,
+          buf.byteOffset + buf.byteLength
+        ) as ArrayBuffer;
+        form.append(
+          "file",
+          new Blob([ab], { type: "application/pdf" }),
+          "audit.pdf"
+        );
+
+        const res = await fetch(url, {
+          method: "POST",
+          body: form,
+          signal: AbortSignal.timeout(PDF_AUDIT_OCR_TIMEOUT_MS),
+        });
+
+        if (!res.ok) {
+          const errBody = await res.text().catch(() => "");
+          return {
+            ok: false,
+            error: `HTTP ${res.status} ${res.statusText}${
+              errBody ? `: ${errBody.slice(0, 200)}` : ""
+            }`,
+          };
+        }
+
+        const json = (await res.json()) as {
+          caratula?: string | null;
+          juzgado?: string | null;
+          raw_preview?: string | null;
+          debug?: { ocr_used?: boolean } | null;
+          error?: string;
+        };
+
+        if (json.error) {
+          return { ok: false, error: json.error };
+        }
+
+        // El microservicio NO devuelve el texto completo, solo raw_preview (500
+        // chars). Componemos un texto con todos los campos para maximizar la
+        // superficie del clasificador. Carátula y juzgado son texto adicional
+        // significativo (un OFICIO suele tener "OFICIO" o "Líbrese oficio" en
+        // el preview; una CEDULA suele tener "CEDULA DE NOTIFICACION").
+        const fragments: string[] = [];
+        if (json.raw_preview) fragments.push(json.raw_preview);
+        if (json.caratula) fragments.push(`Caratula: ${json.caratula}`);
+        if (json.juzgado) fragments.push(`Juzgado: ${json.juzgado}`);
+
+        const texto = fragments.join("\n");
+        const texto_chars = texto.trim().length;
+        const ocr_used = json.debug?.ocr_used === true;
+
+        return { ok: true, texto, texto_chars, ocr_used };
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { ok: false, error: msg };
+      }
+    },
+  };
+}
+
+/**
+ * Resultado canónico de la fase "obtener texto para clasificar".
+ * `paginas` puede ser:
+ *   - múltiples páginas (fuente "local", de pdf-parse)
+ *   - una sola "página" sintética (fuente "ocr", del extractor)
+ *   - vacío (fuente "sin_texto")
+ */
+export type TextoExtraccion = {
+  fuente: FuenteTexto;
+  paginas: string[];
+  texto_chars: number;
+  /** Detalle libre cuando fuente = "sin_texto" o el OCR fue invocado. */
+  detalle: string | null;
+};
+
+export type ObtenerTextoOptions = {
+  /** Si true y la extracción local no da texto útil, invoca el OcrClient. */
+  useOcr: boolean;
+  /** Cliente OCR. Si null/undefined y useOcr=true, se crea desde env. */
+  ocrClient?: OcrClient | null;
+  /** Umbral de chars para considerar el texto "útil" (default PDF_AUDIT_TEXTO_MIN_UTIL). */
+  umbralUtil?: number;
+};
+
+/**
+ * Orquesta extracción local + OCR controlado.
+ *
+ *   1) intenta pdf-parse local.
+ *   2) si la longitud (trimmed) >= umbral → fuente "local".
+ *   3) si no, y use_ocr=true → invoca el OcrClient.
+ *      3a) si el OCR devuelve texto >= umbral → fuente "ocr".
+ *      3b) si el OCR falla o devuelve texto corto → fuente "sin_texto".
+ *   4) si use_ocr=false → fuente "sin_texto".
+ *
+ * NUNCA lanza. El caller distingue:
+ *   - fuente "local" / "ocr" → clasificar con `clasificarTextoPdf({ paginas })`.
+ *   - fuente "sin_texto"    → `clasificacionExtraccionFallida(detalle)`.
+ */
+export async function obtenerTextoParaAuditoria(
+  buf: Buffer,
+  opts: ObtenerTextoOptions
+): Promise<TextoExtraccion> {
+  const umbral = opts.umbralUtil ?? PDF_AUDIT_TEXTO_MIN_UTIL;
+
+  // 1) Local
+  const local = await extraerTextoPdfLocal(buf);
+  if (local.ok) {
+    const charsLocal = local.texto_concatenado.trim().length;
+    if (charsLocal >= umbral) {
+      return {
+        fuente: "local",
+        paginas: local.paginas,
+        texto_chars: charsLocal,
+        detalle: null,
+      };
+    }
+    if (!opts.useOcr) {
+      return {
+        fuente: "sin_texto",
+        paginas: [],
+        texto_chars: charsLocal,
+        detalle: `Texto local insuficiente (${charsLocal} chars; umbral ${umbral}); use_ocr=false`,
+      };
+    }
+  } else {
+    if (!opts.useOcr) {
+      return {
+        fuente: "sin_texto",
+        paginas: [],
+        texto_chars: 0,
+        detalle: `Extracción local falló: ${local.error}; use_ocr=false`,
+      };
+    }
+  }
+
+  // 2) OCR remoto
+  const client = opts.ocrClient ?? createPdfExtractorOcrClient();
+  if (!client) {
+    return {
+      fuente: "sin_texto",
+      paginas: [],
+      texto_chars: 0,
+      detalle:
+        "use_ocr=true pero PDF_EXTRACTOR_URL no está configurada en el entorno",
+    };
+  }
+
+  const ocr = await client.invocar(buf);
+  if (!ocr.ok) {
+    return {
+      fuente: "sin_texto",
+      paginas: [],
+      texto_chars: 0,
+      detalle: `OCR remoto falló: ${ocr.error}`,
+    };
+  }
+
+  if (ocr.texto_chars < umbral) {
+    return {
+      fuente: "sin_texto",
+      paginas: [],
+      texto_chars: ocr.texto_chars,
+      detalle: `OCR devolvió texto insuficiente (${ocr.texto_chars} chars; umbral ${umbral})`,
+    };
+  }
+
+  return {
+    fuente: "ocr",
+    paginas: [ocr.texto],
+    texto_chars: ocr.texto_chars,
+    detalle: ocr.ocr_used
+      ? "extractor remoto (pdftotext+tesseract)"
+      : "extractor remoto (pdftotext)",
+  };
+}
+
+/**
+ * Construye razones meta (sin peso) para preservar trazabilidad en el JSONB
+ * `cedulas_tipo_documento_pdf_audit.razones`.
+ */
+export function razonesMetaDeFuente(
+  fuente: FuenteTexto,
+  texto_chars: number,
+  detalle?: string | null
+): RazonClasificacion[] {
+  const razones: RazonClasificacion[] = [
+    {
+      patron: `Fuente texto: ${fuente}`,
+      clasificacion: null,
+      peso: 0,
+      pagina: null,
+    },
+    {
+      patron: `Texto chars: ${texto_chars}`,
+      clasificacion: null,
+      peso: 0,
+      pagina: null,
+    },
+  ];
+  if (detalle) {
+    razones.push({
+      patron: `Detalle fuente: ${detalle}`,
+      clasificacion: null,
+      peso: 0,
+      pagina: null,
+    });
+  }
+  return razones;
+}
+
+/**
+ * Helpers para parsear las razones meta desde un registro persistido.
+ * Útil para /list/route.ts y la UI (compatibilidad con razones legadas).
+ */
+const RE_FUENTE = /^Fuente texto:\s*(local|ocr|sin_texto)\s*$/i;
+const RE_CHARS = /^Texto chars:\s*(\d+)\s*$/i;
+
+export function leerFuenteDeRazones(
+  razones: unknown
+): { fuente_texto: FuenteTexto | null; texto_chars: number | null } {
+  if (!Array.isArray(razones)) return { fuente_texto: null, texto_chars: null };
+
+  let fuente_texto: FuenteTexto | null = null;
+  let texto_chars: number | null = null;
+
+  for (const raw of razones) {
+    if (!raw || typeof raw !== "object") continue;
+    const r = raw as { patron?: unknown };
+    if (typeof r.patron !== "string") continue;
+
+    const mFuente = RE_FUENTE.exec(r.patron);
+    if (mFuente) {
+      const v = mFuente[1].toLowerCase();
+      if (v === "local" || v === "ocr" || v === "sin_texto") {
+        fuente_texto = v;
+      }
+      continue;
+    }
+    const mChars = RE_CHARS.exec(r.patron);
+    if (mChars) {
+      const n = parseInt(mChars[1], 10);
+      if (Number.isFinite(n)) texto_chars = n;
+    }
+  }
+
+  return { fuente_texto, texto_chars };
 }
 
 /**

@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseService } from "@/lib/supabase-server";
 import { getUserFromRequest } from "@/lib/auth-api";
-import { requireSuperadmin } from "@/lib/auditoria-tipo-documento-pdf";
+import {
+  leerFuenteDeRazones,
+  requireSuperadmin,
+} from "@/lib/auditoria-tipo-documento-pdf";
 
 export const runtime = "nodejs";
 
@@ -80,6 +83,9 @@ export async function GET(req: NextRequest) {
     const mismatch =
       r.clasificacion_pdf !== "INDETERMINADO" &&
       tipoActual !== r.clasificacion_pdf;
+    // Derivar fuente_texto / texto_chars desde las razones meta. Para registros
+    // legados (pre-OCR) será { fuente_texto: null, texto_chars: null }.
+    const meta = leerFuenteDeRazones(r.razones);
     return {
       id: r.id,
       cedula_id: r.cedula_id,
@@ -98,6 +104,8 @@ export async function GET(req: NextRequest) {
       estado_ocr: r.cedulas?.estado_ocr ?? null,
       pjn_cargado_at: r.cedulas?.pjn_cargado_at ?? null,
       mismatch,
+      fuente_texto: meta.fuente_texto,
+      texto_chars: meta.texto_chars,
     };
   });
 

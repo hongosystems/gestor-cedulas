@@ -2,14 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseService } from "@/lib/supabase-server";
 import { getUserFromRequest } from "@/lib/auth-api";
 import {
+  RAZONES_MAX,
   clasificacionExtraccionFallida,
   clasificarTextoPdf,
   descargarPdfDesdeStorage,
-  extraerTextoPdfLocal,
   fetchCandidatosAuditoriaPdf,
+  obtenerTextoParaAuditoria,
+  razonesMetaDeFuente,
   requireSuperadmin,
   type CedulaCandidato,
   type ClasificacionResultado,
+  type FuenteTexto,
+  type OcrClient,
 } from "@/lib/auditoria-tipo-documento-pdf";
 
 export const runtime = "nodejs";
@@ -23,6 +27,7 @@ type RunBody = {
   dry_run?: boolean;
   only_mismatches?: boolean;
   ids?: string[];
+  use_ocr?: boolean;
 };
 
 type RunItemResult = {
@@ -35,6 +40,8 @@ type RunItemResult = {
   audit_id: string | null;
   /** true si tipo_documento_actual != clasificacion_pdf (excluye INDETERMINADO). */
   mismatch: boolean;
+  fuente_texto: FuenteTexto;
+  texto_chars: number;
   error: string | null;
 };
 
@@ -68,12 +75,14 @@ async function parseRunParams(req: NextRequest): Promise<{
   limit: number;
   dryRun: boolean;
   onlyMismatches: boolean;
+  useOcr: boolean;
   ids?: string[];
 }> {
   const url = req.nextUrl.searchParams;
   let limit = parseLimit(url.get("limit"));
   let dryRun = parseBool(url.get("dry_run"), true);
   let onlyMismatches = parseBool(url.get("only_mismatches"), false);
+  let useOcr = parseBool(url.get("use_ocr"), false);
   let ids = parseIds(url.get("ids"));
 
   try {
@@ -83,13 +92,14 @@ async function parseRunParams(req: NextRequest): Promise<{
       if ("dry_run" in body) dryRun = parseBool(body.dry_run, true);
       if ("only_mismatches" in body)
         onlyMismatches = parseBool(body.only_mismatches, false);
+      if ("use_ocr" in body) useOcr = parseBool(body.use_ocr, false);
       if ("ids" in body) ids = parseIds(body.ids);
     }
   } catch {
     /* body vacío o no JSON: usar query */
   }
 
-  return { limit, dryRun, onlyMismatches, ids };
+  return { limit, dryRun, onlyMismatches, useOcr, ids };
 }
 
 function calcularMismatch(
@@ -130,15 +140,22 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { limit, dryRun, onlyMismatches, ids } = await parseRunParams(req);
+  const { limit, dryRun, onlyMismatches, useOcr, ids } = await parseRunParams(req);
 
   console.log("[tipo-doc-audit][run] inicio", {
     userId: user.id,
     limit,
     dryRun,
     onlyMismatches,
+    useOcr,
     idsCount: ids?.length ?? 0,
   });
+
+  if (useOcr && !process.env.PDF_EXTRACTOR_URL?.trim()) {
+    console.warn(
+      "[tipo-doc-audit][run] use_ocr=true pero PDF_EXTRACTOR_URL no está configurada — todos los ítems quedarán como sin_texto"
+    );
+  }
 
   const fetchResult = await fetchCandidatosAuditoriaPdf(svc, { ids });
   if (!fetchResult.ok) {
@@ -155,13 +172,23 @@ export async function POST(req: NextRequest) {
   const resultados: RunItemResult[] = [];
 
   for (const cedula of lote) {
-    const resultado = await procesarCedula(svc, cedula, dryRun, onlyMismatches, user.id);
+    const resultado = await procesarCedula(svc, cedula, {
+      dryRun,
+      onlyMismatches,
+      useOcr,
+      userId: user.id,
+    });
     resultados.push(resultado);
   }
 
   const exitosos = resultados.filter((r) => r.ok).length;
   const fallidos = resultados.filter((r) => !r.ok).length;
   const inconsistencias = resultados.filter((r) => r.mismatch).length;
+  const porFuente = {
+    local: resultados.filter((r) => r.fuente_texto === "local").length,
+    ocr: resultados.filter((r) => r.fuente_texto === "ocr").length,
+    sin_texto: resultados.filter((r) => r.fuente_texto === "sin_texto").length,
+  };
 
   console.log("[tipo-doc-audit][run] fin", {
     userId: user.id,
@@ -169,35 +196,54 @@ export async function POST(req: NextRequest) {
     exitosos,
     fallidos,
     inconsistencias,
+    porFuente,
     dryRun,
+    useOcr,
   });
 
   return NextResponse.json({
     ok: true,
     dry_run: dryRun,
     only_mismatches: onlyMismatches,
+    use_ocr: useOcr,
     generated_at: new Date().toISOString(),
     nota: dryRun
       ? "dry_run=true: se clasificaron PDFs pero NO se insertó en cedulas_tipo_documento_pdf_audit. Enviar dry_run=false para persistir."
       : "Auditoría persistida en cedulas_tipo_documento_pdf_audit. No se modificó cedulas.tipo_documento ni Storage.",
-    parametros: { limit, dry_run: dryRun, only_mismatches: onlyMismatches, limit_max: LIMIT_MAX },
+    parametros: {
+      limit,
+      dry_run: dryRun,
+      only_mismatches: onlyMismatches,
+      use_ocr: useOcr,
+      limit_max: LIMIT_MAX,
+    },
     universo_con_pdf: conPdf.length,
     procesados_en_esta_llamada: lote.length,
     pendientes_restantes: Math.max(0, conPdf.length - lote.length),
     exitosos,
     fallidos,
     inconsistencias,
+    por_fuente_texto: porFuente,
     resultados,
   });
 }
 
+type ProcesarOpts = {
+  dryRun: boolean;
+  onlyMismatches: boolean;
+  useOcr: boolean;
+  userId: string;
+  /** Opcional: cliente OCR inyectable (tests). En producción se construye desde env. */
+  ocrClient?: OcrClient | null;
+};
+
 async function procesarCedula(
   svc: ReturnType<typeof supabaseService>,
   cedula: CedulaCandidato,
-  dryRun: boolean,
-  onlyMismatches: boolean,
-  userId: string
+  opts: ProcesarOpts
 ): Promise<RunItemResult> {
+  const { dryRun, onlyMismatches, useOcr, userId, ocrClient } = opts;
+
   const pdfPath = cedula.pdf_path?.trim();
   if (!pdfPath) {
     return {
@@ -209,11 +255,13 @@ async function procesarCedula(
       razones_count: 0,
       audit_id: null,
       mismatch: false,
+      fuente_texto: "sin_texto",
+      texto_chars: 0,
       error: "pdf_path vacío",
     };
   }
 
-  // 1) Descargar PDF (sin tocar Storage)
+  // 1) Descargar PDF (sin tocar Storage). Único caso que genera ok:false.
   const downloadResult = await descargarPdfDesdeStorage(svc, pdfPath);
   if (!downloadResult.ok) {
     console.warn("[tipo-doc-audit][run] error de descarga", {
@@ -230,31 +278,48 @@ async function procesarCedula(
       razones_count: 0,
       audit_id: null,
       mismatch: false,
+      fuente_texto: "sin_texto",
+      texto_chars: 0,
       error: `No se pudo descargar PDF: ${downloadResult.error}`,
     };
   }
 
-  // 2) Extraer texto con pdf-parse (método barato local, con polyfills DOM
-  //    para Node en Vercel). NO llama Railway en esta fase.
-  //
-  //    Si la extracción falla, el ítem se reporta OK (ok:true) con
-  //    clasificacion=INDETERMINADO y razón "No se pudo extraer texto
-  //    localmente del PDF" — siguiendo la regla "solo ok:false si no se pudo
-  //    descargar/leer el archivo".
-  const extracted = await extraerTextoPdfLocal(downloadResult.buffer);
+  // 2) Obtener texto: local primero; si no es útil y useOcr=true, OCR controlado
+  //    vía pdf-extractor-service. Nunca lanza.
+  const texto = await obtenerTextoParaAuditoria(downloadResult.buffer, {
+    useOcr,
+    ocrClient: ocrClient ?? undefined,
+  });
 
+  console.log("[tipo-doc-audit][run] texto obtenido", {
+    cedula_id: cedula.id,
+    fuente_texto: texto.fuente,
+    texto_chars: texto.texto_chars,
+    detalle: texto.detalle,
+    useOcr,
+  });
+
+  // 3) Clasificar
   let clasificado: ClasificacionResultado;
-  if (!extracted.ok) {
-    console.warn("[tipo-doc-audit][run] extracción local falló (continuamos como INDETERMINADO)", {
-      cedula_id: cedula.id,
-      pdf_path: pdfPath,
-      error: extracted.error,
-    });
-    clasificado = clasificacionExtraccionFallida(extracted.error);
+  if (texto.fuente === "sin_texto") {
+    clasificado = clasificacionExtraccionFallida(
+      texto.detalle ?? "No se pudo extraer texto del PDF"
+    );
   } else {
-    // 3) Clasificar
-    clasificado = clasificarTextoPdf({ paginas: extracted.paginas });
+    clasificado = clasificarTextoPdf({ paginas: texto.paginas });
   }
+
+  // 4) Adjuntar meta-razones de trazabilidad de fuente y longitud.
+  //    Se prependen para que sean fáciles de leer en la UI.
+  const razonesMeta = razonesMetaDeFuente(
+    texto.fuente,
+    texto.texto_chars,
+    texto.detalle
+  );
+  const razonesCompletas = [...razonesMeta, ...clasificado.razones].slice(
+    0,
+    RAZONES_MAX
+  );
 
   const mismatch = calcularMismatch(cedula.tipo_documento, clasificado.clasificacion);
 
@@ -263,11 +328,13 @@ async function procesarCedula(
     tipo_documento_actual: cedula.tipo_documento,
     clasificacion_pdf: clasificado.clasificacion,
     confianza: clasificado.confianza,
-    razones_count: clasificado.razones.length,
+    razones_count: razonesCompletas.length,
+    fuente_texto: texto.fuente,
+    texto_chars: texto.texto_chars,
     mismatch,
   });
 
-  // 4) Persistir (sólo si dry_run=false y, si only_mismatches, sólo si hay mismatch)
+  // 5) Persistir (sólo si dry_run=false y, si only_mismatches, sólo si hay mismatch)
   if (dryRun) {
     return {
       cedula_id: cedula.id,
@@ -275,9 +342,11 @@ async function procesarCedula(
       tipo_documento_actual: cedula.tipo_documento,
       clasificacion_pdf: clasificado.clasificacion,
       confianza: clasificado.confianza,
-      razones_count: clasificado.razones.length,
+      razones_count: razonesCompletas.length,
       audit_id: null,
       mismatch,
+      fuente_texto: texto.fuente,
+      texto_chars: texto.texto_chars,
       error: null,
     };
   }
@@ -289,9 +358,11 @@ async function procesarCedula(
       tipo_documento_actual: cedula.tipo_documento,
       clasificacion_pdf: clasificado.clasificacion,
       confianza: clasificado.confianza,
-      razones_count: clasificado.razones.length,
+      razones_count: razonesCompletas.length,
       audit_id: null,
       mismatch: false,
+      fuente_texto: texto.fuente,
+      texto_chars: texto.texto_chars,
       error: null,
     };
   }
@@ -303,7 +374,7 @@ async function procesarCedula(
       tipo_documento_actual: cedula.tipo_documento,
       clasificacion_pdf: clasificado.clasificacion,
       confianza: clasificado.confianza,
-      razones: clasificado.razones,
+      razones: razonesCompletas,
       texto_detectado: clasificado.texto_detectado,
       archivo_origen: downloadResult.archivo_origen,
       created_by: userId,
@@ -322,9 +393,11 @@ async function procesarCedula(
       tipo_documento_actual: cedula.tipo_documento,
       clasificacion_pdf: clasificado.clasificacion,
       confianza: clasificado.confianza,
-      razones_count: clasificado.razones.length,
+      razones_count: razonesCompletas.length,
       audit_id: null,
       mismatch,
+      fuente_texto: texto.fuente,
+      texto_chars: texto.texto_chars,
       error: `Insert audit falló: ${insertErr?.message ?? "desconocido"}`,
     };
   }
@@ -335,9 +408,11 @@ async function procesarCedula(
     tipo_documento_actual: cedula.tipo_documento,
     clasificacion_pdf: clasificado.clasificacion,
     confianza: clasificado.confianza,
-    razones_count: clasificado.razones.length,
+    razones_count: razonesCompletas.length,
     audit_id: inserted.id,
     mismatch,
+    fuente_texto: texto.fuente,
+    texto_chars: texto.texto_chars,
     error: null,
   };
 }
