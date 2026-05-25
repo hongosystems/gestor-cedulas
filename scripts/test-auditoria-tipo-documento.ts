@@ -28,6 +28,9 @@ import {
   AUDIT_MAX_PAGES_DEFAULT,
   AUDIT_MAX_PAGES_MAX,
   AUDIT_MAX_PAGES_MIN,
+  CONTEXTO_DETECTADO_VACIO,
+  GPT_META_CARATULA_MAX,
+  GPT_META_EXPEDIENTE_MAX,
   PDF_AUDIT_DEBUG_TEXT_MAX,
   RAZON_EXTRACCION_FALLIDA,
   clasificacionExtraccionFallida,
@@ -35,6 +38,7 @@ import {
   clasificarTextoPdfDesdeString,
   esTextoJudicialUtil,
   extraerTextoPdfLocal,
+  leerContextoDeRazones,
   leerFuenteDeRazones,
   obtenerClasificacionAuditoria,
   obtenerTextoParaAuditoria,
@@ -43,12 +47,15 @@ import {
   razonesMetaDeClasificacion,
   razonesMetaDeFuente,
   recortarPdfPrimeraPaginas,
+  resolverDatoConPrioridad,
+  sanitizarMetaGpt,
   sanitizarTextoParaDebug,
   type ClasificacionResultado,
   type ExtractorResultado,
   type GptVisionClient,
   type GptVisionResultado,
   type OcrClient,
+  type RazonClasificacion,
 } from "../lib/auditoria-tipo-documento-pdf";
 
 type TestCase = {
@@ -1205,6 +1212,10 @@ async function testObtenerClasificacionAuditoriaGpt(): Promise<{
       confianza: 0.93,
       razones: ["líbrese oficio", "dirigido al Director del Banco"],
       texto_relevante: "OFICIO. Líbrese oficio al Sr. Director del Banco de la Nación Argentina.",
+      expediente: null,
+      caratula: null,
+      juzgado: null,
+      destinatario: null,
     },
     modelo: "mock-gpt",
   });
@@ -1216,6 +1227,10 @@ async function testObtenerClasificacionAuditoriaGpt(): Promise<{
       confianza: 0.95,
       razones: ["CÉDULA DE NOTIFICACIÓN", "domicilio constituido"],
       texto_relevante: "CÉDULA DE NOTIFICACIÓN. Zona 1. Se notifica.",
+      expediente: null,
+      caratula: null,
+      juzgado: null,
+      destinatario: null,
     },
     modelo: "mock-gpt",
   });
@@ -1227,6 +1242,10 @@ async function testObtenerClasificacionAuditoriaGpt(): Promise<{
       confianza: 0.0,
       razones: ["imagen ilegible"],
       texto_relevante: "",
+      expediente: null,
+      caratula: null,
+      juzgado: null,
+      destinatario: null,
     },
     modelo: "mock-gpt",
   });
@@ -1398,6 +1417,10 @@ async function testRecorteEnOrquestador(): Promise<{
           confianza: 0,
           razones: [],
           texto_relevante: "",
+          expediente: null,
+          caratula: null,
+          juzgado: null,
+          destinatario: null,
         },
         modelo: "mock-gpt",
       };
@@ -1459,6 +1482,7 @@ function testRazonesMetaGptVision(): { pass: number; fail: number; total: number
     max_pages: 5,
     texto_relevante: "OFICIO ...",
     detalle: "modelo=gpt-4o-mini",
+    contexto_detectado: { ...CONTEXTO_DETECTADO_VACIO },
   });
 
   const patrones = meta.map((m) => m.patron);
@@ -1506,6 +1530,7 @@ function testRazonesMetaGptVision(): { pass: number; fail: number; total: number
     max_pages: null,
     texto_relevante: null,
     detalle: null,
+    contexto_detectado: { ...CONTEXTO_DETECTADO_VACIO },
   });
   const patronesLocal = metaLocal.map((m) => m.patron);
   if (patronesLocal.some((p) => p.startsWith("Páginas enviadas") || p.startsWith("Max pages"))) {
@@ -1517,6 +1542,612 @@ function testRazonesMetaGptVision(): { pass: number; fail: number; total: number
   }
 
   return { pass, fail, total: checks.length + 1 };
+}
+
+// =============================================================================
+// Tests de contexto detectado por GPT Vision (expediente, carátula, juzgado,
+// destinatario). Cubre: parser, persistencia en razones JSONB, lectura inversa,
+// y la lógica de prioridad cedulas > GPT > "—" que la UI usa para mostrar.
+// =============================================================================
+
+function testSanitizarMetaGpt(): { pass: number; fail: number; total: number } {
+  console.log("");
+  console.log("[tipo-doc-audit][test] sanitizarMetaGpt (campos contextuales GPT)");
+  let pass = 0;
+  let fail = 0;
+
+  type Case = { name: string; input: unknown; max: number; expected: string | null };
+  const cases: Case[] = [
+    { name: "string normal → mismo trim", input: "  104277/2026  ", max: 50, expected: "104277/2026" },
+    { name: "colapsa espacios internos", input: "TAPIA  c/  FORNERO", max: 100, expected: "TAPIA c/ FORNERO" },
+    { name: '"null" literal → null', input: "null", max: 50, expected: null },
+    { name: '"N/A" → null', input: "N/A", max: 50, expected: null },
+    { name: '"—" → null', input: "—", max: 50, expected: null },
+    { name: '"-" → null', input: "-", max: 50, expected: null },
+    { name: '"none" → null', input: "NONE", max: 50, expected: null },
+    { name: "vacío → null", input: "", max: 50, expected: null },
+    { name: "solo espacios → null", input: "   ", max: 50, expected: null },
+    { name: "no-string (number) → null", input: 12345, max: 50, expected: null },
+    { name: "no-string (null) → null", input: null, max: 50, expected: null },
+    { name: "no-string (undefined) → null", input: undefined, max: 50, expected: null },
+    { name: "trunca al máximo (10)", input: "abcdefghijklmnop", max: 10, expected: "abcdefghij" },
+    { name: "no trunca si entra justo", input: "abcdefghij", max: 10, expected: "abcdefghij" },
+  ];
+
+  for (const tc of cases) {
+    const got = sanitizarMetaGpt(tc.input, tc.max);
+    if (got === tc.expected) {
+      pass++;
+      console.log(`  ✔ ${tc.name}`);
+    } else {
+      fail++;
+      console.log(`  ✘ ${tc.name}`);
+      console.log(`     → esperaba ${JSON.stringify(tc.expected)} obtuve ${JSON.stringify(got)}`);
+    }
+  }
+  return { pass, fail, total: cases.length };
+}
+
+function testParsearRespuestaGptVisionContexto(): {
+  pass: number;
+  fail: number;
+  total: number;
+} {
+  console.log("");
+  console.log(
+    "[tipo-doc-audit][test] parsearRespuestaGptVision (expediente/carátula/juzgado/destinatario)"
+  );
+  let pass = 0;
+  let fail = 0;
+
+  type Case = {
+    name: string;
+    raw: Record<string, unknown>;
+    check: (resp: {
+      expediente: string | null;
+      caratula: string | null;
+      juzgado: string | null;
+      destinatario: string | null;
+    }) => string | null;
+  };
+
+  const base = {
+    tipo_documento: "OFICIO",
+    confianza: 0.8,
+    razones: [],
+    texto_relevante: "",
+  };
+
+  const cases: Case[] = [
+    {
+      name: "GPT devuelve los 4 campos → todos presentes y sanitizados",
+      raw: {
+        ...base,
+        expediente: "  104277/2026 ",
+        caratula: "TAPIA c/ FORNERO s/ DAÑOS",
+        juzgado: "Juzgado Nacional Civil N°1",
+        destinatario: "Banco de la Nación Argentina",
+      },
+      check: (r) => {
+        if (r.expediente !== "104277/2026") return `expediente=${JSON.stringify(r.expediente)}`;
+        if (r.caratula !== "TAPIA c/ FORNERO s/ DAÑOS") return `caratula=${JSON.stringify(r.caratula)}`;
+        if (r.juzgado !== "Juzgado Nacional Civil N°1") return `juzgado=${JSON.stringify(r.juzgado)}`;
+        if (r.destinatario !== "Banco de la Nación Argentina") return `destinatario=${JSON.stringify(r.destinatario)}`;
+        return null;
+      },
+    },
+    {
+      name: "GPT omite todos los campos contextuales → todos null",
+      raw: { ...base },
+      check: (r) => {
+        if (r.expediente !== null) return "expediente debería ser null";
+        if (r.caratula !== null) return "caratula debería ser null";
+        if (r.juzgado !== null) return "juzgado debería ser null";
+        if (r.destinatario !== null) return "destinatario debería ser null";
+        return null;
+      },
+    },
+    {
+      name: "GPT envía null explícito → null",
+      raw: { ...base, expediente: null, caratula: null, juzgado: null, destinatario: null },
+      check: (r) => {
+        if (r.expediente !== null || r.caratula !== null || r.juzgado !== null || r.destinatario !== null) {
+          return `algún campo no es null: ${JSON.stringify(r)}`;
+        }
+        return null;
+      },
+    },
+    {
+      name: 'GPT envía valores sospechosos ("N/A", "null", "—") → null',
+      raw: { ...base, expediente: "N/A", caratula: "n/a", juzgado: "—", destinatario: "null" },
+      check: (r) => {
+        if (r.expediente !== null) return `expediente=${JSON.stringify(r.expediente)}`;
+        if (r.caratula !== null) return `caratula=${JSON.stringify(r.caratula)}`;
+        if (r.juzgado !== null) return `juzgado=${JSON.stringify(r.juzgado)}`;
+        if (r.destinatario !== null) return `destinatario=${JSON.stringify(r.destinatario)}`;
+        return null;
+      },
+    },
+    {
+      name: "expediente muy largo → trunca al máximo",
+      raw: { ...base, expediente: "X".repeat(GPT_META_EXPEDIENTE_MAX + 100) },
+      check: (r) => {
+        if (r.expediente == null || r.expediente.length !== GPT_META_EXPEDIENTE_MAX) {
+          return `expediente.length=${r.expediente?.length}, esperado ${GPT_META_EXPEDIENTE_MAX}`;
+        }
+        return null;
+      },
+    },
+    {
+      name: "caratula muy larga → trunca al máximo",
+      raw: { ...base, caratula: "Y".repeat(GPT_META_CARATULA_MAX + 100) },
+      check: (r) => {
+        if (r.caratula == null || r.caratula.length !== GPT_META_CARATULA_MAX) {
+          return `caratula.length=${r.caratula?.length}, esperado ${GPT_META_CARATULA_MAX}`;
+        }
+        return null;
+      },
+    },
+    {
+      name: "campos de tipo incorrecto (number, array, obj, bool) → null",
+      raw: { ...base, expediente: 12345, caratula: ["array"], juzgado: { nested: "obj" }, destinatario: true },
+      check: (r) => {
+        if (r.expediente !== null || r.caratula !== null || r.juzgado !== null || r.destinatario !== null) {
+          return `algún campo no es null: ${JSON.stringify(r)}`;
+        }
+        return null;
+      },
+    },
+  ];
+
+  for (const tc of cases) {
+    const got = parsearRespuestaGptVision(JSON.stringify(tc.raw));
+    if (!got.ok) {
+      fail++;
+      console.log(`  ✘ ${tc.name}`);
+      console.log(`     → parser falló: ${got.error}`);
+      continue;
+    }
+    const err = tc.check({
+      expediente: got.respuesta.expediente,
+      caratula: got.respuesta.caratula,
+      juzgado: got.respuesta.juzgado,
+      destinatario: got.respuesta.destinatario,
+    });
+    if (err === null) {
+      pass++;
+      console.log(`  ✔ ${tc.name}`);
+    } else {
+      fail++;
+      console.log(`  ✘ ${tc.name}`);
+      console.log(`     → ${err}`);
+    }
+  }
+  return { pass, fail, total: cases.length };
+}
+
+async function testContextoDetectadoEnOrquestador(): Promise<{
+  pass: number;
+  fail: number;
+  total: number;
+}> {
+  console.log("");
+  console.log(
+    "[tipo-doc-audit][test] obtenerClasificacionAuditoria devuelve contexto_detectado"
+  );
+  let pass = 0;
+  let fail = 0;
+
+  const buf = await pdfSinteticoConPaginas(1);
+
+  // Caso 1: GPT devuelve contexto completo
+  const clientCompleto = makeGptClient(
+    async (): Promise<GptVisionResultado> => ({
+      ok: true,
+      modelo: "mock-gpt",
+      respuesta: {
+        tipo_documento: "OFICIO",
+        confianza: 0.9,
+        razones: ["líbrese oficio"],
+        texto_relevante: "OFICIO. Líbrese al Banco Nación.",
+        expediente: "104277/2026",
+        caratula: "TAPIA c/ FORNERO s/ DAÑOS",
+        juzgado: "Juzgado Nacional Civil N°1",
+        destinatario: "Banco de la Nación Argentina",
+      },
+    })
+  );
+  const res1 = await obtenerClasificacionAuditoria(buf, {
+    useOcr: true,
+    gptClient: clientCompleto,
+  });
+  const checks1: Array<{ name: string; ok: boolean }> = [
+    { name: "fuente='gpt_vision'", ok: res1.fuente === "gpt_vision" },
+    { name: "contexto_detectado.expediente == '104277/2026'", ok: res1.contexto_detectado.expediente === "104277/2026" },
+    { name: "contexto_detectado.caratula presente", ok: res1.contexto_detectado.caratula === "TAPIA c/ FORNERO s/ DAÑOS" },
+    { name: "contexto_detectado.juzgado presente", ok: res1.contexto_detectado.juzgado === "Juzgado Nacional Civil N°1" },
+    { name: "contexto_detectado.destinatario presente", ok: res1.contexto_detectado.destinatario === "Banco de la Nación Argentina" },
+  ];
+  for (const c of checks1) {
+    if (c.ok) {
+      pass++;
+      console.log(`  ✔ GPT completo: ${c.name}`);
+    } else {
+      fail++;
+      console.log(`  ✘ GPT completo: ${c.name}`);
+      console.log(`     → contexto_detectado=${JSON.stringify(res1.contexto_detectado)}`);
+    }
+  }
+
+  // Caso 2: GPT devuelve contexto parcial (solo expediente)
+  const clientParcial = makeGptClient(
+    async (): Promise<GptVisionResultado> => ({
+      ok: true,
+      modelo: "mock-gpt",
+      respuesta: {
+        tipo_documento: "CEDULA",
+        confianza: 0.95,
+        razones: ["se notifica"],
+        texto_relevante: "CÉDULA",
+        expediente: "55555/2025",
+        caratula: null,
+        juzgado: null,
+        destinatario: null,
+      },
+    })
+  );
+  const res2 = await obtenerClasificacionAuditoria(buf, {
+    useOcr: true,
+    gptClient: clientParcial,
+  });
+  if (
+    res2.contexto_detectado.expediente === "55555/2025" &&
+    res2.contexto_detectado.caratula === null &&
+    res2.contexto_detectado.juzgado === null &&
+    res2.contexto_detectado.destinatario === null
+  ) {
+    pass++;
+    console.log(`  ✔ GPT parcial: expediente='55555/2025', resto null`);
+  } else {
+    fail++;
+    console.log(`  ✘ GPT parcial: ${JSON.stringify(res2.contexto_detectado)}`);
+  }
+
+  // Caso 3: GPT falla → contexto_detectado todo null (VACIO) y fuente='sin_texto'
+  const clientFalla = makeGptClient(
+    async (): Promise<GptVisionResultado> => ({ ok: false, error: "HTTP 500" })
+  );
+  const res3 = await obtenerClasificacionAuditoria(buf, {
+    useOcr: true,
+    gptClient: clientFalla,
+  });
+  const ctx3 = res3.contexto_detectado;
+  if (
+    ctx3.expediente === null &&
+    ctx3.caratula === null &&
+    ctx3.juzgado === null &&
+    ctx3.destinatario === null &&
+    res3.fuente === "sin_texto"
+  ) {
+    pass++;
+    console.log(`  ✔ GPT falla: contexto_detectado todo null y fuente='sin_texto'`);
+  } else {
+    fail++;
+    console.log(
+      `  ✘ GPT falla: fuente=${res3.fuente}, contexto=${JSON.stringify(ctx3)}`
+    );
+  }
+
+  // Caso 4: use_ocr=false → contexto_detectado todo null
+  const res4 = await obtenerClasificacionAuditoria(buf, {
+    useOcr: false,
+    gptClient: makeGptClient(async () => {
+      throw new Error("no debería llamarse");
+    }),
+  });
+  const ctx4 = res4.contexto_detectado;
+  if (
+    ctx4.expediente === null &&
+    ctx4.caratula === null &&
+    ctx4.juzgado === null &&
+    ctx4.destinatario === null
+  ) {
+    pass++;
+    console.log(`  ✔ use_ocr=false: contexto_detectado todo null`);
+  } else {
+    fail++;
+    console.log(`  ✘ use_ocr=false: contexto=${JSON.stringify(ctx4)}`);
+  }
+
+  return { pass, fail, total: checks1.length + 3 };
+}
+
+function testRazonesMetaContextoGptRoundTrip(): {
+  pass: number;
+  fail: number;
+  total: number;
+} {
+  console.log("");
+  console.log(
+    "[tipo-doc-audit][test] round-trip persistencia contexto GPT (razonesMeta ↔ leerContextoDeRazones)"
+  );
+  let pass = 0;
+  let fail = 0;
+
+  // Caso 1: contexto completo → meta-razones GPT * → leerContextoDeRazones recupera todo
+  const meta1 = razonesMetaDeClasificacion({
+    fuente: "gpt_vision",
+    clasificacion: "OFICIO",
+    confianza: 0.9,
+    razones: [],
+    texto_detectado: "OFICIO ...",
+    texto_chars: 42,
+    paginas_enviadas: 3,
+    max_pages: 5,
+    texto_relevante: "OFICIO ...",
+    detalle: "modelo=gpt-4o-mini",
+    contexto_detectado: {
+      expediente: "104277/2026",
+      caratula: "TAPIA c/ FORNERO s/ DAÑOS",
+      juzgado: "Juzgado Nacional Civil N°1",
+      destinatario: "Banco de la Nación Argentina",
+    },
+  });
+
+  const patrones1 = meta1.map((m) => m.patron);
+  const expectedPatrones = [
+    "GPT expediente: 104277/2026",
+    "GPT caratula: TAPIA c/ FORNERO s/ DAÑOS",
+    "GPT juzgado: Juzgado Nacional Civil N°1",
+    "GPT destinatario: Banco de la Nación Argentina",
+  ];
+  for (const expected of expectedPatrones) {
+    if (patrones1.includes(expected)) {
+      pass++;
+      console.log(`  ✔ meta incluye "${expected}"`);
+    } else {
+      fail++;
+      console.log(`  ✘ meta NO incluye "${expected}"`);
+      console.log(`     → patrones: ${JSON.stringify(patrones1)}`);
+    }
+  }
+
+  const ctx1 = leerContextoDeRazones(meta1);
+  if (
+    ctx1.expediente === "104277/2026" &&
+    ctx1.caratula === "TAPIA c/ FORNERO s/ DAÑOS" &&
+    ctx1.juzgado === "Juzgado Nacional Civil N°1" &&
+    ctx1.destinatario === "Banco de la Nación Argentina"
+  ) {
+    pass++;
+    console.log(`  ✔ leerContextoDeRazones round-trip OK`);
+  } else {
+    fail++;
+    console.log(`  ✘ leerContextoDeRazones perdió datos: ${JSON.stringify(ctx1)}`);
+  }
+
+  // Caso 2: contexto parcial (solo expediente y juzgado)
+  const meta2 = razonesMetaDeClasificacion({
+    fuente: "gpt_vision",
+    clasificacion: "CEDULA",
+    confianza: 0.95,
+    razones: [],
+    texto_detectado: "CÉDULA",
+    texto_chars: 10,
+    paginas_enviadas: 2,
+    max_pages: 5,
+    texto_relevante: "CÉDULA",
+    detalle: "modelo=gpt-4o-mini",
+    contexto_detectado: {
+      expediente: "55555/2025",
+      caratula: null,
+      juzgado: "Juzgado Federal N°2",
+      destinatario: null,
+    },
+  });
+  const patrones2 = meta2.map((m) => m.patron);
+  const tieneExp = patrones2.includes("GPT expediente: 55555/2025");
+  const noTieneCaratula = !patrones2.some((p) => p.startsWith("GPT caratula:"));
+  const tieneJuzgado = patrones2.includes("GPT juzgado: Juzgado Federal N°2");
+  const noTieneDestinatario = !patrones2.some((p) => p.startsWith("GPT destinatario:"));
+  if (tieneExp && noTieneCaratula && tieneJuzgado && noTieneDestinatario) {
+    pass++;
+    console.log(`  ✔ contexto parcial: solo expediente y juzgado en meta`);
+  } else {
+    fail++;
+    console.log(`  ✘ contexto parcial: meta=${JSON.stringify(patrones2)}`);
+  }
+
+  const ctx2 = leerContextoDeRazones(meta2);
+  if (
+    ctx2.expediente === "55555/2025" &&
+    ctx2.caratula === null &&
+    ctx2.juzgado === "Juzgado Federal N°2" &&
+    ctx2.destinatario === null
+  ) {
+    pass++;
+    console.log(`  ✔ leerContextoDeRazones contexto parcial OK`);
+  } else {
+    fail++;
+    console.log(`  ✘ leerContextoDeRazones contexto parcial: ${JSON.stringify(ctx2)}`);
+  }
+
+  // Caso 3: fuente "local" → NO debe emitir meta GPT * aunque haya datos
+  const meta3 = razonesMetaDeClasificacion({
+    fuente: "local",
+    clasificacion: "CEDULA",
+    confianza: 0.8,
+    razones: [],
+    texto_detectado: "Cédula...",
+    texto_chars: 100,
+    paginas_enviadas: null,
+    max_pages: null,
+    texto_relevante: null,
+    detalle: null,
+    contexto_detectado: {
+      expediente: "9999/2024",
+      caratula: "Y",
+      juzgado: "Z",
+      destinatario: "W",
+    },
+  });
+  const patrones3 = meta3.map((m) => m.patron);
+  if (!patrones3.some((p) => p.startsWith("GPT "))) {
+    pass++;
+    console.log(`  ✔ fuente 'local' NO emite meta GPT *`);
+  } else {
+    fail++;
+    console.log(`  ✘ fuente 'local' filtró meta GPT *: ${JSON.stringify(patrones3)}`);
+  }
+
+  // Caso 4: razones sin meta GPT (legado)
+  const razonesLegado: RazonClasificacion[] = [
+    { patron: "OFICIO", clasificacion: "OFICIO", peso: 3, pagina: 1 },
+    { patron: "Fuente texto: local", clasificacion: null, peso: 0, pagina: null },
+    { patron: "Texto chars: 1234", clasificacion: null, peso: 0, pagina: null },
+  ];
+  const ctxLegado = leerContextoDeRazones(razonesLegado);
+  if (
+    ctxLegado.expediente === null &&
+    ctxLegado.caratula === null &&
+    ctxLegado.juzgado === null &&
+    ctxLegado.destinatario === null
+  ) {
+    pass++;
+    console.log(`  ✔ razones legadas (sin GPT *) → contexto todo null`);
+  } else {
+    fail++;
+    console.log(`  ✘ razones legadas: contexto=${JSON.stringify(ctxLegado)}`);
+  }
+
+  // Caso 5: razones null/no-array → CONTEXTO_DETECTADO_VACIO
+  const ctxNull = leerContextoDeRazones(null);
+  const ctxString = leerContextoDeRazones("no es array");
+  const ctxNumber = leerContextoDeRazones(42);
+  const todosVacio =
+    JSON.stringify(ctxNull) === JSON.stringify(CONTEXTO_DETECTADO_VACIO) &&
+    JSON.stringify(ctxString) === JSON.stringify(CONTEXTO_DETECTADO_VACIO) &&
+    JSON.stringify(ctxNumber) === JSON.stringify(CONTEXTO_DETECTADO_VACIO);
+  if (todosVacio) {
+    pass++;
+    console.log(`  ✔ razones null/no-array → CONTEXTO_DETECTADO_VACIO`);
+  } else {
+    fail++;
+    console.log(`  ✘ tolerancia a no-array falló`);
+  }
+
+  // leerFuenteDeRazones reconoce 'gpt_vision'
+  const fuenteLeida = leerFuenteDeRazones(meta1);
+  if (fuenteLeida.fuente_texto === "gpt_vision" && fuenteLeida.texto_chars === 42) {
+    pass++;
+    console.log(`  ✔ leerFuenteDeRazones reconoce 'gpt_vision'`);
+  } else {
+    fail++;
+    console.log(
+      `  ✘ leerFuenteDeRazones: fuente=${fuenteLeida.fuente_texto}, chars=${fuenteLeida.texto_chars}`
+    );
+  }
+
+  // total: 4 patrones esperados + round-trip + parcial + parcial round-trip
+  //         + local sin GPT + legado + no-array + fuente gpt_vision = 11
+  return { pass, fail, total: 11 };
+}
+
+function testResolverDatoConPrioridad(): {
+  pass: number;
+  fail: number;
+  total: number;
+} {
+  console.log("");
+  console.log(
+    "[tipo-doc-audit][test] resolverDatoConPrioridad (cedulas > GPT > null)"
+  );
+  let pass = 0;
+  let fail = 0;
+
+  type Case = {
+    name: string;
+    propio: string | null | undefined;
+    gpt: string | null | undefined;
+    expected: { value: string | null; fromGpt: boolean };
+  };
+  const cases: Case[] = [
+    {
+      name: "cedulas tiene expediente → prevalece sobre GPT (fromGpt=false)",
+      propio: "104277/2026",
+      gpt: "999/2099",
+      expected: { value: "104277/2026", fromGpt: false },
+    },
+    {
+      name: "cedulas vacío + GPT con valor → usa GPT (fromGpt=true)",
+      propio: null,
+      gpt: "104277/2026",
+      expected: { value: "104277/2026", fromGpt: true },
+    },
+    {
+      name: 'cedulas "" + GPT con valor → usa GPT',
+      propio: "",
+      gpt: "9999/2024",
+      expected: { value: "9999/2024", fromGpt: true },
+    },
+    {
+      name: "cedulas solo whitespace + GPT con valor → usa GPT",
+      propio: "   ",
+      gpt: "9999/2024",
+      expected: { value: "9999/2024", fromGpt: true },
+    },
+    {
+      name: "ambos null → null fromGpt=false",
+      propio: null,
+      gpt: null,
+      expected: { value: null, fromGpt: false },
+    },
+    {
+      name: "ambos undefined → null",
+      propio: undefined,
+      gpt: undefined,
+      expected: { value: null, fromGpt: false },
+    },
+    {
+      name: "ambos string vacío → null",
+      propio: "",
+      gpt: "",
+      expected: { value: null, fromGpt: false },
+    },
+    {
+      name: "cedulas vacío + GPT whitespace → null",
+      propio: null,
+      gpt: "   ",
+      expected: { value: null, fromGpt: false },
+    },
+    {
+      name: "cedulas con espacios alrededor → trim y prevalece",
+      propio: "  104277/2026  ",
+      gpt: null,
+      expected: { value: "104277/2026", fromGpt: false },
+    },
+    {
+      name: "cedulas con valor + GPT null → cedulas",
+      propio: "ABC",
+      gpt: null,
+      expected: { value: "ABC", fromGpt: false },
+    },
+  ];
+
+  for (const tc of cases) {
+    const got = resolverDatoConPrioridad(tc.propio, tc.gpt);
+    if (got.value === tc.expected.value && got.fromGpt === tc.expected.fromGpt) {
+      pass++;
+      console.log(`  ✔ ${tc.name}`);
+    } else {
+      fail++;
+      console.log(`  ✘ ${tc.name}`);
+      console.log(
+        `     → esperaba ${JSON.stringify(tc.expected)}, obtuve ${JSON.stringify(got)}`
+      );
+    }
+  }
+  return { pass, fail, total: cases.length };
 }
 
 async function run(): Promise<void> {
@@ -1560,6 +2191,13 @@ async function run(): Promise<void> {
   const recOrq = await testRecorteEnOrquestador();
   const metaGpt = testRazonesMetaGptVision();
 
+  // Contexto detectado por GPT (expediente/caratula/juzgado/destinatario)
+  const sanGpt = testSanitizarMetaGpt();
+  const ctxParser = testParsearRespuestaGptVisionContexto();
+  const ctxOrq = await testContextoDetectadoEnOrquestador();
+  const ctxRoundTrip = testRazonesMetaContextoGptRoundTrip();
+  const prioridad = testResolverDatoConPrioridad();
+
   pass +=
     extr.pass +
     fallida.pass +
@@ -1575,7 +2213,12 @@ async function run(): Promise<void> {
     parseGpt.pass +
     orqGpt.pass +
     recOrq.pass +
-    metaGpt.pass;
+    metaGpt.pass +
+    sanGpt.pass +
+    ctxParser.pass +
+    ctxOrq.pass +
+    ctxRoundTrip.pass +
+    prioridad.pass;
   fail +=
     extr.fail +
     fallida.fail +
@@ -1591,7 +2234,12 @@ async function run(): Promise<void> {
     parseGpt.fail +
     orqGpt.fail +
     recOrq.fail +
-    metaGpt.fail;
+    metaGpt.fail +
+    sanGpt.fail +
+    ctxParser.fail +
+    ctxOrq.fail +
+    ctxRoundTrip.fail +
+    prioridad.fail;
   const total =
     TEST_CASES.length +
     extr.total +
@@ -1608,7 +2256,12 @@ async function run(): Promise<void> {
     parseGpt.total +
     orqGpt.total +
     recOrq.total +
-    metaGpt.total;
+    metaGpt.total +
+    sanGpt.total +
+    ctxParser.total +
+    ctxOrq.total +
+    ctxRoundTrip.total +
+    prioridad.total;
 
   console.log("");
   console.log(`[tipo-doc-audit][test] ${pass} OK · ${fail} fallidas · ${total} total`);

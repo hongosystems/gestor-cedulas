@@ -4,6 +4,7 @@ import { getUserFromRequest } from "@/lib/auth-api";
 import {
   AUDIT_MAX_PAGES_DEFAULT,
   AUDIT_MAX_PAGES_MAX,
+  CONTEXTO_DETECTADO_VACIO,
   PDF_AUDIT_DEBUG_TEXT_MAX,
   RAZONES_MAX,
   descargarPdfDesdeStorage,
@@ -15,6 +16,7 @@ import {
   sanitizarTextoParaDebug,
   type CedulaCandidato,
   type ClasificacionResultado,
+  type ContextoDetectado,
   type FuenteTexto,
   type GptVisionClient,
 } from "@/lib/auditoria-tipo-documento-pdf";
@@ -62,6 +64,17 @@ type RunItemResult = {
   juzgado: string | null;
   ocr_destinatario: string | null;
   pdf_path: string | null;
+  /**
+   * Metadatos contextuales detectados por GPT Vision (4 campos opcionales).
+   * Siempre presente en la respuesta; los sub-campos quedan en null si el
+   * modelo no leyó nada o si la fuente no fue GPT.
+   *
+   * La UI usa estos campos como FALLBACK cuando no hay datos en cedulas (con
+   * marca "GPT" visible). Persistencia: cuando dry_run=false, los sub-campos
+   * no-null se guardan dentro de `razones` como meta-razones (sin migración
+   * nueva, sin cambios a la tabla cedulas).
+   */
+  contexto_detectado: ContextoDetectado;
   /**
    * Muestra sanitizada del texto usado para clasificar (máx
    * PDF_AUDIT_DEBUG_TEXT_MAX caracteres). Solo presente cuando el caller pidió
@@ -351,6 +364,7 @@ async function procesarCedula(
       fuente_texto: "sin_texto",
       texto_chars: 0,
       ...ctx,
+      contexto_detectado: { ...CONTEXTO_DETECTADO_VACIO },
       error: "pdf_path vacío",
     };
   }
@@ -375,6 +389,7 @@ async function procesarCedula(
       fuente_texto: "sin_texto",
       texto_chars: 0,
       ...ctx,
+      contexto_detectado: { ...CONTEXTO_DETECTADO_VACIO },
       error: `No se pudo descargar PDF: ${downloadResult.error}`,
     };
   }
@@ -464,6 +479,7 @@ async function procesarCedula(
       texto_chars: clasif.texto_chars,
       ...gptFields,
       ...ctx,
+      contexto_detectado: clasif.contexto_detectado,
       error: null,
       ...debugExtra,
     };
@@ -483,6 +499,7 @@ async function procesarCedula(
       texto_chars: clasif.texto_chars,
       ...gptFields,
       ...ctx,
+      contexto_detectado: clasif.contexto_detectado,
       error: null,
       ...debugExtra,
     };
@@ -521,6 +538,7 @@ async function procesarCedula(
       texto_chars: clasif.texto_chars,
       ...gptFields,
       ...ctx,
+      contexto_detectado: clasif.contexto_detectado,
       error: `Insert audit falló: ${insertErr?.message ?? "desconocido"}`,
     };
   }
@@ -538,6 +556,7 @@ async function procesarCedula(
     texto_chars: clasif.texto_chars,
     ...gptFields,
     ...ctx,
+    contexto_detectado: clasif.contexto_detectado,
     error: null,
   };
 }

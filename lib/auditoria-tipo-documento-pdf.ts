@@ -866,10 +866,14 @@ Respondé SOLO JSON válido con este formato:
   "tipo_documento": "CEDULA" | "OFICIO" | "INDETERMINADO",
   "confianza": number entre 0 y 1,
   "razones": string[],
-  "texto_relevante": string
+  "texto_relevante": string,
+  "expediente": string | null,
+  "caratula": string | null,
+  "juzgado": string | null,
+  "destinatario": string | null
 }
 
-Criterios:
+Criterios de clasificación:
 - CEDULA: cédula de notificación, domicilio, notificación, oficial notificador, zona, traslado, se notifica, cédula ley, constancia de diligenciamiento.
 - OFICIO: oficio judicial, dirigido a banco, hospital, registro, empleador, organismo, director, entidad, pedido de informe, líbrese oficio, mandamiento/oficio dirigido a tercero institucional.
 - INDETERMINADO: si no hay evidencia clara o la imagen no permite leer suficiente.
@@ -881,7 +885,46 @@ Reglas:
 - No clasifiques por metadatos técnicos.
 - Clasificá por contenido visible del documento.
 - Si hay varias páginas, evaluá el conjunto.
-- "texto_relevante" debe ser breve: solo frases o palabras que justifiquen la clasificación, no transcripción completa.`;
+- "texto_relevante" debe ser breve: solo frases o palabras que justifiquen la clasificación, no transcripción completa.
+
+Metadatos contextuales (para revisión humana, NO para clasificar):
+- "expediente": número/identificador del expediente tal como aparece (ej "104277/2026"). Si no se lee, null.
+- "caratula": carátula completa o lo más cercano (ej "TAPIA c/ FORNERO s/ DAÑOS"). Si no se lee, null.
+- "juzgado": juzgado/tribunal interviniente (ej "JUZGADO NACIONAL EN LO CIVIL N° 1"). Si no se lee, null.
+- "destinatario": destinatario del documento (ej "BANCO DE LA NACIÓN ARGENTINA", "Hospital Zubizarreta"). Si no se lee, null.
+
+Reglas para metadatos:
+- No inventes. Si dudás, devolvé null en ese campo.
+- Devolvé exactamente lo que se lee, sin reformular ni acortar arbitrariamente.
+- No incluyas etiquetas como "Expediente:" o "Carátula:" — solo el valor.`;
+
+// ─── Sanitización de campos opcionales del response GPT ──────────────────────
+
+/** Límites de tamaño para metadatos contextuales (defensa en profundidad). */
+export const GPT_META_EXPEDIENTE_MAX = 80;
+export const GPT_META_CARATULA_MAX = 500;
+export const GPT_META_JUZGADO_MAX = 300;
+export const GPT_META_DESTINATARIO_MAX = 400;
+
+/**
+ * Sanitiza un campo opcional string|null del GPT:
+ *  - trim, colapsa espacios.
+ *  - rechaza strings vacíos.
+ *  - rechaza strings sospechosos ("null", "n/a", "-", etc).
+ *  - trunca a `max` chars.
+ *
+ * Cualquier no-string devuelve null.
+ */
+export function sanitizarMetaGpt(raw: unknown, max: number): string | null {
+  if (typeof raw !== "string") return null;
+  const s = raw.replace(/\s+/g, " ").trim();
+  if (s.length === 0) return null;
+  const low = s.toLowerCase();
+  if (low === "null" || low === "n/a" || low === "na" || low === "-" || low === "—" || low === "none") {
+    return null;
+  }
+  return s.length > max ? s.slice(0, max) : s;
+}
 
 // ─── Tipos del cliente Vision ────────────────────────────────────────────────
 
@@ -890,6 +933,19 @@ export type GptVisionRespuesta = {
   confianza: number;
   razones: string[];
   texto_relevante: string;
+  /** Metadatos contextuales detectados por GPT, para revisión humana. Null si no se pudo leer. */
+  expediente: string | null;
+  caratula: string | null;
+  juzgado: string | null;
+  destinatario: string | null;
+};
+
+/** Contexto detectado por GPT Vision (los 4 campos opcionales). */
+export type ContextoDetectado = {
+  expediente: string | null;
+  caratula: string | null;
+  juzgado: string | null;
+  destinatario: string | null;
 };
 
 export type GptVisionResultado =
@@ -1014,6 +1070,10 @@ export function parsearRespuestaGptVision(
       confianza,
       razones,
       texto_relevante,
+      expediente: sanitizarMetaGpt(o.expediente, GPT_META_EXPEDIENTE_MAX),
+      caratula: sanitizarMetaGpt(o.caratula, GPT_META_CARATULA_MAX),
+      juzgado: sanitizarMetaGpt(o.juzgado, GPT_META_JUZGADO_MAX),
+      destinatario: sanitizarMetaGpt(o.destinatario, GPT_META_DESTINATARIO_MAX),
     },
   };
 }
@@ -1045,7 +1105,52 @@ export type ClasificacionAuditoria = {
   texto_relevante: string | null;
   /** Modelo usado (gpt_vision) o descriptor de fuente (local/sin_texto). */
   detalle: string | null;
+  /**
+   * Metadatos contextuales detectados por GPT Vision (cuando aplica).
+   * Cuando fuente != "gpt_vision" o GPT no devolvió campos válidos, los 4
+   * sub-campos quedan en null. Nunca es null el objeto mismo, para simplificar
+   * la UI (siempre puede leer `clas.contexto_detectado.expediente`).
+   */
+  contexto_detectado: ContextoDetectado;
 };
+
+/** Contexto detectado vacío (todos los campos null). Constante reutilizable. */
+export const CONTEXTO_DETECTADO_VACIO: ContextoDetectado = {
+  expediente: null,
+  caratula: null,
+  juzgado: null,
+  destinatario: null,
+};
+
+/**
+ * Resultado de priorizar un dato contextual (expediente/carátula/juzgado/
+ * destinatario) entre el valor propio de `cedulas` y el detectado por GPT.
+ */
+export type ResolucionDato = {
+  value: string | null;
+  fromGpt: boolean;
+};
+
+/**
+ * Resuelve un dato contextual con prioridad:
+ *
+ *   A) `propio` (de cedulas/OCR humano) si no es vacío  → fromGpt=false
+ *   B) `gpt`    (de contexto_detectado)  si propio vacío → fromGpt=true
+ *   C) null si ambos vacíos                              → fromGpt=false
+ *
+ * Whitespace-only se considera vacío en ambos lados. Tipo pure: ideal para
+ * tests y para uso desde la UI sin acoplar a React.
+ */
+export function resolverDatoConPrioridad(
+  propio: string | null | undefined,
+  gpt: string | null | undefined
+): ResolucionDato {
+  const p = typeof propio === "string" ? propio.trim() : "";
+  if (p.length > 0) return { value: p, fromGpt: false };
+  const g = typeof gpt === "string" ? gpt.trim() : "";
+  if (g.length > 0) return { value: g, fromGpt: true };
+  return { value: null, fromGpt: false };
+}
 
 export type ObtenerClasificacionOptions = {
   /** Si true, intenta GPT Vision cuando local no da texto útil. */
@@ -1099,6 +1204,7 @@ export async function obtenerClasificacionAuditoria(
         max_pages: null,
         texto_relevante: null,
         detalle: null,
+        contexto_detectado: { ...CONTEXTO_DETECTADO_VACIO },
       };
     }
     if (!opts.useOcr) {
@@ -1116,6 +1222,7 @@ export async function obtenerClasificacionAuditoria(
         max_pages: null,
         texto_relevante: null,
         detalle: `Texto local no es útil; use_ocr=false`,
+        contexto_detectado: { ...CONTEXTO_DETECTADO_VACIO },
       };
     }
   } else {
@@ -1134,6 +1241,7 @@ export async function obtenerClasificacionAuditoria(
         max_pages: null,
         texto_relevante: null,
         detalle: `Extracción local falló; use_ocr=false`,
+        contexto_detectado: { ...CONTEXTO_DETECTADO_VACIO },
       };
     }
   }
@@ -1155,6 +1263,7 @@ export async function obtenerClasificacionAuditoria(
       max_pages: maxPages,
       texto_relevante: null,
       detalle: "OPENAI_API_KEY no configurada",
+      contexto_detectado: { ...CONTEXTO_DETECTADO_VACIO },
     };
   }
 
@@ -1175,6 +1284,7 @@ export async function obtenerClasificacionAuditoria(
       max_pages: maxPages,
       texto_relevante: null,
       detalle: `pdf-lib: ${recortado.error}`,
+      contexto_detectado: { ...CONTEXTO_DETECTADO_VACIO },
     };
   }
 
@@ -1196,6 +1306,7 @@ export async function obtenerClasificacionAuditoria(
       max_pages: maxPages,
       texto_relevante: null,
       detalle: `GPT Vision: ${gptRes.error}`,
+      contexto_detectado: { ...CONTEXTO_DETECTADO_VACIO },
     };
   }
 
@@ -1222,6 +1333,12 @@ export async function obtenerClasificacionAuditoria(
     max_pages: maxPages,
     texto_relevante: r.texto_relevante,
     detalle: `modelo=${gptRes.modelo}`,
+    contexto_detectado: {
+      expediente: r.expediente,
+      caratula: r.caratula,
+      juzgado: r.juzgado,
+      destinatario: r.destinatario,
+    },
   };
 }
 
@@ -1258,6 +1375,42 @@ export function razonesMetaDeClasificacion(
     if (c.max_pages != null) {
       out.push({
         patron: `Max pages: ${c.max_pages}`,
+        clasificacion: null,
+        peso: 0,
+        pagina: null,
+      });
+    }
+    // Contexto detectado por GPT: lo persistimos como meta-razones para
+    // poder reconstruirlo desde el JSONB (sin migración). Cada campo va con
+    // prefijo "GPT <campo>: <valor>". sanitizarMetaGpt ya truncó las longitudes
+    // razonables, así que estos strings no explotan la fila.
+    if (c.contexto_detectado.expediente) {
+      out.push({
+        patron: `GPT expediente: ${c.contexto_detectado.expediente}`,
+        clasificacion: null,
+        peso: 0,
+        pagina: null,
+      });
+    }
+    if (c.contexto_detectado.caratula) {
+      out.push({
+        patron: `GPT caratula: ${c.contexto_detectado.caratula}`,
+        clasificacion: null,
+        peso: 0,
+        pagina: null,
+      });
+    }
+    if (c.contexto_detectado.juzgado) {
+      out.push({
+        patron: `GPT juzgado: ${c.contexto_detectado.juzgado}`,
+        clasificacion: null,
+        peso: 0,
+        pagina: null,
+      });
+    }
+    if (c.contexto_detectado.destinatario) {
+      out.push({
+        patron: `GPT destinatario: ${c.contexto_detectado.destinatario}`,
         clasificacion: null,
         peso: 0,
         pagina: null,
@@ -1362,8 +1515,12 @@ export function sanitizarTextoParaDebug(
  * Helpers para parsear las razones meta desde un registro persistido.
  * Útil para /list/route.ts y la UI (compatibilidad con razones legadas).
  */
-const RE_FUENTE = /^Fuente texto:\s*(local|ocr|sin_texto)\s*$/i;
+const RE_FUENTE = /^Fuente texto:\s*(local|ocr|gpt_vision|sin_texto)\s*$/i;
 const RE_CHARS = /^Texto chars:\s*(\d+)\s*$/i;
+const RE_GPT_EXPEDIENTE = /^GPT expediente:\s*(.+?)\s*$/i;
+const RE_GPT_CARATULA = /^GPT caratula:\s*(.+?)\s*$/i;
+const RE_GPT_JUZGADO = /^GPT juzgado:\s*(.+?)\s*$/i;
+const RE_GPT_DESTINATARIO = /^GPT destinatario:\s*(.+?)\s*$/i;
 
 export function leerFuenteDeRazones(
   razones: unknown
@@ -1381,7 +1538,7 @@ export function leerFuenteDeRazones(
     const mFuente = RE_FUENTE.exec(r.patron);
     if (mFuente) {
       const v = mFuente[1].toLowerCase();
-      if (v === "local" || v === "ocr" || v === "sin_texto") {
+      if (v === "local" || v === "ocr" || v === "gpt_vision" || v === "sin_texto") {
         fuente_texto = v;
       }
       continue;
@@ -1394,6 +1551,51 @@ export function leerFuenteDeRazones(
   }
 
   return { fuente_texto, texto_chars };
+}
+
+/**
+ * Reconstruye el `contexto_detectado` (los 4 campos opcionales de GPT) desde
+ * el JSONB `razones` persistido por /run. Si las razones no contienen alguno
+ * de los campos meta GPT, ese campo queda en null.
+ *
+ * Es tolerante a:
+ *  - razones que no son array (devuelve todo null).
+ *  - entries inválidos (los ignora).
+ *  - registros viejos sin "GPT *" (todos null).
+ *
+ * Pareja simétrica de `razonesMetaDeClasificacion` para fuente "gpt_vision".
+ */
+export function leerContextoDeRazones(razones: unknown): ContextoDetectado {
+  const out: ContextoDetectado = { ...CONTEXTO_DETECTADO_VACIO };
+  if (!Array.isArray(razones)) return out;
+
+  for (const raw of razones) {
+    if (!raw || typeof raw !== "object") continue;
+    const r = raw as { patron?: unknown };
+    if (typeof r.patron !== "string") continue;
+
+    const mE = RE_GPT_EXPEDIENTE.exec(r.patron);
+    if (mE) {
+      out.expediente = sanitizarMetaGpt(mE[1], GPT_META_EXPEDIENTE_MAX);
+      continue;
+    }
+    const mC = RE_GPT_CARATULA.exec(r.patron);
+    if (mC) {
+      out.caratula = sanitizarMetaGpt(mC[1], GPT_META_CARATULA_MAX);
+      continue;
+    }
+    const mJ = RE_GPT_JUZGADO.exec(r.patron);
+    if (mJ) {
+      out.juzgado = sanitizarMetaGpt(mJ[1], GPT_META_JUZGADO_MAX);
+      continue;
+    }
+    const mD = RE_GPT_DESTINATARIO.exec(r.patron);
+    if (mD) {
+      out.destinatario = sanitizarMetaGpt(mD[1], GPT_META_DESTINATARIO_MAX);
+      continue;
+    }
+  }
+  return out;
 }
 
 /**

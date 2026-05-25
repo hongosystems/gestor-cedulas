@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import {
+  resolverDatoConPrioridad,
+  type ResolucionDato,
+} from "@/lib/auditoria-tipo-documento-pdf";
 
 // =============================================================================
 // Tipos
@@ -19,6 +23,14 @@ type FuenteTexto = "local" | "ocr" | "gpt_vision" | "sin_texto";
 
 type Clasif = "CEDULA" | "OFICIO" | "INDETERMINADO";
 
+/** Metadatos contextuales detectados por GPT Vision (todos opcionales). */
+type ContextoDetectado = {
+  expediente: string | null;
+  caratula: string | null;
+  juzgado: string | null;
+  destinatario: string | null;
+};
+
 /** Item de respuesta de /run. Incluye contexto del expediente. */
 type RunItemResult = {
   cedula_id: string;
@@ -34,13 +46,15 @@ type RunItemResult = {
   paginas_enviadas?: number | null;
   max_pages?: number | null;
   error: string | null;
-  // contexto del expediente
+  // contexto del expediente (datos existentes en cedulas)
   ocr_exp_nro: string | null;
   caratula: string | null;
   ocr_caratula: string | null;
   juzgado: string | null;
   ocr_destinatario: string | null;
   pdf_path: string | null;
+  // contexto detectado por GPT Vision (siempre presente; sub-campos pueden ser null)
+  contexto_detectado: ContextoDetectado;
   // solo en dry_run+debug_text
   debug_text?: string;
   debug_text_chars_originales?: number;
@@ -102,6 +116,7 @@ type AuditRow = {
   mismatch: boolean;
   fuente_texto: FuenteTexto | null;
   texto_chars: number | null;
+  contexto_detectado: ContextoDetectado;
 };
 
 type PreviewBreakdown = {
@@ -112,30 +127,64 @@ type PreviewBreakdown = {
 };
 
 // =============================================================================
-// Helpers de display (NUNCA inventa columnas — usa solo las que existen en cedulas)
+// Helpers de display
+// -----------------------------------------------------------------------------
+// Cada helper devuelve { value, fromGpt }:
+//   - value: string mostrable (puede ser null si no hay nada).
+//   - fromGpt: true si el dato proviene de `contexto_detectado` (GPT Vision)
+//     porque las columnas de `cedulas` estaban vacías. Si vino de cedulas,
+//     false. Si no hay nada, false.
+//
+// Prioridad (orden):
+//   A) datos existentes en cedulas (ocr_* o columna directa)
+//   B) datos detectados por GPT (contexto_detectado.*)
+//   C) null  → la UI muestra "—"
 // =============================================================================
+
+type Meta = ResolucionDato;
 
 function expedienteOf(r: {
   ocr_exp_nro: string | null;
-}): string | null {
-  return r.ocr_exp_nro?.trim() || null;
+  contexto_detectado?: ContextoDetectado | null;
+}): Meta {
+  return resolverDatoConPrioridad(
+    r.ocr_exp_nro,
+    r.contexto_detectado?.expediente ?? null
+  );
 }
 
 function caratulaOf(r: {
   ocr_caratula: string | null;
   caratula: string | null;
-}): string | null {
-  return r.ocr_caratula?.trim() || r.caratula?.trim() || null;
+  contexto_detectado?: ContextoDetectado | null;
+}): Meta {
+  // Para carátula la fuente "propia" tiene dos candidatos (ocr_caratula es el
+  // OCR confiable; caratula es la columna histórica). Si ambos vacíos, cae a GPT.
+  const propio = (r.ocr_caratula?.trim() || r.caratula?.trim()) ?? null;
+  return resolverDatoConPrioridad(
+    propio,
+    r.contexto_detectado?.caratula ?? null
+  );
 }
 
 function destinatarioOf(r: {
   ocr_destinatario: string | null;
-}): string | null {
-  return r.ocr_destinatario?.trim() || null;
+  contexto_detectado?: ContextoDetectado | null;
+}): Meta {
+  return resolverDatoConPrioridad(
+    r.ocr_destinatario,
+    r.contexto_detectado?.destinatario ?? null
+  );
 }
 
-function juzgadoOf(r: { juzgado: string | null }): string | null {
-  return r.juzgado?.trim() || null;
+function juzgadoOf(r: {
+  juzgado: string | null;
+  contexto_detectado?: ContextoDetectado | null;
+}): Meta {
+  return resolverDatoConPrioridad(
+    r.juzgado,
+    r.contexto_detectado?.juzgado ?? null
+  );
 }
 
 function fmtDate(iso: string | null | undefined): string {
@@ -779,16 +828,16 @@ export default function AuditoriaTipoDocumentoPage() {
                               )}
                             </td>
                             <td style={tabNum}>
-                              {expedienteOf(r) || <span className="muted">—</span>}
+                              <MetaValue meta={expedienteOf(r)} />
                             </td>
                             <td style={{ fontWeight: 600, fontSize: 12 }}>
-                              {caratulaOf(r) || <span className="muted">—</span>}
+                              <MetaValue meta={caratulaOf(r)} />
                             </td>
                             <td style={{ fontSize: 12 }}>
-                              {juzgadoOf(r) || <span className="muted">—</span>}
+                              <MetaValue meta={juzgadoOf(r)} />
                             </td>
                             <td style={{ fontSize: 12 }}>
-                              {destinatarioOf(r) || <span className="muted">—</span>}
+                              <MetaValue meta={destinatarioOf(r)} />
                             </td>
                             <td style={{ fontSize: 11, maxWidth: 320 }}>
                               {r.error && (
@@ -993,16 +1042,16 @@ export default function AuditoriaTipoDocumentoPage() {
                                 )}
                             </td>
                             <td style={tabNum}>
-                              {expedienteOf(r) || <span className="muted">—</span>}
+                              <MetaValue meta={expedienteOf(r)} />
                             </td>
                             <td style={{ fontWeight: 600, fontSize: 12 }}>
-                              {caratulaOf(r) || <span className="muted">—</span>}
+                              <MetaValue meta={caratulaOf(r)} />
                             </td>
                             <td style={{ fontSize: 12 }}>
-                              {juzgadoOf(r) || <span className="muted">—</span>}
+                              <MetaValue meta={juzgadoOf(r)} />
                             </td>
                             <td style={{ fontSize: 12 }}>
-                              {destinatarioOf(r) || <span className="muted">—</span>}
+                              <MetaValue meta={destinatarioOf(r)} />
                             </td>
                             <td>
                               {r.razones && r.razones.length > 0 ? (
@@ -1259,5 +1308,50 @@ function MismatchTag() {
     >
       ⚠ INCONSISTENCIA
     </div>
+  );
+}
+
+/**
+ * Pequeña marca visual "GPT" que se muestra al lado de un valor cuando éste
+ * provino de `contexto_detectado` (GPT Vision) y no de las columnas de cedulas.
+ * Sirve para que el revisor entienda de un vistazo que es un dato detectado
+ * automáticamente, no validado humanamente ni almacenado en cedulas.
+ */
+function GptMark() {
+  return (
+    <span
+      title="Detectado automáticamente por GPT Vision; no está en cedulas. Validar antes de confiar."
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        marginLeft: 6,
+        padding: "1px 5px",
+        borderRadius: 4,
+        background: "rgba(217,70,239,.18)",
+        border: "1px solid rgba(217,70,239,.45)",
+        color: "rgba(245,208,254,.96)",
+        fontSize: 9,
+        fontWeight: 700,
+        letterSpacing: 0.5,
+        verticalAlign: "middle",
+      }}
+    >
+      GPT
+    </span>
+  );
+}
+
+/**
+ * Renderiza un valor contextual (expediente/caratula/juzgado/destinatario)
+ * aplicando el resultado de los helpers `*Of`. Si no hay valor → "—". Si vino
+ * de GPT, agrega la marca visual.
+ */
+function MetaValue({ meta }: { meta: Meta }) {
+  if (!meta.value) return <span className="muted">—</span>;
+  return (
+    <>
+      <span>{meta.value}</span>
+      {meta.fromGpt && <GptMark />}
+    </>
   );
 }

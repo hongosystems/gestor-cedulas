@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseService } from "@/lib/supabase-server";
 import { getUserFromRequest } from "@/lib/auth-api";
 import {
+  leerContextoDeRazones,
   leerFuenteDeRazones,
   requireSuperadmin,
 } from "@/lib/auditoria-tipo-documento-pdf";
@@ -88,6 +89,9 @@ export async function GET(req: NextRequest) {
     // Derivar fuente_texto / texto_chars desde las razones meta. Para registros
     // legados (pre-OCR) será { fuente_texto: null, texto_chars: null }.
     const meta = leerFuenteDeRazones(r.razones);
+    // Reconstruir contexto detectado por GPT desde las razones meta. Para
+    // registros legados (pre-GPT) será { todos null }.
+    const contextoDetectado = leerContextoDeRazones(r.razones);
     return {
       id: r.id,
       cedula_id: r.cedula_id,
@@ -110,6 +114,7 @@ export async function GET(req: NextRequest) {
       mismatch,
       fuente_texto: meta.fuente_texto,
       texto_chars: meta.texto_chars,
+      contexto_detectado: contextoDetectado,
     };
   });
 
