@@ -180,6 +180,25 @@ async function procesarOcrEnBackground(cedulaId: string, svc: ReturnType<typeof 
       return;
     }
 
+    // Defensa secundaria: nunca elegir endpoint Railway con tipo_documento inválido.
+    const tipoValido = ["CEDULA", "OFICIO"].includes(
+      String(cedula.tipo_documento || "").trim().toUpperCase()
+    );
+    if (!tipoValido) {
+      console.warn("[tipo-doc-guard] bloqueo OCR por tipo_documento inválido", {
+        cedulaId,
+        tipo_documento: cedula.tipo_documento,
+      });
+      await svc
+        .from("cedulas")
+        .update({
+          estado_ocr: "error",
+          ocr_error: "tipo_documento inválido o vacío",
+        })
+        .eq("id", cedulaId);
+      return;
+    }
+
     // 2. Descargar PDF desde Supabase Storage
     const { data: fileData, error: downloadErr } = await svc.storage
       .from("cedulas")
@@ -368,6 +387,30 @@ export async function POST(
   if (!cedula.pdf_path) {
     return NextResponse.json(
       { error: "La cédula no tiene archivo PDF asociado" },
+      { status: 400 }
+    );
+  }
+
+  // Guard: el endpoint Railway (/procesar vs /procesar-oficio) se decide
+  // EXCLUSIVAMENTE por tipo_documento. Sin un valor válido no clasificamos
+  // como CEDULA por default: bloqueamos y persistimos error explícito.
+  const tipoValido = ["CEDULA", "OFICIO"].includes(
+    String(cedula.tipo_documento || "").trim().toUpperCase()
+  );
+  if (!tipoValido) {
+    console.warn("[tipo-doc-guard] bloqueo OCR por tipo_documento inválido", {
+      cedulaId,
+      tipo_documento: cedula.tipo_documento,
+    });
+    await svc
+      .from("cedulas")
+      .update({
+        estado_ocr: "error",
+        ocr_error: "tipo_documento inválido o vacío",
+      })
+      .eq("id", cedulaId);
+    return NextResponse.json(
+      { error: "tipo_documento inválido o vacío" },
       { status: 400 }
     );
   }

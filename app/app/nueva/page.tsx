@@ -442,8 +442,9 @@ export default function NuevaCedulaPage() {
 
       const uid = session.user.id;
 
-      // 1) Crear cédula (fecha_carga, vencimiento automático y tipo_documento si existe la columna)
-      const baseInsertData: any = {
+      // 1) Crear cédula (fecha_carga, vencimiento automático y tipo_documento explícito)
+      // No hay fallback que persista sin tipo_documento: jamás insertar NULL.
+      const insertData: any = {
         owner_user_id: uid,
         caratula: caratula.trim(),
         juzgado: juzgado.trim() || null,
@@ -452,36 +453,24 @@ export default function NuevaCedulaPage() {
         estado: "NUEVA",
         pdf_path: null,
         created_by_user_id: uid,                    // ✅ guarda quién creó la cédula
+        tipo_documento: tipoDocumento,
       };
-      
-      // Intentar insertar con tipo_documento primero
-      let insertData = { ...baseInsertData };
-      insertData.tipo_documento = tipoDocumento;
-      
-      let { data: created, error: insErr } = await supabase
+
+      const { data: created, error: insErr } = await supabase
         .from("cedulas")
         .insert(insertData)
         .select("id")
         .single();
-      
-      // Si falla porque la columna tipo_documento no existe, reintentar sin ella
-      if (insErr && (insErr.message?.includes("tipo_documento") || insErr.message?.includes("schema cache"))) {
-        const { data: createdRetry, error: insErrRetry } = await supabase
-          .from("cedulas")
-          .insert(baseInsertData)
-          .select("id")
-          .single();
-        
-        if (insErrRetry || !createdRetry?.id) {
-          setMsg(insErrRetry?.message || "No se pudo crear la cédula.");
-          return;
-        }
-        created = createdRetry;
-        insErr = null;
-      }
 
       if (insErr || !created?.id) {
-        setMsg(insErr?.message || "No se pudo crear la cédula.");
+        const errMsg = insErr?.message || "";
+        const esErrorTipoDoc =
+          errMsg.includes("tipo_documento") || errMsg.includes("schema cache");
+        setMsg(
+          esErrorTipoDoc
+            ? "No se pudo guardar tipo_documento"
+            : errMsg || "No se pudo crear la cédula."
+        );
         return;
       }
 

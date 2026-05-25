@@ -52,8 +52,14 @@ function fmtDate(iso: string | null | undefined) {
   return `${dd}/${mm}/${yy} ${hh}:${min}`;
 }
 
-function getTipoLabel(tipo: CedulaDiligenciamiento["tipo_documento"]) {
-  return tipo === "OFICIO" ? "OFICIO" : "CEDULA";
+function getTipoLabel(tipo: CedulaDiligenciamiento["tipo_documento"]): string {
+  if (tipo === "OFICIO") return "OFICIO";
+  if (tipo === "CEDULA") return "CEDULA";
+  return "Sin definir";
+}
+
+function isTipoSinDefinir(tipo: CedulaDiligenciamiento["tipo_documento"]): boolean {
+  return tipo !== "CEDULA" && tipo !== "OFICIO";
 }
 
 function Spinner({ size = 14 }: { size?: number }) {
@@ -212,9 +218,11 @@ export default function DiligenciamientoPage() {
     let r = [...cedulas];
     if (filters.tipo_documento) {
       if (filters.tipo_documento === "CEDULA") {
-        r = r.filter((c) => !c.tipo_documento || c.tipo_documento === "CEDULA");
+        r = r.filter((c) => c.tipo_documento === "CEDULA");
       } else if (filters.tipo_documento === "OFICIO") {
         r = r.filter((c) => c.tipo_documento === "OFICIO");
+      } else if (filters.tipo_documento === "SIN_DEFINIR") {
+        r = r.filter((c) => isTipoSinDefinir(c.tipo_documento));
       }
     }
     if (filters.juzgado) {
@@ -642,6 +650,7 @@ export default function DiligenciamientoPage() {
                     options={[
                       { value: "CEDULA", label: "CEDULA" },
                       { value: "OFICIO", label: "OFICIO" },
+                      { value: "SIN_DEFINIR", label: "Sin definir" },
                     ]}
                     activeFilter={filters.tipo_documento}
                     onFilter={(v) => setFilter("tipo_documento", v)}
@@ -688,6 +697,11 @@ export default function DiligenciamientoPage() {
                     <tr key={item.id}>
                       <td>
                         <span
+                          title={
+                            isTipoSinDefinir(item.tipo_documento)
+                              ? "tipo_documento sin definir — requiere revisión"
+                              : undefined
+                          }
                           style={{
                             display: "inline-flex",
                             alignItems: "center",
@@ -698,15 +712,21 @@ export default function DiligenciamientoPage() {
                             border:
                               item.tipo_documento === "OFICIO"
                                 ? "1px solid rgba(168,85,247,.45)"
-                                : "1px solid rgba(59,130,246,.45)",
+                                : item.tipo_documento === "CEDULA"
+                                  ? "1px solid rgba(59,130,246,.45)"
+                                  : "1px solid rgba(245,158,11,.55)",
                             background:
                               item.tipo_documento === "OFICIO"
                                 ? "rgba(168,85,247,.18)"
-                                : "rgba(59,130,246,.18)",
+                                : item.tipo_documento === "CEDULA"
+                                  ? "rgba(59,130,246,.18)"
+                                  : "rgba(245,158,11,.18)",
                             color:
                               item.tipo_documento === "OFICIO"
                                 ? "rgba(243,232,255,.96)"
-                                : "rgba(219,234,254,.96)",
+                                : item.tipo_documento === "CEDULA"
+                                  ? "rgba(219,234,254,.96)"
+                                  : "rgba(254,243,199,.97)",
                             fontSize: 11,
                             fontWeight: 700,
                             letterSpacing: 0.3,
