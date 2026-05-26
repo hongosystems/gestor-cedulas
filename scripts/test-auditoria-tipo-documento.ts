@@ -57,6 +57,10 @@ import {
   type OcrClient,
   type RazonClasificacion,
 } from "../lib/auditoria-tipo-documento-pdf";
+import {
+  extraerDestinatarioOficio,
+  extraerDestinatarioOficioDePaginas,
+} from "../lib/oficio-destinatario";
 
 type TestCase = {
   name: string;
@@ -2150,6 +2154,362 @@ function testResolverDatoConPrioridad(): {
   return { pass, fail, total: cases.length };
 }
 
+function testExtraerDestinatarioOficio(): {
+  pass: number;
+  fail: number;
+  total: number;
+} {
+  console.log("");
+  console.log(
+    "[tipo-doc-audit][test] extraerDestinatarioOficio (heurística regex)"
+  );
+  let pass = 0;
+  let fail = 0;
+
+  type Case = {
+    name: string;
+    input: string;
+    expected: string | null;
+  };
+
+  const cases: Case[] = [
+    {
+      name: "HOSPITAL DE TRAUMA FEDERICO ABETE (todo mayúsculas, dirección 'Miraflores 123')",
+      input:
+        "Al SR. DIRECTOR del\nHOSPITAL DE TRAUMA FEDERICO ABETE\nMiraflores 123",
+      expected: "HOSPITAL DE TRAUMA FEDERICO ABETE",
+    },
+    {
+      name: "Hospital Diego Thompson (mayúsculas/minúsculas preservadas)",
+      input:
+        "Al SR. DIRECTOR del\nHospital Diego Thompson\nAvellaneda 2131",
+      expected: "Hospital Diego Thompson",
+    },
+    {
+      name: "UPA de Jose C Paz (con 'de la' como conector)",
+      input: "Al SR. DIRECTOR de la\nUPA de Jose C Paz\nLamas 123",
+      expected: "UPA de Jose C Paz",
+    },
+    {
+      name: "POLICLINICO CENTRAL SAN JUSTO (dos líneas concatenadas, sin dirección)",
+      input: "Al SR. DIRECTOR DEL\nPOLICLINICO CENTRAL\nSAN JUSTO",
+      expected: "POLICLINICO CENTRAL SAN JUSTO",
+    },
+    {
+      name: "texto sin destinatario → null",
+      input: "Líbrese oficio al Banco de la Nación. Fecha: 12/03/2024.",
+      expected: null,
+    },
+    {
+      name: "texto vacío → null",
+      input: "",
+      expected: null,
+    },
+    {
+      name: "solo prefijo sin contenido institucional → null",
+      input: "Al SR. DIRECTOR del\nAv. Mitre 1234",
+      expected: null,
+    },
+    {
+      name: "variante 'Al Señor Director' + Hospital",
+      input: "Al Señor Director\nHOSPITAL ITALIANO\nCalle Falsa 123",
+      expected: "HOSPITAL ITALIANO",
+    },
+    {
+      name: "destinatario rodeado de texto judicial irrelevante",
+      input:
+        "VISTOS: el expediente.\n\nAl SR. DIRECTOR del\nBANCO DE LA NACIÓN ARGENTINA\nProvincia de Buenos Aires\n\nNotifíquese.",
+      expected: "BANCO DE LA NACIÓN ARGENTINA",
+    },
+    {
+      name: "espacios dobles y saltos colapsados",
+      input: "Al SR. DIRECTOR del\n   HOSPITAL    ZUBIZARRETA   \nCalle 456",
+      expected: "HOSPITAL ZUBIZARRETA",
+    },
+    {
+      name: "código postal corta el bloque",
+      input: "Al SR. DIRECTOR del\nINSTITUTO MEDICO X\nB1650 San Martín",
+      expected: "INSTITUTO MEDICO X",
+    },
+    {
+      name: "stop por 'Buenos Aires'",
+      input:
+        "Al SR. DIRECTOR del\nHOSPITAL CHURRUCA VISCA\nBuenos Aires Capital",
+      expected: "HOSPITAL CHURRUCA VISCA",
+    },
+  ];
+
+  for (const tc of cases) {
+    const got = extraerDestinatarioOficio(tc.input);
+    if (got === tc.expected) {
+      pass++;
+      console.log(`  ✔ ${tc.name}`);
+    } else {
+      fail++;
+      console.log(`  ✘ ${tc.name}`);
+      console.log(`     → esperaba ${JSON.stringify(tc.expected)}, obtuve ${JSON.stringify(got)}`);
+    }
+  }
+  return { pass, fail, total: cases.length };
+}
+
+function testExtraerDestinatarioOficioDePaginas(): {
+  pass: number;
+  fail: number;
+  total: number;
+} {
+  console.log("");
+  console.log(
+    "[tipo-doc-audit][test] extraerDestinatarioOficioDePaginas (prioridad 2→1→3)"
+  );
+  let pass = 0;
+  let fail = 0;
+
+  type Case = {
+    name: string;
+    paginas: string[];
+    expected: string | null;
+  };
+
+  const PAG_HOSPITAL_TRAUMA =
+    "Al SR. DIRECTOR del\nHOSPITAL DE TRAUMA FEDERICO ABETE\nMiraflores 123";
+  const PAG_DIEGO_THOMPSON =
+    "Al SR. DIRECTOR del\nHospital Diego Thompson\nAvellaneda 2131";
+  const PAG_UPA =
+    "Al SR. DIRECTOR de la\nUPA de Jose C Paz\nLamas 123";
+  const PAG_SIN_DESTINATARIO =
+    "Texto judicial cualquiera sin patrón de destinatario.";
+
+  const cases: Case[] = [
+    {
+      name: "página 2 trae destinatario → se prefiere (idx 1)",
+      paginas: [PAG_SIN_DESTINATARIO, PAG_HOSPITAL_TRAUMA, PAG_DIEGO_THOMPSON],
+      expected: "HOSPITAL DE TRAUMA FEDERICO ABETE",
+    },
+    {
+      name: "página 2 sin match → fallback a página 1",
+      paginas: [PAG_DIEGO_THOMPSON, PAG_SIN_DESTINATARIO, PAG_UPA],
+      expected: "Hospital Diego Thompson",
+    },
+    {
+      name: "páginas 1 y 2 sin match → fallback a página 3",
+      paginas: [PAG_SIN_DESTINATARIO, PAG_SIN_DESTINATARIO, PAG_UPA],
+      expected: "UPA de Jose C Paz",
+    },
+    {
+      name: "ninguna página trae destinatario → null",
+      paginas: [PAG_SIN_DESTINATARIO, PAG_SIN_DESTINATARIO, PAG_SIN_DESTINATARIO],
+      expected: null,
+    },
+    {
+      name: "array vacío → null",
+      paginas: [],
+      expected: null,
+    },
+    {
+      name: "solo página 2 disponible → la usa",
+      paginas: [PAG_SIN_DESTINATARIO, PAG_HOSPITAL_TRAUMA],
+      expected: "HOSPITAL DE TRAUMA FEDERICO ABETE",
+    },
+    {
+      name: "página 1 con match y resto vacío → usa página 1",
+      paginas: [PAG_DIEGO_THOMPSON, "", ""],
+      expected: "Hospital Diego Thompson",
+    },
+    {
+      name: "página 4+ se ignora aunque tenga destinatario",
+      paginas: [
+        PAG_SIN_DESTINATARIO,
+        PAG_SIN_DESTINATARIO,
+        PAG_SIN_DESTINATARIO,
+        PAG_HOSPITAL_TRAUMA,
+      ],
+      expected: null,
+    },
+  ];
+
+  for (const tc of cases) {
+    const got = extraerDestinatarioOficioDePaginas(tc.paginas);
+    if (got === tc.expected) {
+      pass++;
+      console.log(`  ✔ ${tc.name}`);
+    } else {
+      fail++;
+      console.log(`  ✘ ${tc.name}`);
+      console.log(`     → esperaba ${JSON.stringify(tc.expected)}, obtuve ${JSON.stringify(got)}`);
+    }
+  }
+  return { pass, fail, total: cases.length };
+}
+
+async function testDestinatarioOficioEnOrquestador(): Promise<{
+  pass: number;
+  fail: number;
+  total: number;
+}> {
+  console.log("");
+  console.log(
+    "[tipo-doc-audit][test] orquestador: destinatario OFICIO sobreescribe GPT cuando hay match"
+  );
+  let pass = 0;
+  let fail = 0;
+
+  const buf = await pdfSinteticoConPaginas(1);
+
+  // Caso A: GPT clasifica OFICIO y texto_relevante TRAE el patrón → override.
+  const clientA = makeGptClient(
+    async (): Promise<GptVisionResultado> => ({
+      ok: true,
+      modelo: "mock-gpt",
+      respuesta: {
+        tipo_documento: "OFICIO",
+        confianza: 0.9,
+        razones: ["líbrese oficio"],
+        texto_relevante:
+          "OFICIO\nAl SR. DIRECTOR del\nHOSPITAL DE TRAUMA FEDERICO ABETE\nMiraflores 123\nLíbrese.",
+        expediente: "104277/2026",
+        caratula: "EXP s/ DAÑOS",
+        juzgado: "Juzgado Nacional Civil N°1",
+        // GPT detecta algo distinto (o pobre): el helper debe sobrescribir.
+        destinatario: "Director del Hospital",
+      },
+    })
+  );
+  const resA = await obtenerClasificacionAuditoria(buf, {
+    useOcr: true,
+    gptClient: clientA,
+  });
+  const checksA: Array<{ name: string; ok: boolean }> = [
+    { name: "fuente='gpt_vision'", ok: resA.fuente === "gpt_vision" },
+    { name: "clasificacion='OFICIO'", ok: resA.clasificacion === "OFICIO" },
+    {
+      name: "destinatario sobreescrito por helper = 'HOSPITAL DE TRAUMA FEDERICO ABETE'",
+      ok: resA.contexto_detectado.destinatario === "HOSPITAL DE TRAUMA FEDERICO ABETE",
+    },
+    {
+      name: "otros campos contexto preservados (expediente)",
+      ok: resA.contexto_detectado.expediente === "104277/2026",
+    },
+  ];
+  for (const c of checksA) {
+    if (c.ok) {
+      pass++;
+      console.log(`  ✔ override OK: ${c.name}`);
+    } else {
+      fail++;
+      console.log(`  ✘ override OK: ${c.name}`);
+      console.log(`     → contexto=${JSON.stringify(resA.contexto_detectado)}`);
+    }
+  }
+
+  // Caso B: GPT clasifica OFICIO pero texto_relevante NO trae patrón → preserva
+  // el destinatario que GPT ya devolvió (lógica previa).
+  const clientB = makeGptClient(
+    async (): Promise<GptVisionResultado> => ({
+      ok: true,
+      modelo: "mock-gpt",
+      respuesta: {
+        tipo_documento: "OFICIO",
+        confianza: 0.85,
+        razones: ["oficio judicial"],
+        texto_relevante: "OFICIO sin prefijos de destinatario en el texto.",
+        expediente: null,
+        caratula: null,
+        juzgado: null,
+        destinatario: "Banco de la Nación Argentina",
+      },
+    })
+  );
+  const resB = await obtenerClasificacionAuditoria(buf, {
+    useOcr: true,
+    gptClient: clientB,
+  });
+  if (resB.contexto_detectado.destinatario === "Banco de la Nación Argentina") {
+    pass++;
+    console.log(
+      `  ✔ helper sin match: preserva destinatario GPT 'Banco de la Nación Argentina'`
+    );
+  } else {
+    fail++;
+    console.log(
+      `  ✘ helper sin match: destinatario=${JSON.stringify(resB.contexto_detectado.destinatario)}`
+    );
+  }
+
+  // Caso C: GPT clasifica CEDULA → el helper NO se aplica aunque el texto traiga
+  // el patrón. Preservamos el destinatario que GPT haya devuelto.
+  const clientC = makeGptClient(
+    async (): Promise<GptVisionResultado> => ({
+      ok: true,
+      modelo: "mock-gpt",
+      respuesta: {
+        tipo_documento: "CEDULA",
+        confianza: 0.95,
+        razones: ["se notifica"],
+        texto_relevante:
+          "CÉDULA. Al SR. DIRECTOR del HOSPITAL X (texto irrelevante en cédula).",
+        expediente: null,
+        caratula: null,
+        juzgado: null,
+        destinatario: null,
+      },
+    })
+  );
+  const resC = await obtenerClasificacionAuditoria(buf, {
+    useOcr: true,
+    gptClient: clientC,
+  });
+  if (
+    resC.clasificacion === "CEDULA" &&
+    resC.contexto_detectado.destinatario === null
+  ) {
+    pass++;
+    console.log(`  ✔ CEDULA: helper NO se aplica, destinatario sigue null`);
+  } else {
+    fail++;
+    console.log(
+      `  ✘ CEDULA: clasif=${resC.clasificacion}, destinatario=${JSON.stringify(resC.contexto_detectado.destinatario)}`
+    );
+  }
+
+  // Caso D: GPT clasifica INDETERMINADO → no se aplica heurística.
+  const clientD = makeGptClient(
+    async (): Promise<GptVisionResultado> => ({
+      ok: true,
+      modelo: "mock-gpt",
+      respuesta: {
+        tipo_documento: "INDETERMINADO",
+        confianza: 0.5,
+        razones: ["dudoso"],
+        texto_relevante:
+          "Texto ambiguo. Al SR. DIRECTOR del Hospital X (no debe aplicarse).",
+        expediente: null,
+        caratula: null,
+        juzgado: null,
+        destinatario: null,
+      },
+    })
+  );
+  const resD = await obtenerClasificacionAuditoria(buf, {
+    useOcr: true,
+    gptClient: clientD,
+  });
+  if (
+    resD.clasificacion === "INDETERMINADO" &&
+    resD.contexto_detectado.destinatario === null
+  ) {
+    pass++;
+    console.log(`  ✔ INDETERMINADO: helper NO se aplica`);
+  } else {
+    fail++;
+    console.log(
+      `  ✘ INDETERMINADO: clasif=${resD.clasificacion}, destinatario=${JSON.stringify(resD.contexto_detectado.destinatario)}`
+    );
+  }
+
+  return { pass, fail, total: checksA.length + 3 };
+}
+
 async function run(): Promise<void> {
   let pass = 0;
   let fail = 0;
@@ -2198,6 +2558,11 @@ async function run(): Promise<void> {
   const ctxRoundTrip = testRazonesMetaContextoGptRoundTrip();
   const prioridad = testResolverDatoConPrioridad();
 
+  // Heurística específica de destinatario para OFICIOS
+  const destinatarioPuro = testExtraerDestinatarioOficio();
+  const destinatarioPaginas = testExtraerDestinatarioOficioDePaginas();
+  const destinatarioOrq = await testDestinatarioOficioEnOrquestador();
+
   pass +=
     extr.pass +
     fallida.pass +
@@ -2218,7 +2583,10 @@ async function run(): Promise<void> {
     ctxParser.pass +
     ctxOrq.pass +
     ctxRoundTrip.pass +
-    prioridad.pass;
+    prioridad.pass +
+    destinatarioPuro.pass +
+    destinatarioPaginas.pass +
+    destinatarioOrq.pass;
   fail +=
     extr.fail +
     fallida.fail +
@@ -2239,7 +2607,10 @@ async function run(): Promise<void> {
     ctxParser.fail +
     ctxOrq.fail +
     ctxRoundTrip.fail +
-    prioridad.fail;
+    prioridad.fail +
+    destinatarioPuro.fail +
+    destinatarioPaginas.fail +
+    destinatarioOrq.fail;
   const total =
     TEST_CASES.length +
     extr.total +
@@ -2261,7 +2632,10 @@ async function run(): Promise<void> {
     ctxParser.total +
     ctxOrq.total +
     ctxRoundTrip.total +
-    prioridad.total;
+    prioridad.total +
+    destinatarioPuro.total +
+    destinatarioPaginas.total +
+    destinatarioOrq.total;
 
   console.log("");
   console.log(`[tipo-doc-audit][test] ${pass} OK · ${fail} fallidas · ${total} total`);

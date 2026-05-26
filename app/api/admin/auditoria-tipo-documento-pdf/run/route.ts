@@ -9,6 +9,7 @@ import {
   RAZONES_MAX,
   descargarPdfDesdeStorage,
   fetchCandidatosAuditoriaPdf,
+  fetchCedulaIdsYaAuditados,
   obtenerClasificacionAuditoria,
   parsearMaxPages,
   razonesMetaDeClasificacion,
@@ -35,6 +36,15 @@ type RunBody = {
   use_ocr?: boolean;
   debug_text?: boolean;
   max_pages?: number;
+  /**
+   * Si false (default), las cédulas con al menos una fila en
+   * `cedulas_tipo_documento_pdf_audit` son excluidas del lote. Si true,
+   * se permite reprocesarlas explícitamente (útil para reauditar tras
+   * cambios en el clasificador). El filtro respeta `ids[]`: si se pasa
+   * `ids` explícito y `include_already_audited=false`, los ya auditados
+   * dentro de `ids` también se excluyen.
+   */
+  include_already_audited?: boolean;
 };
 
 type RunItemResult = {
@@ -117,6 +127,7 @@ async function parseRunParams(req: NextRequest): Promise<{
   useOcr: boolean;
   debugText: boolean;
   maxPages: number;
+  includeAlreadyAudited: boolean;
   ids?: string[];
 }> {
   const url = req.nextUrl.searchParams;
@@ -126,6 +137,10 @@ async function parseRunParams(req: NextRequest): Promise<{
   let useOcr = parseBool(url.get("use_ocr"), false);
   let debugText = parseBool(url.get("debug_text"), false);
   let maxPages = parsearMaxPages(url.get("max_pages"));
+  let includeAlreadyAudited = parseBool(
+    url.get("include_already_audited"),
+    false
+  );
   let ids = parseIds(url.get("ids"));
 
   try {
@@ -138,13 +153,24 @@ async function parseRunParams(req: NextRequest): Promise<{
       if ("use_ocr" in body) useOcr = parseBool(body.use_ocr, false);
       if ("debug_text" in body) debugText = parseBool(body.debug_text, false);
       if ("max_pages" in body) maxPages = parsearMaxPages(body.max_pages);
+      if ("include_already_audited" in body)
+        includeAlreadyAudited = parseBool(body.include_already_audited, false);
       if ("ids" in body) ids = parseIds(body.ids);
     }
   } catch {
     /* body vacío o no JSON: usar query */
   }
 
-  return { limit, dryRun, onlyMismatches, useOcr, debugText, maxPages, ids };
+  return {
+    limit,
+    dryRun,
+    onlyMismatches,
+    useOcr,
+    debugText,
+    maxPages,
+    includeAlreadyAudited,
+    ids,
+  };
 }
 
 function calcularMismatch(
@@ -191,8 +217,16 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { limit, dryRun, onlyMismatches, useOcr, debugText, maxPages, ids } =
-    await parseRunParams(req);
+  const {
+    limit,
+    dryRun,
+    onlyMismatches,
+    useOcr,
+    debugText,
+    maxPages,
+    includeAlreadyAudited,
+    ids,
+  } = await parseRunParams(req);
 
   // Guarda: debug_text solo se honra cuando dry_run=true. Esto preserva la
   // promesa de "nunca se persiste". El acceso a este endpoint ya está
@@ -209,6 +243,7 @@ export async function POST(req: NextRequest) {
     debugText,
     debugTextEfectivo,
     maxPages,
+    includeAlreadyAudited,
     idsCount: ids?.length ?? 0,
   });
 
@@ -233,9 +268,57 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Set de cedula_id que YA tienen al menos una fila en
+  // cedulas_tipo_documento_pdf_audit. Lectura única por request.
+  const yaAuditadosRes = await fetchCedulaIdsYaAuditados(svc);
+  if (!yaAuditadosRes.ok) {
+    console.error(
+      "[tipo-doc-audit][run] error al listar IDs ya auditados:",
+      yaAuditadosRes.error
+    );
+    return NextResponse.json(
+      {
+        error: "Error al listar IDs ya auditados",
+        details: yaAuditadosRes.error,
+      },
+      { status: 500 }
+    );
+  }
+  const yaAuditadosIds = yaAuditadosRes.ids;
+
   // Sólo procesamos los que tienen pdf_path. Sin PDF no hay nada que clasificar.
   const conPdf = fetchResult.candidatos.filter((c) => !!c.pdf_path?.trim());
-  const lote = conPdf.slice(0, limit);
+
+  // Conteo de cuántos del universo con-PDF ya están auditados (informativo).
+  const yaAuditadasEnUniverso = conPdf.filter((c) =>
+    yaAuditadosIds.has(c.id)
+  ).length;
+
+  // Filtro principal: si include_already_audited=false (default), excluir los
+  // ya auditados; si true, no filtrar.
+  const universo = includeAlreadyAudited
+    ? conPdf
+    : conPdf.filter((c) => !yaAuditadosIds.has(c.id));
+
+  // Cuando include_already_audited=false, ya_auditadas_excluidas = los que
+  // quedaron fuera del lote por estar auditados. Cuando es true, 0 (nada se
+  // excluyó por este filtro).
+  const yaAuditadasExcluidas = includeAlreadyAudited ? 0 : yaAuditadasEnUniverso;
+
+  // Ordenamiento estable: no-auditados primero (tie-breaker útil cuando
+  // include_already_audited=true), después por id ASC para que dos runs con
+  // los mismos datos elijan el mismo lote (regla 7).
+  universo.sort((a, b) => {
+    const auditedA = yaAuditadosIds.has(a.id) ? 1 : 0;
+    const auditedB = yaAuditadosIds.has(b.id) ? 1 : 0;
+    if (auditedA !== auditedB) return auditedA - auditedB;
+    if (a.id < b.id) return -1;
+    if (a.id > b.id) return 1;
+    return 0;
+  });
+
+  const pendientesReales = universo.length;
+  const lote = universo.slice(0, limit);
   const resultados: RunItemResult[] = [];
 
   for (const cedula of lote) {
@@ -270,6 +353,9 @@ export async function POST(req: NextRequest) {
     dryRun,
     useOcr,
     maxPages,
+    includeAlreadyAudited,
+    yaAuditadasEnUniverso,
+    pendientesReales,
   });
 
   return NextResponse.json({
@@ -279,6 +365,7 @@ export async function POST(req: NextRequest) {
     use_ocr: useOcr,
     debug_text: debugTextEfectivo,
     max_pages: maxPages,
+    include_already_audited: includeAlreadyAudited,
     generated_at: new Date().toISOString(),
     nota: dryRun
       ? "dry_run=true: se clasificaron PDFs pero NO se insertó en cedulas_tipo_documento_pdf_audit. Enviar dry_run=false para persistir."
@@ -294,10 +381,13 @@ export async function POST(req: NextRequest) {
       max_pages_max: AUDIT_MAX_PAGES_MAX,
       max_pages_default: AUDIT_MAX_PAGES_DEFAULT,
       limit_max: LIMIT_MAX,
+      include_already_audited: includeAlreadyAudited,
     },
     universo_con_pdf: conPdf.length,
+    ya_auditadas_excluidas: yaAuditadasExcluidas,
+    pendientes_reales: pendientesReales,
     procesados_en_esta_llamada: lote.length,
-    pendientes_restantes: Math.max(0, conPdf.length - lote.length),
+    pendientes_restantes: Math.max(0, pendientesReales - lote.length),
     exitosos,
     fallidos,
     inconsistencias,

@@ -20,7 +20,11 @@ export const runtime = "nodejs";
  * Query params:
  *   - only_mismatches=true → filtra a aquellos donde tipo_documento_actual != clasificacion_pdf
  *     (y excluye INDETERMINADO).
- *   - limit (default 100, max 500)
+ *   - mostrar_historial_completo (default false): por defecto se devuelve
+ *     SOLO la última auditoría de cada `cedula_id` (la de `created_at` más
+ *     reciente). Si true, se devuelven todas las filas (historial completo).
+ *     No se borra nada en ningún caso.
+ *   - limit (default 100, max 500). Se aplica DESPUÉS del dedupe.
  */
 export async function GET(req: NextRequest) {
   const user = await getUserFromRequest(req);
@@ -38,9 +42,16 @@ export async function GET(req: NextRequest) {
 
   const url = req.nextUrl.searchParams;
   const onlyMismatches = url.get("only_mismatches") === "true";
+  const mostrarHistorialCompleto =
+    url.get("mostrar_historial_completo") === "true";
   const limitRaw = parseInt(url.get("limit") ?? "100", 10);
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 500) : 100;
 
+  // Trae un cap razonable de filas DESC; el dedupe por cedula_id (cuando
+  // mostrar_historial_completo=false) ocurre en memoria, y el limit final se
+  // aplica DESPUÉS del dedupe para que el caller siempre vea hasta `limit`
+  // cédulas distintas, no `limit` filas crudas.
+  const RAW_FETCH_CAP = 5000;
   const { data, error } = await svc
     .from("cedulas_tipo_documento_pdf_audit")
     .select(
@@ -48,7 +59,7 @@ export async function GET(req: NextRequest) {
         "cedulas:cedulas!cedulas_tipo_documento_pdf_audit_cedula_id_fkey(caratula, ocr_caratula, juzgado, ocr_exp_nro, ocr_destinatario, pdf_path, estado_ocr, pjn_cargado_at, tipo_documento)"
     )
     .order("created_at", { ascending: false })
-    .limit(limit);
+    .limit(RAW_FETCH_CAP);
 
   if (error) {
     console.error("[tipo-doc-audit][list] error:", error.message);
@@ -118,13 +129,38 @@ export async function GET(req: NextRequest) {
     };
   });
 
-  const filtrados = onlyMismatches ? rows.filter((r) => r.mismatch) : rows;
+  // Dedupe por cedula_id: como `rows` viene en orden created_at DESC, la
+  // primera ocurrencia de cada `cedula_id` es la más reciente. Conservar solo
+  // ésa cuando mostrar_historial_completo=false. Nunca se borra nada en DB.
+  let despuesDeDedupe: typeof rows;
+  if (mostrarHistorialCompleto) {
+    despuesDeDedupe = rows;
+  } else {
+    const vistos = new Set<string>();
+    despuesDeDedupe = [];
+    for (const r of rows) {
+      if (vistos.has(r.cedula_id)) continue;
+      vistos.add(r.cedula_id);
+      despuesDeDedupe.push(r);
+    }
+  }
+
+  const filtrados = onlyMismatches
+    ? despuesDeDedupe.filter((r) => r.mismatch)
+    : despuesDeDedupe;
+
+  const conLimit = filtrados.slice(0, limit);
 
   return NextResponse.json({
     ok: true,
     generated_at: new Date().toISOString(),
-    total: filtrados.length,
+    total: conLimit.length,
+    total_sin_limit: filtrados.length,
+    total_filas_raw: rows.length,
+    truncado_por_cap: rows.length >= RAW_FETCH_CAP,
+    cedulas_distintas: new Set(despuesDeDedupe.map((r) => r.cedula_id)).size,
     only_mismatches: onlyMismatches,
-    rows: filtrados,
+    mostrar_historial_completo: mostrarHistorialCompleto,
+    rows: conLimit,
   });
 }

@@ -66,6 +66,7 @@ type RunResponse = {
   use_ocr: boolean;
   debug_text: boolean;
   max_pages: number;
+  include_already_audited: boolean;
   generated_at: string;
   nota: string;
   parametros: {
@@ -78,8 +79,13 @@ type RunResponse = {
     max_pages_max: number;
     max_pages_default: number;
     limit_max: number;
+    include_already_audited: boolean;
   };
   universo_con_pdf: number;
+  /** Cuántas cédulas con PDF ya tenían auditoría (excluidas por filtro). */
+  ya_auditadas_excluidas: number;
+  /** Cuántas cédulas quedan pendientes tras aplicar el filtro de ya-auditadas. */
+  pendientes_reales: number;
   procesados_en_esta_llamada: number;
   pendientes_restantes: number;
   exitosos: number;
@@ -266,6 +272,11 @@ export default function AuditoriaTipoDocumentoPage() {
   const [runUseOcr, setRunUseOcr] = useState<boolean>(true);
   const [runDryRun, setRunDryRun] = useState<boolean>(true);
   const [runDebugText, setRunDebugText] = useState<boolean>(false);
+  // Default OFF: por defecto se ignoran las cédulas ya auditadas para no
+  // re-procesarlas. ON sólo cuando el operador quiere reauditar
+  // explícitamente.
+  const [runIncludeAlreadyAudited, setRunIncludeAlreadyAudited] =
+    useState<boolean>(false);
   const [running, setRunning] = useState<boolean>(false);
 
   // ── último run ──────────────────────────────────────────────────────────
@@ -280,6 +291,10 @@ export default function AuditoriaTipoDocumentoPage() {
   const [filterOnlyMismatches, setFilterOnlyMismatches] = useState<boolean>(false);
   const [filterClasif, setFilterClasif] = useState<"todos" | Clasif>("todos");
   const [filterFuente, setFilterFuente] = useState<"todas" | FuenteTexto>("todas");
+  // Default OFF: la lista muestra una sola fila por cédula (la última
+  // auditoría). ON expone todo el historial sin borrar nada.
+  const [mostrarHistorialCompleto, setMostrarHistorialCompleto] =
+    useState<boolean>(false);
 
   // ── mensajes ────────────────────────────────────────────────────────────
   const [msg, setMsg] = useState<string>("");
@@ -297,28 +312,53 @@ export default function AuditoriaTipoDocumentoPage() {
     return { Authorization: `Bearer ${token}` };
   }, [token]);
 
-  const cargarPersistidos = useCallback(async () => {
-    const headers = authHeaders();
-    if (!headers) return;
-    setReloadingList(true);
-    try {
-      const res = await fetch("/api/admin/auditoria-tipo-documento-pdf/list", { headers });
-      if (res.ok) {
-        const j = await res.json();
-        setRows((j.rows ?? []) as AuditRow[]);
-      } else {
-        const j = await res.json().catch(() => ({} as { error?: string }));
+  const cargarPersistidos = useCallback(
+    async (opts?: { historialCompleto?: boolean }) => {
+      const headers = authHeaders();
+      if (!headers) return;
+      // Permitimos override puntual del toggle para los cambios on-toggle
+      // (donde el estado React aún no se actualizó). Si no se pasa, usamos el
+      // estado actual.
+      const historialCompleto =
+        opts?.historialCompleto ?? mostrarHistorialCompleto;
+      setReloadingList(true);
+      try {
+        const qs = new URLSearchParams();
+        qs.set(
+          "mostrar_historial_completo",
+          historialCompleto ? "true" : "false"
+        );
+        const res = await fetch(
+          `/api/admin/auditoria-tipo-documento-pdf/list?${qs.toString()}`,
+          { headers }
+        );
+        if (res.ok) {
+          const j = await res.json();
+          setRows((j.rows ?? []) as AuditRow[]);
+        } else {
+          const j = await res.json().catch(() => ({} as { error?: string }));
+          setMsgOk(false);
+          setMsg(j?.error || "Error al cargar lista persistida");
+        }
+      } catch (e: unknown) {
         setMsgOk(false);
-        setMsg(j?.error || "Error al cargar lista persistida");
+        const m = e instanceof Error ? e.message : String(e);
+        setMsg(`Error de red al cargar lista: ${m}`);
+      } finally {
+        setReloadingList(false);
       }
-    } catch (e: unknown) {
-      setMsgOk(false);
-      const m = e instanceof Error ? e.message : String(e);
-      setMsg(`Error de red al cargar lista: ${m}`);
-    } finally {
-      setReloadingList(false);
-    }
-  }, [authHeaders]);
+    },
+    [authHeaders, mostrarHistorialCompleto]
+  );
+
+  const onToggleHistorialCompleto = useCallback(
+    (v: boolean) => {
+      setMostrarHistorialCompleto(v);
+      // Refresca con el valor nuevo sin esperar al re-render del estado.
+      void cargarPersistidos({ historialCompleto: v });
+    },
+    [cargarPersistidos]
+  );
 
   // ────────────────────────────────────────────────────────────────────────
   // Bootstrap: sesión + rol + carga inicial.
@@ -358,12 +398,17 @@ export default function AuditoriaTipoDocumentoPage() {
 
       // Llamadas iniciales con el token recién obtenido (no esperamos al
       // re-render con setToken para evitar carrera con las versiones
-      // memoizadas de cargarPreview/cargarPersistidos).
+      // memoizadas de cargarPreview/cargarPersistidos). `list` se pide con
+      // mostrar_historial_completo=false (default UI) para que la grilla
+      // arranque mostrando solo la última auditoría por cédula.
       const headers: HeadersInit = { Authorization: `Bearer ${accessToken}` };
       try {
         const [previewRes, listRes] = await Promise.all([
           fetch("/api/admin/auditoria-tipo-documento-pdf/preview", { headers }),
-          fetch("/api/admin/auditoria-tipo-documento-pdf/list", { headers }),
+          fetch(
+            "/api/admin/auditoria-tipo-documento-pdf/list?mostrar_historial_completo=false",
+            { headers }
+          ),
         ]);
         if (previewRes.ok) {
           const j = await previewRes.json();
@@ -445,6 +490,7 @@ export default function AuditoriaTipoDocumentoPage() {
         use_ocr: runUseOcr,
         debug_text: dryRun ? runDebugText : false,
         max_pages: runMaxPages,
+        include_already_audited: runIncludeAlreadyAudited,
       };
       const res = await fetch("/api/admin/auditoria-tipo-documento-pdf/run", {
         method: "POST",
@@ -463,10 +509,20 @@ export default function AuditoriaTipoDocumentoPage() {
       setLastRun(data);
       setMsgOk(true);
       if (dryRun) {
-        setMsg(`Prueba ejecutada (${data.procesados_en_esta_llamada} procesados, ${data.inconsistencias} inconsistencias, ${data.por_fuente_texto.gpt_vision} via GPT Vision). No se guardó nada.`);
+        const yaAuditadasMsg = data.ya_auditadas_excluidas > 0
+          ? `, ${data.ya_auditadas_excluidas} ya auditadas excluidas`
+          : "";
+        setMsg(
+          `Prueba ejecutada (${data.procesados_en_esta_llamada} procesados, ${data.inconsistencias} inconsistencias, ${data.por_fuente_texto.gpt_vision} via GPT Vision${yaAuditadasMsg}). No se guardó nada.`
+        );
       } else {
         const conAuditId = data.resultados.filter((r) => r.audit_id).length;
-        setMsg(`Auditoría guardada: ${conAuditId} registros persistidos en cedulas_tipo_documento_pdf_audit. No se modificaron cédulas, Storage, PJN ni flujos productivos.`);
+        const yaAuditadasMsg = data.ya_auditadas_excluidas > 0
+          ? ` (${data.ya_auditadas_excluidas} ya auditadas excluidas)`
+          : "";
+        setMsg(
+          `Auditoría guardada: ${conAuditId} registros persistidos en cedulas_tipo_documento_pdf_audit${yaAuditadasMsg}. No se modificaron cédulas, Storage, PJN ni flujos productivos.`
+        );
         await cargarPersistidos();
       }
     } catch (e: unknown) {
@@ -674,6 +730,20 @@ export default function AuditoriaTipoDocumentoPage() {
                   label={runDebugText ? "ON" : "OFF"}
                 />
               </Field>
+
+              {/* include_already_audited */}
+              <Field label="Incluir ya auditadas">
+                <Checkbox
+                  checked={runIncludeAlreadyAudited}
+                  onChange={setRunIncludeAlreadyAudited}
+                  disabled={running}
+                  label={
+                    runIncludeAlreadyAudited
+                      ? "ON — reauditará cédulas ya con audit"
+                      : "OFF — saltea ya auditadas"
+                  }
+                />
+              </Field>
             </div>
 
             {/* Botones */}
@@ -761,7 +831,15 @@ export default function AuditoriaTipoDocumentoPage() {
                 <StatBox label="Exitosos" value={lastRun.exitosos} />
                 <StatBox label="Fallidos" value={lastRun.fallidos} />
                 <StatBox label="Inconsistencias" value={lastRun.inconsistencias} />
-                <StatBox label="Pendientes" value={lastRun.pendientes_restantes} />
+                <StatBox
+                  label="Pendientes reales"
+                  value={lastRun.pendientes_reales}
+                />
+                <StatBox
+                  label="Ya auditadas excluidas"
+                  value={lastRun.ya_auditadas_excluidas}
+                />
+                <StatBox label="Pendientes restantes" value={lastRun.pendientes_restantes} />
                 <StatBox label="Universo c/PDF" value={lastRun.universo_con_pdf} />
                 <StatBox label="GPT Vision" value={lastRun.por_fuente_texto.gpt_vision} />
                 <StatBox label="Local" value={lastRun.por_fuente_texto.local} />
@@ -916,7 +994,9 @@ export default function AuditoriaTipoDocumentoPage() {
               <button
                 type="button"
                 className="btn"
-                onClick={cargarPersistidos}
+                onClick={() => {
+                  void cargarPersistidos();
+                }}
                 disabled={reloadingList}
                 style={{ fontSize: 12, padding: "5px 10px" }}
               >
@@ -935,6 +1015,18 @@ export default function AuditoriaTipoDocumentoPage() {
                   onChange={(e) => setFilterOnlyMismatches(e.target.checked)}
                 />
                 Solo inconsistencias
+              </label>
+              <label
+                style={inlineLabel}
+                title="OFF: una fila por cédula (la última auditoría). ON: historial completo, sin borrar nada."
+              >
+                <input
+                  type="checkbox"
+                  checked={mostrarHistorialCompleto}
+                  onChange={(e) => onToggleHistorialCompleto(e.target.checked)}
+                  disabled={reloadingList}
+                />
+                Mostrar historial completo
               </label>
               <label style={inlineLabel}>
                 Tipo detectado:

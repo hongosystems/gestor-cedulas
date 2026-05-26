@@ -1,5 +1,9 @@
 import { supabaseService } from "@/lib/supabase-server";
 import { parseVisionOcrJson } from "@/lib/vision-json-repair";
+import {
+  extraerDestinatarioOficio,
+  extraerDestinatarioOficioDePaginas,
+} from "@/lib/oficio-destinatario";
 
 /**
  * Helper compartido por:
@@ -1193,6 +1197,21 @@ export async function obtenerClasificacionAuditoria(
     const charsLocal = local.texto_concatenado.trim().length;
     if (esTextoJudicialUtil(local.texto_concatenado)) {
       const clas = clasificarTextoPdf({ paginas: local.paginas });
+      // Si el clasificador local detectó OFICIO, aplicamos la heurística
+      // específica para extraer el destinatario institucional (página 2 →
+      // 1 → 3). Solo lo agregamos si pasa el sanitizador.
+      let contextoLocal: ContextoDetectado = { ...CONTEXTO_DETECTADO_VACIO };
+      if (clas.clasificacion === "OFICIO") {
+        const dest = extraerDestinatarioOficioDePaginas(local.paginas);
+        const destSan = sanitizarMetaGpt(dest, GPT_META_DESTINATARIO_MAX);
+        if (destSan) {
+          console.log(
+            "[tipo-doc-audit] destinatario extraido:",
+            JSON.stringify(destSan)
+          );
+          contextoLocal = { ...contextoLocal, destinatario: destSan };
+        }
+      }
       return {
         fuente: "local",
         clasificacion: clas.clasificacion,
@@ -1204,7 +1223,7 @@ export async function obtenerClasificacionAuditoria(
         max_pages: null,
         texto_relevante: null,
         detalle: null,
-        contexto_detectado: { ...CONTEXTO_DETECTADO_VACIO },
+        contexto_detectado: contextoLocal,
       };
     }
     if (!opts.useOcr) {
@@ -1319,6 +1338,28 @@ export async function obtenerClasificacionAuditoria(
     pagina: null,
   }));
 
+  // Si GPT clasificó OFICIO, intentamos mejorar el destinatario aplicando la
+  // heurística regex sobre `texto_relevante` (que GPT devuelve concatenado).
+  // El helper retorna null cuando no encuentra patrón → preservamos el
+  // destinatario original de GPT (lógica previa).
+  let contextoGpt: ContextoDetectado = {
+    expediente: r.expediente,
+    caratula: r.caratula,
+    juzgado: r.juzgado,
+    destinatario: r.destinatario,
+  };
+  if (r.tipo_documento === "OFICIO") {
+    const dest = extraerDestinatarioOficio(r.texto_relevante);
+    const destSan = sanitizarMetaGpt(dest, GPT_META_DESTINATARIO_MAX);
+    if (destSan) {
+      console.log(
+        "[tipo-doc-audit] destinatario extraido:",
+        JSON.stringify(destSan)
+      );
+      contextoGpt = { ...contextoGpt, destinatario: destSan };
+    }
+  }
+
   return {
     fuente: "gpt_vision",
     clasificacion: r.tipo_documento,
@@ -1333,12 +1374,7 @@ export async function obtenerClasificacionAuditoria(
     max_pages: maxPages,
     texto_relevante: r.texto_relevante,
     detalle: `modelo=${gptRes.modelo}`,
-    contexto_detectado: {
-      expediente: r.expediente,
-      caratula: r.caratula,
-      juzgado: r.juzgado,
-      destinatario: r.destinatario,
-    },
+    contexto_detectado: contextoGpt,
   };
 }
 
@@ -1796,6 +1832,33 @@ export async function fetchCandidatosAuditoriaPdf(
   }
 
   return { ok: true, candidatos: (data ?? []) as CedulaCandidato[] };
+}
+
+/**
+ * Devuelve el conjunto de `cedula_id` que ya tienen al menos una fila en
+ * `cedulas_tipo_documento_pdf_audit`. Se usa para evitar re-procesar las
+ * mismas cédulas en ejecuciones consecutivas del orquestador.
+ *
+ * Solo lectura. No modifica `cedulas` ni la tabla de auditoría.
+ *
+ * @returns Set de UUIDs de cedulas auditadas, o error de SELECT.
+ */
+export async function fetchCedulaIdsYaAuditados(
+  svc: ReturnType<typeof supabaseService>
+): Promise<{ ok: true; ids: Set<string> } | { ok: false; error: string }> {
+  const { data, error } = await svc
+    .from("cedulas_tipo_documento_pdf_audit")
+    .select("cedula_id");
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+
+  const ids = new Set<string>();
+  for (const row of (data ?? []) as { cedula_id: string | null }[]) {
+    if (row.cedula_id) ids.add(row.cedula_id);
+  }
+  return { ok: true, ids };
 }
 
 // =============================================================================
