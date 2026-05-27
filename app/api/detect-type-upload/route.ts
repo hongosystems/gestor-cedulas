@@ -231,6 +231,16 @@ export async function POST(req: Request) {
         });
       }
 
+      // Railway extrajo exp/carátula pero el tipo es ambiguo: no defaultear CEDULA.
+      if (!rail.tipo && (rail.expNro || rail.caratula)) {
+        return NextResponse.json({
+          tipo: textHint ?? localTipo,
+          autoDetected: false,
+          expNro: rail.expNro,
+          caratula: rail.caratula,
+        });
+      }
+
       return NextResponse.json({
         tipo: textHint ?? localTipo,
         autoDetected: false,

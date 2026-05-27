@@ -22,13 +22,23 @@ const soloCedula = resolveTipoFromRailwayAttempts(
 );
 assert(soloCedula?.tipo === "OFICIO", "solo /procesar + hint OFICIO → OFICIO");
 
-// Sin hint → CEDULA (cédula real)
+// Sin hint → no asumir tipo (usuario elige); conservar exp/carátula
 const soloCedulaSinHint = resolveTipoFromRailwayAttempts(
   { ok: true, expNro: "1/2024", caratula: "X", tipoDocumento: null },
   empty,
   null
 );
-assert(soloCedulaSinHint?.tipo === "CEDULA", "solo /procesar sin hint → CEDULA");
+assert(soloCedulaSinHint?.tipo === null, "solo /procesar sin hint → tipo null");
+assert(soloCedulaSinHint?.autoDetected === false, "solo /procesar sin hint → no auto");
+assert(soloCedulaSinHint?.expNro === "1/2024", "solo /procesar sin hint → conserva exp");
+
+// Con hint CEDULA explícito → CEDULA
+const soloCedulaConHint = resolveTipoFromRailwayAttempts(
+  { ok: true, expNro: "2/2024", caratula: "Y", tipoDocumento: null },
+  empty,
+  "CEDULA"
+);
+assert(soloCedulaConHint?.tipo === "CEDULA", "solo /procesar + hint CEDULA → CEDULA");
 
 // Ambos OK → OFICIO por defecto
 const ambos = resolveTipoFromRailwayAttempts(

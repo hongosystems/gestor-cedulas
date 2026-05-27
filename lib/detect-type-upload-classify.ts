@@ -60,7 +60,8 @@ function headerToTipo(header: string | null | undefined): DocTipo | null {
 }
 
 export type RailwayResolved = {
-  tipo: DocTipo;
+  /** null = Railway extrajo datos pero el tipo no es confiable; el usuario debe elegir. */
+  tipo: DocTipo | null;
   autoDetected: boolean;
   expNro: string | null;
   caratula: string | null;
@@ -90,16 +91,26 @@ export function resolveTipoFromRailwayAttempts(
   }
 
   if (ced.ok && !ofi.ok) {
-    const tipo: DocTipo =
-      headerCed ??
-      (textHint === "OFICIO"
-        ? "OFICIO"
-        : textHint === "CEDULA"
-          ? "CEDULA"
-          : "CEDULA");
+    if (headerCed) {
+      return {
+        tipo: headerCed,
+        autoDetected: true,
+        expNro: ced.expNro,
+        caratula: ced.caratula,
+      };
+    }
+    if (textHint === "OFICIO" || textHint === "CEDULA") {
+      return {
+        tipo: textHint,
+        autoDetected: true,
+        expNro: ced.expNro,
+        caratula: ced.caratula,
+      };
+    }
+    // Sin header ni hint: no asumir CEDULA (oficios escaneados suelen caer acá).
     return {
-      tipo,
-      autoDetected: true,
+      tipo: null,
+      autoDetected: false,
       expNro: ced.expNro,
       caratula: ced.caratula,
     };
