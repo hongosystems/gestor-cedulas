@@ -166,7 +166,63 @@ Flujo:
 
 **Endpoint:** `app/api/cedulas/[id]/procesar-ocr/route.ts`
 
-### 4.8 Prueba/Pericia y órdenes médicas
+### 4.8 OCR oficio histórico (reproceso batch)
+
+**Contexto:** registros antiguos clasificados como `CEDULA` que en realidad eran `OFICIO` fueron reclasificados (`cedulas_tipo_documento_audit` con motivo `bug_historico_oficios_presentados_como_cedulas`). Para esos casos hay que re-extraer destinatario/expediente/carátula vía OCR sin alterar el flujo PJN ya cumplido.
+
+**Restricciones operativas (no negociables):**
+
+- **No** se modifica `pjn_cargado_at`, `estado_ocr` ni `pdf_acredita_url`.
+- Solo se actualizan `ocr_destinatario`, `ocr_exp_nro` (si estaba vacío), `ocr_caratula` (si estaba vacía) y `ocr_error: null`.
+- Solo superadmin puede ejecutar (`requireSuperadmin`).
+
+**Endpoints:**
+
+- `app/api/admin/ocr-oficio-historico/preview/route.ts` — dry-run del universo de candidatos.
+- `app/api/admin/ocr-oficio-historico/run/route.ts` — ejecución real (`limit` máx. 5, default 3; `dry_run=true` por defecto).
+
+**Library compartida:** `lib/ocr-oficio-historico.ts`
+
+- `fetchCandidatosOcrOficioHistorico` — universo: audit aplicado + `tipo_documento=OFICIO` + `estado_ocr=listo` + `pjn_cargado_at NOT NULL` + `ocr_destinatario` vacío.
+- `invocarProcesarOficio(pdfBuffer, railwayUrl)` — POST a `${RAILWAY_OCR_URL}/procesar-oficio` con `FormData`. El `Buffer` se convierte a `ArrayBuffer` real (slice por `byteOffset`/`byteLength`) antes del `Blob` para compatibilidad con tipos de `BlobPart` en Node 22+.
+- `buildPatchOcrOficioHistorico(cedula, headers)` — valida destinatario antes de armar el patch. Si falla devuelve `{ error, validation_error }` y **no se hace UPDATE**.
+
+#### Validación de `ocr_destinatario` (hardening)
+
+Helper público: `isValidDestinatarioOCR(value: string): boolean` (acompañado por `getDestinatarioOcrValidationError` para diagnósticos).
+
+Reglas (en orden) — si alguna falla, se rechaza y se devuelve `validation_error`:
+
+| # | Regla | Rechazo |
+|---|-------|---------|
+| 1 | No vacío | `null` o solo espacios |
+| 2 | Longitud | `> 180` caracteres (`DESTINATARIO_OCR_MAX_LENGTH`) |
+| 3 | Sin frases de cuerpo judicial | "Se hace saber", "Notifíquese", "Firmado electrónicamente", "deberá enviarse", "beneficio de litigar", "correo electrónico" (case-insensitive) |
+| 4 | Saltos de línea | `> 3` `\n` |
+
+**Motivación:** un registro real (`392ea72e-46e2-4f47-9bfa-1c283018badf`) tomó 939 caracteres de un proveído como destinatario. La validación corta ese tipo de salidas antes de persistir.
+
+**Comportamiento ante rechazo:**
+
+- No se ejecuta `update` en `cedulas`.
+- La respuesta del ítem queda `ok: false` con `validation_error` (motivo concreto) y `error` (mensaje legible).
+- Log: `[ocr-oficio-historico/run] Validación destinatario rechazada { id, validation_error, destinatario_length }`.
+
+**Registros ya correctos:** el filtro de candidatos exige `ocr_destinatario` vacío; los registros con destinatario válido no entran al batch. Para reprocesar uno con destinatario corrupto hay que limpiarlo manualmente primero.
+
+### 4.9 Reiteratorios
+
+**UI:** `app/reiteratorios/page.tsx`  
+Universo: oficios cargados en PJN hace ≥ 14 días que requieren reiteración. Filtro UI: `tipo_documento=OFICIO` + `estado_ocr=listo` + `pjn_cargado_at NOT NULL`.
+
+**Endpoints:**
+
+- `app/api/reiteratorios/[id]/presentar/route.ts` — presenta reiteratorio.
+- `app/api/reiteratorios/diagnostico/route.ts` — diagnóstico del universo, exclusiones por etapa y muestras (ver `docs/auditoria-tipo-documento-reiteratorios.md`).
+
+**Relación con 4.8:** el flujo histórico re-pobla `ocr_destinatario` para que esos registros pasen el chequeo de campos requeridos al presentar reiteratorio.
+
+### 4.10 Prueba/Pericia y órdenes médicas
 
 **UI:** `app/prueba-pericia/page.tsx` (feature flag `NEXT_PUBLIC_FEATURE_ORDENES_SEGUIMIENTO`)
 
@@ -292,6 +348,13 @@ Todas las rutas del módulo deben incluir `is_admin_ordenes_medicas` donde apliq
 - `/api/diligenciamiento`
 - `/api/diligenciamiento/[id]/cargar-pjn`
 - `/api/open-file`
+- `/api/admin/ocr-oficio-historico/preview` (superadmin, dry-run)
+- `/api/admin/ocr-oficio-historico/run` (superadmin, batch real con validación)
+
+### Reiteratorios
+
+- `/api/reiteratorios/[id]/presentar`
+- `/api/reiteratorios/diagnostico`
 
 ### Expedientes / PJN data
 
@@ -423,8 +486,16 @@ Todas las rutas del módulo deben incluir `is_admin_ordenes_medicas` donde apliq
 - `app/api/open-file/route.ts`
 - `app/prueba-pericia/page.tsx`
 - `app/api/ordenes-medicas/upload/route.ts`
+- `app/api/admin/ocr-oficio-historico/preview/route.ts`
+- `app/api/admin/ocr-oficio-historico/run/route.ts`
+- `app/api/reiteratorios/[id]/presentar/route.ts`
+- `app/api/reiteratorios/diagnostico/route.ts`
+- `app/reiteratorios/page.tsx`
+- `lib/ocr-oficio-historico.ts` (helpers de validación `isValidDestinatarioOCR`, `getDestinatarioOcrValidationError`)
 - `migrations/add_admin_ordenes_medicas.sql`
+- `migrations/audit_reclasificar_tipo_documento_oficio.sql`
 - `docs/ordenes-seguimiento-mvp.md`
+- `docs/auditoria-tipo-documento-reiteratorios.md`
 - `lib/auth-api.ts`
 - `lib/supabase.ts`
 - `lib/supabase-server.ts`

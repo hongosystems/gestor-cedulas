@@ -1,41 +1,19 @@
 import { NextResponse } from "next/server";
 import mammoth from "mammoth";
 import { getUserFromRequest } from "@/lib/auth-api";
+import {
+  clasificarTipoDesdePdfBuffer,
+  detectTipoFromPageTexts,
+  normalizePdfTextChunk,
+  resolveTipoFromRailwayAttempts,
+  type DocTipo,
+  type RailwayTryResult,
+} from "@/lib/detect-type-upload-classify";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-/** Páginas en las que se busca “CEDULA” / “OFICIO” en la heurística local (texto embebido). */
 const PDF_CLASSIFY_MAX_PAGES = 4;
-
-function normalizePdfTextChunk(s: string): string {
-  return s
-    .replace(/\u00A0/g, " ")
-    .replace(/\r/g, "")
-    .replace(/\n+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toUpperCase();
-}
-
-/**
- * Por cada página (en orden), decide si hay señal de OFICIO o CÉDULA.
- * OFICIO tiene prioridad si en la misma página aparecen ambas coincidencias.
- */
-function detectTipoFromPageTexts(pageTexts: string[]): "CEDULA" | "OFICIO" | null {
-  for (const raw of pageTexts) {
-    const n = normalizePdfTextChunk(raw);
-    if (!n) continue;
-
-    const hasOficio = /\bOFICIO\b/.test(n);
-    const hasCedula =
-      /\bCEDULA\b/.test(n) || /\bCEDULA\s+DE\s+NOTIFICACION\b/.test(n);
-
-    if (hasOficio) return "OFICIO";
-    if (hasCedula) return "CEDULA";
-  }
-  return null;
-}
 
 async function extractPdfPageTextsFirstN(buf: Buffer, maxPages: number): Promise<string[]> {
   const { PDFParse } = await import("pdf-parse");
@@ -48,7 +26,7 @@ async function extractPdfPageTextsFirstN(buf: Buffer, maxPages: number): Promise
   }
 }
 
-async function detectTipoLocalFromPdfBuffer(buf: Buffer, fileName: string): Promise<"CEDULA" | "OFICIO" | null> {
+async function detectTipoLocalFromPdfBuffer(buf: Buffer, fileName: string): Promise<DocTipo | null> {
   const name = fileName.toLowerCase();
   try {
     const pageTexts = await extractPdfPageTextsFirstN(buf, PDF_CLASSIFY_MAX_PAGES);
@@ -61,15 +39,11 @@ async function detectTipoLocalFromPdfBuffer(buf: Buffer, fileName: string): Prom
   const nameUpper = name.toUpperCase();
   if (/OFICIO/i.test(nameUpper)) return "OFICIO";
   if (/CEDULA/i.test(nameUpper)) return "CEDULA";
-  /* PDFs generados por PJN suelen nombrarse acredita-*.pdf (diligenciamiento de oficio) */
   if (/^acredita-/.test(name)) return "OFICIO";
   return null;
 }
 
-/**
- * Heurística local (texto embebido PDF páginas 1–4 / DOCX / nombre de archivo).
- */
-async function detectTipoLocalFromFile(file: File): Promise<"CEDULA" | "OFICIO" | null> {
+async function detectTipoLocalFromFile(file: File): Promise<DocTipo | null> {
   const name = (file.name || "").toLowerCase();
   const ext = name.split(".").pop() || "";
 
@@ -95,10 +69,10 @@ async function detectTipoLocalFromFile(file: File): Promise<"CEDULA" | "OFICIO" 
       const normalizedText = normalizePdfTextChunk(text);
       const first500 = normalizedText.substring(0, 500);
       const hasCedula =
-        /\bCEDULA\b/i.test(first500) || /\bCEDULA\s+DE\s+NOTIFICACION\b/i.test(first500);
+        /\bCEDULA\b/.test(first500) || /\bCEDULA\s+DE\s+NOTIFICACION\b/.test(first500);
       const first200 = normalizedText.substring(0, 200);
       const startsWithOficio =
-        /^\s*OFICIO\b/i.test(normalizedText) || /\bOFICIO\b/i.test(first200);
+        /^\s*OFICIO\b/.test(normalizedText) || /\bOFICIO\b/.test(first200);
       if (startsWithOficio) return "OFICIO";
       if (hasCedula) return "CEDULA";
       return null;
@@ -116,13 +90,6 @@ async function detectTipoLocalFromFile(file: File): Promise<"CEDULA" | "OFICIO" 
     return null;
   }
 }
-
-type RailwayTryResult = {
-  ok: boolean;
-  expNro: string | null;
-  caratula: string | null;
-  tipoDocumento: string | null;
-};
 
 async function tryRailwayEndpoint(
   base: string,
@@ -175,11 +142,14 @@ async function tryRailwayEndpoint(
 }
 
 /**
- * POST /procesar primero (tipo vía X-Tipo-Documento); si falla, POST /procesar-oficio como respaldo.
- * Éxito = respuesta OK y header X-Exp-Nro no vacío (misma convención que procesar-ocr).
+ * Invoca /procesar y /procesar-oficio en paralelo y resuelve el tipo sin asumir
+ * CEDULA cuando solo el endpoint de cédula responde OK.
  */
-async function railwayClassifyPdf(buffer: Buffer): Promise<{
-  tipo: "CEDULA" | "OFICIO" | null;
+async function railwayClassifyPdf(
+  buffer: Buffer,
+  textHint: DocTipo | null
+): Promise<{
+  tipo: DocTipo | null;
   autoDetected: boolean;
   expNro: string | null;
   caratula: string | null;
@@ -192,25 +162,14 @@ async function railwayClassifyPdf(buffer: Buffer): Promise<{
 
     const base = railwayUrl.replace(/\/$/, "");
 
-    const ced = await tryRailwayEndpoint(base, "/procesar", buffer, "cedula.pdf");
-    if (ced.ok) {
-      const detectedTipo = ced.tipoDocumento === "OFICIO" ? "OFICIO" : "CEDULA";
-      return {
-        tipo: detectedTipo,
-        autoDetected: true,
-        expNro: ced.expNro,
-        caratula: ced.caratula,
-      };
-    }
+    const [ced, ofi] = await Promise.all([
+      tryRailwayEndpoint(base, "/procesar", buffer, "cedula.pdf"),
+      tryRailwayEndpoint(base, "/procesar-oficio", buffer, "oficio.pdf"),
+    ]);
 
-    const ofi = await tryRailwayEndpoint(base, "/procesar-oficio", buffer, "oficio.pdf");
-    if (ofi.ok) {
-      return {
-        tipo: "OFICIO",
-        autoDetected: true,
-        expNro: ofi.expNro,
-        caratula: ofi.caratula,
-      };
+    const resolved = resolveTipoFromRailwayAttempts(ced, ofi, textHint);
+    if (resolved) {
+      return resolved;
     }
 
     return { tipo: null, autoDetected: false, expNro: null, caratula: null };
@@ -244,12 +203,26 @@ export async function POST(req: Request) {
 
     if (ext === "pdf") {
       const buf = Buffer.from(await file.arrayBuffer());
-      // Clasificación local y Railway en paralelo: si Railway tira error/red, el local sigue aplicando.
-      const [localTipo, rail] = await Promise.all([
+      const [localTipo, scoringTipo] = await Promise.all([
         detectTipoLocalFromPdfBuffer(buf, file.name || ""),
-        railwayClassifyPdf(buf),
+        clasificarTipoDesdePdfBuffer(buf, PDF_CLASSIFY_MAX_PAGES).catch(() => null),
       ]);
+      const textHint = scoringTipo ?? localTipo;
+      const rail = await railwayClassifyPdf(buf, textHint);
+
       if (rail.tipo && rail.autoDetected) {
+        if (textHint === "OFICIO" && rail.tipo === "CEDULA") {
+          console.warn(
+            "[detect-type-upload] Railway devolvió CEDULA pero scoring local indica OFICIO; prevalece OFICIO",
+            { file: file.name }
+          );
+          return NextResponse.json({
+            tipo: "OFICIO",
+            autoDetected: true,
+            expNro: rail.expNro,
+            caratula: rail.caratula,
+          });
+        }
         return NextResponse.json({
           tipo: rail.tipo,
           autoDetected: true,
@@ -257,8 +230,9 @@ export async function POST(req: Request) {
           caratula: rail.caratula,
         });
       }
+
       return NextResponse.json({
-        tipo: localTipo,
+        tipo: textHint ?? localTipo,
         autoDetected: false,
         expNro: null,
         caratula: null,

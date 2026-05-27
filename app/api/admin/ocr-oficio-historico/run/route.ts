@@ -21,6 +21,7 @@ type RunItemResult = {
   destinatario_extraido: string | null;
   campos_actualizados: string[];
   error: string | null;
+  validation_error: string | null;
 };
 
 function parseBool(value: unknown, defaultValue: boolean): boolean {
@@ -109,6 +110,7 @@ export async function POST(req: NextRequest) {
         destinatario_extraido: null,
         campos_actualizados: [],
         error: null,
+        validation_error: null,
       });
       continue;
     }
@@ -121,6 +123,7 @@ export async function POST(req: NextRequest) {
         destinatario_extraido: null,
         campos_actualizados: [],
         error: "pdf_path vacío en base de datos",
+        validation_error: null,
       });
       continue;
     }
@@ -136,6 +139,7 @@ export async function POST(req: NextRequest) {
         destinatario_extraido: null,
         campos_actualizados: [],
         error: downloadErr?.message || "No se pudo descargar el PDF",
+        validation_error: null,
       });
       continue;
     }
@@ -150,18 +154,25 @@ export async function POST(req: NextRequest) {
         destinatario_extraido: null,
         campos_actualizados: [],
         error: ocrResult.error,
+        validation_error: null,
       });
       continue;
     }
 
     const patchResult = buildPatchOcrOficioHistorico(cedula, ocrResult.headers);
     if ("error" in patchResult) {
+      console.warn("[ocr-oficio-historico/run] Validación destinatario rechazada", {
+        id: cedula.id,
+        validation_error: patchResult.validation_error,
+        destinatario_length: ocrResult.headers.destinatario?.length ?? 0,
+      });
       resultados.push({
         id: cedula.id,
         ok: false,
         destinatario_extraido: ocrResult.headers.destinatario,
         campos_actualizados: [],
         error: patchResult.error,
+        validation_error: patchResult.validation_error,
       });
       continue;
     }
@@ -178,6 +189,7 @@ export async function POST(req: NextRequest) {
         destinatario_extraido: ocrResult.headers.destinatario,
         campos_actualizados: [],
         error: `Error al actualizar cédula: ${updateErr.message}`,
+        validation_error: null,
       });
       continue;
     }
@@ -185,6 +197,7 @@ export async function POST(req: NextRequest) {
     console.log("[ocr-oficio-historico/run] OK", {
       id: cedula.id,
       campos: patchResult.campos,
+      destinatario_length: patchResult.patch.ocr_destinatario?.length ?? 0,
     });
 
     resultados.push({
@@ -193,6 +206,7 @@ export async function POST(req: NextRequest) {
       destinatario_extraido: ocrResult.headers.destinatario,
       campos_actualizados: patchResult.campos.filter((c) => c !== "ocr_error"),
       error: null,
+      validation_error: null,
     });
   }
 

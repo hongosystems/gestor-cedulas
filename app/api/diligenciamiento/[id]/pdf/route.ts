@@ -1,20 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseService } from "@/lib/supabase-server";
 import { getUserFromRequest } from "@/lib/auth-api";
+import {
+  DILIGENCIAMIENTO_FORBIDDEN_MSG,
+  requireDiligenciamientoAccess,
+} from "@/lib/diligenciamiento-access";
 
 export const runtime = "nodejs";
-
-async function requireAbogado(
-  userId: string,
-  svc: ReturnType<typeof supabaseService>
-): Promise<boolean> {
-  const { data } = await svc
-    .from("user_roles")
-    .select("is_abogado, is_superadmin")
-    .eq("user_id", userId)
-    .maybeSingle();
-  return data?.is_abogado === true || data?.is_superadmin === true;
-}
 
 export async function GET(
   req: NextRequest,
@@ -27,12 +19,12 @@ export async function GET(
     : req;
   const user = await getUserFromRequest(reqWithAuth);
   if (!user) {
-    return new NextResponse("Unauthorized", { status: 401 });
+    return new NextResponse("Sesión inválida o expirada", { status: 401 });
   }
 
   const svc = supabaseService();
-  if (!(await requireAbogado(user.id, svc))) {
-    return new NextResponse("Forbidden", { status: 403 });
+  if (!(await requireDiligenciamientoAccess(user.id, svc))) {
+    return new NextResponse(DILIGENCIAMIENTO_FORBIDDEN_MSG, { status: 403 });
   }
 
   const { id: cedulaId } = await context.params;

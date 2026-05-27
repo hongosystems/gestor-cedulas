@@ -38,6 +38,49 @@ export function matchesBugHistoricoMotivo(motivo: string | null): boolean {
   );
 }
 
+export const DESTINATARIO_OCR_MAX_LENGTH = 180;
+
+export const DESTINATARIO_OCR_FRASES_CUERPO_JUDICIAL = [
+  "Se hace saber",
+  "Notifíquese",
+  "Firmado electrónicamente",
+  "deberá enviarse",
+  "beneficio de litigar",
+  "correo electrónico",
+] as const;
+
+export function getDestinatarioOcrValidationError(
+  value: string | null | undefined
+): string | null {
+  if (value == null || value.trim() === "") {
+    return "destinatario vacío";
+  }
+
+  const trimmed = value.trim();
+
+  if (trimmed.length > DESTINATARIO_OCR_MAX_LENGTH) {
+    return `destinatario demasiado largo (${trimmed.length} > ${DESTINATARIO_OCR_MAX_LENGTH})`;
+  }
+
+  const lower = trimmed.toLowerCase();
+  for (const frase of DESTINATARIO_OCR_FRASES_CUERPO_JUDICIAL) {
+    if (lower.includes(frase.toLowerCase())) {
+      return `destinatario contiene frase de cuerpo judicial: "${frase}"`;
+    }
+  }
+
+  const newlineCount = (trimmed.match(/\n/g) ?? []).length;
+  if (newlineCount > 3) {
+    return `destinatario tiene demasiados saltos de línea (${newlineCount} > 3)`;
+  }
+
+  return null;
+}
+
+export function isValidDestinatarioOCR(value: string): boolean {
+  return getDestinatarioOcrValidationError(value) == null;
+}
+
 export function isOcrDestinatarioVacio(value: string | null | undefined): boolean {
   return value == null || value.trim() === "";
 }
@@ -207,19 +250,27 @@ export async function invocarProcesarOficio(
   return { ok: true, headers };
 }
 
+export type BuildPatchOcrOficioHistoricoResult =
+  | { patch: Record<string, string | null>; campos: string[] }
+  | { error: string; validation_error: string };
+
 export function buildPatchOcrOficioHistorico(
   cedula: CedulaOficioHistorico,
   headers: OcrOficioHeaders
-): { patch: Record<string, string | null>; campos: string[] } | { error: string } {
+): BuildPatchOcrOficioHistoricoResult {
   const destinatario = headers.destinatario?.trim();
-  if (!destinatario) {
-    return { error: "OCR respondió OK pero sin X-Destinatario" };
+  const validationError = getDestinatarioOcrValidationError(destinatario ?? null);
+  if (validationError) {
+    return {
+      error: `Destinatario OCR inválido: ${validationError}`,
+      validation_error: validationError,
+    };
   }
 
   const patch: Record<string, string | null> = { ocr_error: null };
   const campos: string[] = ["ocr_error"];
 
-  patch.ocr_destinatario = destinatario;
+  patch.ocr_destinatario = destinatario!;
   campos.push("ocr_destinatario");
 
   if (isOcrCampoVacio(cedula.ocr_exp_nro) && headers.expNro?.trim()) {

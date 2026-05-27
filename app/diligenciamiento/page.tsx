@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { getAuthHeaders, getFreshAccessToken } from "@/lib/auth-client";
 import { FilterableTh } from "@/app/components/FilterableTh";
 import NotificationBell from "@/app/components/NotificationBell";
 import { useColumnFilters, uniqueOptionsFromField } from "@/app/hooks/useColumnFilters";
@@ -199,6 +200,7 @@ export default function DiligenciamientoPage() {
   const [isAdminMediaciones, setIsAdminMediaciones] = useState(false);
   const [isAbogado, setIsAbogado] = useState(false);
   const [isSuperadmin, setIsSuperadmin] = useState(false);
+  const [isAdminCedulas, setIsAdminCedulas] = useState(false);
   const { filters, setFilter, clearAll, hasActiveFilters, openFilter, setOpenFilter } =
     useColumnFilters<DiligenciamientoFilterKey>({
       tipo_documento: null as string | null,
@@ -237,6 +239,8 @@ export default function DiligenciamientoPage() {
     [filteredCedulas]
   );
 
+  const canOperarPjn = isAbogado || isSuperadmin || isAdminCedulas;
+
   useEffect(() => {
     if (!menuOpen) return;
     const handleClickOutside = () => setMenuOpen(false);
@@ -264,28 +268,47 @@ export default function DiligenciamientoPage() {
 
       const { data: roleData } = await supabase
         .from("user_roles")
-        .select("is_admin_mediaciones, is_abogado, is_superadmin")
+        .select("is_admin_mediaciones, is_abogado, is_superadmin, is_admin_cedulas")
         .eq("user_id", uid)
         .maybeSingle();
       setIsAdminMediaciones(roleData?.is_admin_mediaciones === true);
       setIsAbogado(roleData?.is_abogado === true);
       setIsSuperadmin(roleData?.is_superadmin === true);
+      setIsAdminCedulas(roleData?.is_admin_cedulas === true);
 
-      const token = sess.session.access_token;
-      const res = await fetch("/api/diligenciamiento", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const authHeaders = await getAuthHeaders();
+      if (!authHeaders) {
+        window.location.href = "/login";
+        return;
+      }
+
+      let res = await fetch("/api/diligenciamiento", { headers: authHeaders });
+
+      if (res.status === 401) {
+        const retryHeaders = await getAuthHeaders();
+        if (retryHeaders) {
+          res = await fetch("/api/diligenciamiento", { headers: retryHeaders });
+        }
+      }
 
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
-        if (res.status === 403) {
+        if (res.status === 401) {
+          setMsgSuccess(false);
+          setMsg(
+            (json?.error as string) ||
+              "Sesión expirada. Cerrá sesión y volvé a entrar."
+          );
+          setCedulas([]);
+        } else if (res.status === 403) {
           setMsgSuccess(false);
           setMsg(json?.error || "No tienes acceso a esta sección.");
+          setCedulas([]);
         } else {
           setMsgSuccess(false);
           setMsg(json?.error || "Error al cargar cédulas.");
+          setCedulas([]);
         }
-        setCedulas([]);
       } else {
         const json = await res.json();
         setCedulas(json.cedulas ?? []);
@@ -295,8 +318,7 @@ export default function DiligenciamientoPage() {
   }, []);
 
   function verPdf(item: CedulaDiligenciamiento) {
-    supabase.auth.getSession().then(({ data }) => {
-      const token = data?.session?.access_token;
+    getFreshAccessToken().then((token) => {
       if (!token) return;
       const url = `/api/diligenciamiento/${item.id}/pdf?token=${encodeURIComponent(token)}`;
       window.open(url, "_blank");
@@ -309,9 +331,15 @@ export default function DiligenciamientoPage() {
 
     if (item.pjn_cargado_at) {
       if (!window.confirm("La carga ya fue realizada. ¿Desea reintentar?")) return;
+      const authHeaders = await getAuthHeaders({ "Content-Type": "application/json" });
+      if (!authHeaders) {
+        setMsgSuccess(false);
+        setMsg("Sesión expirada");
+        return;
+      }
       const res = await fetch(`/api/cedulas/${item.id}/confirmar-pjn`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders,
         body: JSON.stringify({ reset: true }),
       });
       if (!res.ok) {
@@ -331,9 +359,15 @@ export default function DiligenciamientoPage() {
     }
 
     if (item.observaciones_pjn) {
+      const authHeaders = await getAuthHeaders({ "Content-Type": "application/json" });
+      if (!authHeaders) {
+        setMsgSuccess(false);
+        setMsg("Sesión expirada");
+        return;
+      }
       const res = await fetch(`/api/cedulas/${item.id}/confirmar-pjn`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders,
         body: JSON.stringify({ reset: true }),
       });
       if (!res.ok) {
@@ -363,8 +397,7 @@ export default function DiligenciamientoPage() {
     setMsgSuccess(false);
     setModalPjnError(null);
 
-    const { data: sess } = await supabase.auth.getSession();
-    const token = sess.session?.access_token;
+    const token = await getFreshAccessToken();
     if (!token) {
       setModalPjnError("Sesión expirada");
       return;
@@ -466,15 +499,21 @@ export default function DiligenciamientoPage() {
   }
 
   async function togglePjnEstado(item: CedulaDiligenciamiento) {
-    if (!(isAbogado || isSuperadmin)) return;
+    if (!canOperarPjn) return;
     if (!item.pjn_cargado_at) {
       setMsgSuccess(false);
       setMsg("Estado pendiente. Usá “Cargar en PJN” para marcar como cargado.");
       return;
     }
+    const authHeaders = await getAuthHeaders({ "Content-Type": "application/json" });
+    if (!authHeaders) {
+      setMsgSuccess(false);
+      setMsg("Sesión expirada");
+      return;
+    }
     const res = await fetch(`/api/cedulas/${item.id}/confirmar-pjn`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders,
       body: JSON.stringify({ reset: true }),
     });
     if (!res.ok) {
@@ -676,19 +715,19 @@ export default function DiligenciamientoPage() {
                   />
                   <th style={{ width: 140 }}>Fecha procesado</th>
                   <th style={{ width: 220 }}>Acciones</th>
-                  {(isAbogado || isSuperadmin) && <th style={{ width: 140 }}>Estado PJN</th>}
+                  {canOperarPjn && <th style={{ width: 140 }}>Estado PJN</th>}
                 </tr>
               </thead>
               <tbody>
                 {cedulas.length === 0 ? (
                   <tr>
-                    <td colSpan={(isAbogado || isSuperadmin) ? 7 : 6} className="muted" style={{ padding: 24, textAlign: "center" }}>
+                    <td colSpan={canOperarPjn ? 7 : 6} className="muted" style={{ padding: 24, textAlign: "center" }}>
                       No hay cédulas ni oficios listos para diligenciamiento.
                     </td>
                   </tr>
                 ) : filteredCedulas.length === 0 ? (
                   <tr>
-                    <td colSpan={(isAbogado || isSuperadmin) ? 7 : 6} className="muted" style={{ padding: 24, textAlign: "center" }}>
+                    <td colSpan={canOperarPjn ? 7 : 6} className="muted" style={{ padding: 24, textAlign: "center" }}>
                       Ningún resultado con los filtros seleccionados.
                     </td>
                   </tr>
@@ -790,7 +829,7 @@ export default function DiligenciamientoPage() {
                             )}
                         </div>
                       </td>
-                      {(isAbogado || isSuperadmin) && (
+                      {canOperarPjn && (
                         <td>
                           <button
                             type="button"

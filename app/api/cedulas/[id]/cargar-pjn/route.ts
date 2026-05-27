@@ -6,6 +6,10 @@ import {
   logPjnPayload,
   pjnVpsBaseUrl,
 } from "@/lib/pjn-payload";
+import {
+  DILIGENCIAMIENTO_FORBIDDEN_MSG,
+  requireDiligenciamientoAccess,
+} from "@/lib/diligenciamiento-access";
 
 export const runtime = "nodejs";
 
@@ -28,31 +32,22 @@ async function persistPjnFallo(
   }
 }
 
-async function requireAbogado(
-  userId: string,
-  svc: ReturnType<typeof supabaseService>
-): Promise<boolean> {
-  const { data } = await svc
-    .from("user_roles")
-    .select("is_abogado, is_superadmin")
-    .eq("user_id", userId)
-    .maybeSingle();
-  return data?.is_abogado === true || data?.is_superadmin === true;
-}
-
 export async function POST(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
   const user = await getUserFromRequest(req);
   if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json(
+      { error: "Sesión inválida o expirada. Volvé a iniciar sesión." },
+      { status: 401 }
+    );
   }
 
   const svc = supabaseService();
-  if (!(await requireAbogado(user.id, svc))) {
+  if (!(await requireDiligenciamientoAccess(user.id, svc))) {
     return NextResponse.json(
-      { error: "Solo abogados pueden cargar en PJN" },
+      { error: DILIGENCIAMIENTO_FORBIDDEN_MSG },
       { status: 403 }
     );
   }
