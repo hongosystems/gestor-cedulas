@@ -108,6 +108,16 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     ok: true,
+    mensaje:
+      "Solo se actualizó la auditoría. No se modificó cedulas.tipo_documento.",
+    cedulas_modificada: false,
+    campos_modificados: [
+      "revisado",
+      "revisado_at",
+      "revisado_by",
+      "revision_estado",
+      "revision_nota",
+    ],
     audit: updated,
   });
 }

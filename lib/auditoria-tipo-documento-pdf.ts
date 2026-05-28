@@ -1904,6 +1904,8 @@ export type RollbackDataPdfAudit = {
   revision_estado: RevisionEstado;
   applied_by: string;
   applied_at: string;
+  clasificacion_pdf?: string;
+  clasificacion_manual?: string | null;
 };
 
 /** Normaliza tipo_documento para comparar transiciones permitidas. */
@@ -1951,14 +1953,131 @@ export function tieneInconsistenciaTipo(
   return raw.toUpperCase() !== clasificacionPdf;
 }
 
+export type ClasificacionManual = "CEDULA" | "OFICIO" | "INDETERMINADO";
+
+export const CLASIFICACIONES_MANUALES: readonly ClasificacionManual[] = [
+  "CEDULA",
+  "OFICIO",
+  "INDETERMINADO",
+];
+
+/** Tipo efectivo para apply: manual CEDULA/OFICIO, si no detectado CEDULA/OFICIO. */
+export function resolverTipoNuevoAudit(
+  clasificacion_manual: string | null | undefined,
+  clasificacion_pdf: string
+): "CEDULA" | "OFICIO" | null {
+  const manual = (clasificacion_manual ?? "").trim().toUpperCase();
+  if (manual === "CEDULA" || manual === "OFICIO") return manual;
+  const pdf = (clasificacion_pdf ?? "").trim().toUpperCase();
+  if (pdf === "CEDULA" || pdf === "OFICIO") return pdf;
+  return null;
+}
+
+export function tieneClasificacionManualAplicable(
+  clasificacion_manual: string | null | undefined
+): boolean {
+  const m = (clasificacion_manual ?? "").trim().toUpperCase();
+  return m === "CEDULA" || m === "OFICIO";
+}
+
+export type FilaContadoresAuditoria = {
+  revisado: boolean;
+  revision_estado: string | null;
+  clasificacion_pdf: string;
+  clasificacion_manual?: string | null;
+  confianza: number | null;
+  aplicado: boolean;
+  aplicable: boolean;
+  mismatch: boolean;
+};
+
+export type ContadoresAuditoria = {
+  total_guardadas: number;
+  total_unicas_cedula: number;
+  sin_revisar: number;
+  confirmadas: number;
+  rechazadas: number;
+  duda: number;
+  indeterminadas: number;
+  inconsistencias: number;
+  aplicables: number;
+  aplicadas: number;
+  pendientes_aplicar: number;
+  no_aplicables: number;
+  detectada_cedula: number;
+  detectada_oficio: number;
+  detectada_indeterminado: number;
+  manual_cedula: number;
+  manual_oficio: number;
+  manual_indeterminado: number;
+};
+
+export function calcularContadoresAuditoria(
+  filas: FilaContadoresAuditoria[],
+  opts?: { total_guardadas?: number }
+): ContadoresAuditoria {
+  const c: ContadoresAuditoria = {
+    total_guardadas: opts?.total_guardadas ?? filas.length,
+    total_unicas_cedula: filas.length,
+    sin_revisar: 0,
+    confirmadas: 0,
+    rechazadas: 0,
+    duda: 0,
+    indeterminadas: 0,
+    inconsistencias: 0,
+    aplicables: 0,
+    aplicadas: 0,
+    pendientes_aplicar: 0,
+    no_aplicables: 0,
+    detectada_cedula: 0,
+    detectada_oficio: 0,
+    detectada_indeterminado: 0,
+    manual_cedula: 0,
+    manual_oficio: 0,
+    manual_indeterminado: 0,
+  };
+
+  for (const r of filas) {
+    if (!r.revisado) c.sin_revisar++;
+    else if (r.revision_estado === "CONFIRMADO") c.confirmadas++;
+    else if (r.revision_estado === "RECHAZADO") c.rechazadas++;
+    else if (r.revision_estado === "DUDA") c.duda++;
+
+    const pdf = (r.clasificacion_pdf ?? "").toUpperCase();
+    if (pdf === "CEDULA") c.detectada_cedula++;
+    else if (pdf === "OFICIO") c.detectada_oficio++;
+    else if (pdf === "INDETERMINADO") c.detectada_indeterminado++;
+
+    const manual = (r.clasificacion_manual ?? "").trim().toUpperCase();
+    if (manual === "CEDULA") c.manual_cedula++;
+    else if (manual === "OFICIO") c.manual_oficio++;
+    else if (manual === "INDETERMINADO") c.manual_indeterminado++;
+
+    if (r.clasificacion_pdf === "INDETERMINADO" && !tieneClasificacionManualAplicable(r.clasificacion_manual)) {
+      c.indeterminadas++;
+    }
+    if (r.mismatch) c.inconsistencias++;
+    if (r.aplicado) c.aplicadas++;
+    if (r.aplicable) {
+      c.aplicables++;
+      if (!r.aplicado) c.pendientes_aplicar++;
+    } else if (!r.aplicado) {
+      c.no_aplicables++;
+    }
+  }
+
+  return c;
+}
+
 export function evaluarAplicabilidadAudit(input: {
   revision_estado: string | null;
   revisado: boolean;
   clasificacion_pdf: string;
+  clasificacion_manual?: string | null;
   confianza: number | null;
   aplicado: boolean;
   tipo_documento_actual: string | null;
-  /** Si se omite, se calcula con tieneInconsistenciaTipo. */
+  /** Si se omite, se calcula contra tipo_nuevo resuelto. */
   mismatch?: boolean;
 }): AplicabilidadAudit {
   if (input.aplicado) {
@@ -1973,28 +2092,45 @@ export function evaluarAplicabilidadAudit(input: {
       motivo: `Revisión ${input.revision_estado ?? "sin estado"} (se requiere CONFIRMADO)`,
     };
   }
-  const clasif = input.clasificacion_pdf;
-  if (clasif !== "CEDULA" && clasif !== "OFICIO") {
-    return { aplicable: false, motivo: "Clasificación INDETERMINADO o inválida" };
-  }
-  const conf = input.confianza ?? 0;
-  if (conf < AUDIT_APPLY_MIN_CONFIDENCE) {
+
+  const tipoNuevo = resolverTipoNuevoAudit(
+    input.clasificacion_manual,
+    input.clasificacion_pdf
+  );
+  if (!tipoNuevo) {
     return {
       aplicable: false,
-      motivo: `Confianza ${conf.toFixed(2)} < ${AUDIT_APPLY_MIN_CONFIDENCE}`,
+      motivo: "Sin tipo aplicable (INDETERMINADO o inválido)",
     };
   }
+
+  const tieneManual = tieneClasificacionManualAplicable(input.clasificacion_manual);
+  if (!tieneManual) {
+    const conf = input.confianza ?? 0;
+    if (conf < AUDIT_APPLY_MIN_CONFIDENCE) {
+      return {
+        aplicable: false,
+        motivo: `Confianza ${conf.toFixed(2)} < ${AUDIT_APPLY_MIN_CONFIDENCE}`,
+      };
+    }
+  }
+
+  const actualNorm = normalizarTipoDocumento(input.tipo_documento_actual);
+  const rawActual = (input.tipo_documento_actual ?? "").trim();
+  const necesitaCambio = actualNorm === null && !rawActual ? true : actualNorm !== tipoNuevo;
+  if (!necesitaCambio) {
+    return {
+      aplicable: false,
+      motivo: "Tipo actual ya coincide con el tipo a aplicar",
+    };
+  }
+
   const inconsistency =
-    input.mismatch ??
-    tieneInconsistenciaTipo(input.tipo_documento_actual, clasif);
-  if (!inconsistency) {
+    input.mismatch ?? tieneInconsistenciaTipo(input.tipo_documento_actual, tipoNuevo);
+  if (!inconsistency && actualNorm !== null) {
     return { aplicable: false, motivo: "Sin inconsistencia real" };
   }
-  const tipoNuevo = clasif as "CEDULA" | "OFICIO";
-  const actualNorm = normalizarTipoDocumento(input.tipo_documento_actual);
-  if (actualNorm === tipoNuevo) {
-    return { aplicable: false, motivo: "Tipo actual ya coincide con el detectado" };
-  }
+
   if (!esTransicionTipoPermitida(input.tipo_documento_actual, tipoNuevo)) {
     return {
       aplicable: false,

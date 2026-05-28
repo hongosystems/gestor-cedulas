@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseService } from "@/lib/supabase-server";
 import { getUserFromRequest } from "@/lib/auth-api";
 import {
+  calcularContadoresAuditoria,
   evaluarAplicabilidadAudit,
   leerContextoDeRazones,
   leerFuenteDeRazones,
   requireSuperadmin,
+  resolverTipoNuevoAudit,
 } from "@/lib/auditoria-tipo-documento-pdf";
 
 export const runtime = "nodejs";
@@ -56,7 +58,7 @@ export async function GET(req: NextRequest) {
   const { data, error } = await svc
     .from("cedulas_tipo_documento_pdf_audit")
     .select(
-      "id, cedula_id, tipo_documento_actual, clasificacion_pdf, confianza, razones, archivo_origen, " +
+      "id, cedula_id, tipo_documento_actual, clasificacion_pdf, clasificacion_manual, clasificacion_manual_at, clasificacion_manual_by, clasificacion_manual_nota, confianza, razones, archivo_origen, " +
         "aplicado, aplicado_at, rollback_data, revisado, revisado_at, revisado_by, revision_estado, revision_nota, created_at, " +
         "cedulas:cedulas!cedulas_tipo_documento_pdf_audit_cedula_id_fkey(caratula, ocr_caratula, juzgado, ocr_exp_nro, ocr_destinatario, pdf_path, estado_ocr, pjn_cargado_at, tipo_documento)"
     )
@@ -76,6 +78,10 @@ export async function GET(req: NextRequest) {
     cedula_id: string;
     tipo_documento_actual: string | null;
     clasificacion_pdf: "CEDULA" | "OFICIO" | "INDETERMINADO";
+    clasificacion_manual: string | null;
+    clasificacion_manual_at: string | null;
+    clasificacion_manual_by: string | null;
+    clasificacion_manual_nota: string | null;
     confianza: number | null;
     razones: unknown;
     archivo_origen: string | null;
@@ -113,10 +119,15 @@ export async function GET(req: NextRequest) {
     // registros legados (pre-GPT) será { todos null }.
     const contextoDetectado = leerContextoDeRazones(r.razones);
     const tipoActualLive = r.cedulas?.tipo_documento ?? r.tipo_documento_actual;
+    const tipoNuevo = resolverTipoNuevoAudit(
+      r.clasificacion_manual,
+      r.clasificacion_pdf
+    );
     const aplicabilidad = evaluarAplicabilidadAudit({
       revision_estado: r.revision_estado,
       revisado: r.revisado === true,
       clasificacion_pdf: r.clasificacion_pdf,
+      clasificacion_manual: r.clasificacion_manual,
       confianza: r.confianza != null ? Number(r.confianza) : null,
       aplicado: r.aplicado === true,
       tipo_documento_actual: tipoActualLive,
@@ -128,6 +139,11 @@ export async function GET(req: NextRequest) {
       tipo_documento_actual: r.tipo_documento_actual,
       tipo_documento_actual_cedulas: r.cedulas?.tipo_documento ?? null,
       clasificacion_pdf: r.clasificacion_pdf,
+      clasificacion_manual: r.clasificacion_manual,
+      clasificacion_manual_at: r.clasificacion_manual_at,
+      clasificacion_manual_by: r.clasificacion_manual_by,
+      clasificacion_manual_nota: r.clasificacion_manual_nota,
+      tipo_nuevo: tipoNuevo,
       confianza: r.confianza,
       razones: r.razones,
       archivo_origen: r.archivo_origen,
@@ -179,6 +195,20 @@ export async function GET(req: NextRequest) {
 
   const conLimit = filtrados.slice(0, limit);
 
+  const statsGlobal = calcularContadoresAuditoria(
+    despuesDeDedupe.map((r) => ({
+      revisado: r.revisado,
+      revision_estado: r.revision_estado,
+      clasificacion_pdf: r.clasificacion_pdf,
+      clasificacion_manual: r.clasificacion_manual,
+      confianza: r.confianza,
+      aplicado: r.aplicado,
+      aplicable: r.aplicable,
+      mismatch: r.mismatch,
+    })),
+    { total_guardadas: rows.length }
+  );
+
   return NextResponse.json({
     ok: true,
     generated_at: new Date().toISOString(),
@@ -189,6 +219,7 @@ export async function GET(req: NextRequest) {
     cedulas_distintas: new Set(despuesDeDedupe.map((r) => r.cedula_id)).size,
     only_mismatches: onlyMismatches,
     mostrar_historial_completo: mostrarHistorialCompleto,
+    stats_global: statsGlobal,
     rows: conLimit,
   });
 }

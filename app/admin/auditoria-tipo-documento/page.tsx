@@ -3,8 +3,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import {
+  calcularContadoresAuditoria,
   normalizarTipoDocumento,
   resolverDatoConPrioridad,
+  resolverTipoNuevoAudit,
+  type ClasificacionManual,
+  type ContadoresAuditoria,
   type ResolucionDato,
   type RevisionEstado,
   type RollbackDataPdfAudit,
@@ -103,12 +107,26 @@ type RunResponse = {
   resultados: RunItemResult[];
 };
 
+type FilterClasificacion =
+  | "todos"
+  | "detectada_CEDULA"
+  | "detectada_OFICIO"
+  | "detectada_INDETERMINADO"
+  | "manual_CEDULA"
+  | "manual_OFICIO"
+  | "manual_INDETERMINADO";
+
 type AuditRow = {
   id: string;
   cedula_id: string;
   tipo_documento_actual: string | null;
   tipo_documento_actual_cedulas: string | null;
   clasificacion_pdf: Clasif;
+  clasificacion_manual: ClasificacionManual | null;
+  clasificacion_manual_at: string | null;
+  clasificacion_manual_by: string | null;
+  clasificacion_manual_nota: string | null;
+  tipo_nuevo: "CEDULA" | "OFICIO" | null;
   confianza: number | null;
   razones: Razon[] | null;
   archivo_origen: string | null;
@@ -316,17 +334,19 @@ export default function AuditoriaTipoDocumentoPage() {
   // ── preview + persistidos ───────────────────────────────────────────────
   const [preview, setPreview] = useState<PreviewBreakdown | null>(null);
   const [rows, setRows] = useState<AuditRow[]>([]);
+  const [statsGlobal, setStatsGlobal] = useState<ContadoresAuditoria | null>(null);
   const [reloadingList, setReloadingList] = useState<boolean>(false);
 
   // ── filtros lista persistida ────────────────────────────────────────────
   const [filterOnlyMismatches, setFilterOnlyMismatches] = useState<boolean>(false);
-  const [filterClasif, setFilterClasif] = useState<"todos" | Clasif>("todos");
+  const [filterClasificacion, setFilterClasificacion] =
+    useState<FilterClasificacion>("todos");
   const [filterFuente, setFilterFuente] = useState<"todas" | FuenteTexto>("todas");
   const [filterRevision, setFilterRevision] = useState<
     "todos" | "sin_revisar" | "confirmado" | "rechazado" | "duda"
   >("todos");
   const [filterAplicado, setFilterAplicado] = useState<
-    "todos" | "aplicado" | "no_aplicado"
+    "todos" | "aplicado" | "no_aplicado" | "aplicable"
   >("todos");
   const [filterTipoActual, setFilterTipoActual] = useState<
     "todos" | "CEDULA" | "OFICIO" | "NULL" | "OTROS"
@@ -356,6 +376,10 @@ export default function AuditoriaTipoDocumentoPage() {
   // ── notas de revisión por fila ──────────────────────────────────────────
   const [notasRevision, setNotasRevision] = useState<Record<string, string>>({});
   const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const [manualModalRow, setManualModalRow] = useState<AuditRow | null>(null);
+  const [manualTipo, setManualTipo] = useState<ClasificacionManual>("CEDULA");
+  const [manualNota, setManualNota] = useState("");
+  const [manualSaving, setManualSaving] = useState(false);
 
   // ── mensajes ────────────────────────────────────────────────────────────
   const [msg, setMsg] = useState<string>("");
@@ -393,6 +417,7 @@ export default function AuditoriaTipoDocumentoPage() {
         if (res.ok) {
           const j = await res.json();
           setRows((j.rows ?? []) as AuditRow[]);
+          if (j.stats_global) setStatsGlobal(j.stats_global as ContadoresAuditoria);
         } else {
           const j = await res.json().catch(() => ({} as { error?: string }));
           setMsgOk(false);
@@ -486,6 +511,7 @@ export default function AuditoriaTipoDocumentoPage() {
         if (listRes.ok) {
           const j = await listRes.json();
           setRows((j.rows ?? []) as AuditRow[]);
+          if (j.stats_global) setStatsGlobal(j.stats_global as ContadoresAuditoria);
         } else {
           const j = await listRes.json().catch(() => ({} as { error?: string }));
           setMsgOk(false);
@@ -634,7 +660,10 @@ export default function AuditoriaTipoDocumentoPage() {
         return;
       }
       setMsgOk(true);
-      setMsg(`Revisión guardada: ${estado}`);
+      const reviewMsg =
+        String(j?.mensaje || "Revisión guardada. No se modificó cedulas.tipo_documento.");
+      setMsg(reviewMsg);
+      setToast({ message: reviewMsg, ok: true });
       setSelectedAuditIds((prev) => prev.filter((id) => id !== auditId));
       await cargarPersistidos();
     } catch (e: unknown) {
@@ -644,6 +673,62 @@ export default function AuditoriaTipoDocumentoPage() {
     } finally {
       setReviewingId(null);
     }
+  }
+
+  async function enviarClasificacionManual() {
+    if (!manualModalRow) return;
+    const headers = authHeaders();
+    if (!headers) return;
+    if (
+      (manualTipo === "CEDULA" || manualTipo === "OFICIO") &&
+      !manualNota.trim()
+    ) {
+      setMsgOk(false);
+      setMsg("La nota es obligatoria al elegir CEDULA u OFICIO.");
+      return;
+    }
+    setManualSaving(true);
+    setMsg("");
+    try {
+      const res = await fetch(
+        "/api/admin/auditoria-tipo-documento-pdf/manual-classification",
+        {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            audit_id: manualModalRow.id,
+            tipo: manualTipo,
+            nota: manualNota.trim() || undefined,
+          }),
+        }
+      );
+      const j = await res.json().catch(() => ({} as { error?: string; mensaje?: string }));
+      if (!res.ok) {
+        setMsgOk(false);
+        setMsg(j?.error || `Error clasificación manual (HTTP ${res.status})`);
+        return;
+      }
+      const doneMsg =
+        String(j?.mensaje || "Clasificación manual guardada. No se modificó cedulas.tipo_documento.");
+      setMsgOk(true);
+      setMsg(doneMsg);
+      setToast({ message: doneMsg, ok: true });
+      setManualModalRow(null);
+      setManualNota("");
+      await cargarPersistidos();
+    } catch (e: unknown) {
+      setMsgOk(false);
+      const m = e instanceof Error ? e.message : String(e);
+      setMsg(`Error de red: ${m}`);
+    } finally {
+      setManualSaving(false);
+    }
+  }
+
+  function abrirResolverManual(r: AuditRow) {
+    setManualModalRow(r);
+    setManualTipo("CEDULA");
+    setManualNota(r.clasificacion_manual_nota ?? "");
   }
 
   function toggleSelectApply(auditId: string, seleccionable: boolean) {
@@ -724,7 +809,18 @@ export default function AuditoriaTipoDocumentoPage() {
   const filteredRows = useMemo(() => {
     let r = rows;
     if (filterOnlyMismatches) r = r.filter((x) => x.mismatch);
-    if (filterClasif !== "todos") r = r.filter((x) => x.clasificacion_pdf === filterClasif);
+    if (filterClasificacion === "detectada_CEDULA")
+      r = r.filter((x) => x.clasificacion_pdf === "CEDULA");
+    if (filterClasificacion === "detectada_OFICIO")
+      r = r.filter((x) => x.clasificacion_pdf === "OFICIO");
+    if (filterClasificacion === "detectada_INDETERMINADO")
+      r = r.filter((x) => x.clasificacion_pdf === "INDETERMINADO");
+    if (filterClasificacion === "manual_CEDULA")
+      r = r.filter((x) => x.clasificacion_manual === "CEDULA");
+    if (filterClasificacion === "manual_OFICIO")
+      r = r.filter((x) => x.clasificacion_manual === "OFICIO");
+    if (filterClasificacion === "manual_INDETERMINADO")
+      r = r.filter((x) => x.clasificacion_manual === "INDETERMINADO");
     if (filterFuente !== "todas") r = r.filter((x) => x.fuente_texto === filterFuente);
     if (filterRevision === "sin_revisar") r = r.filter((x) => !x.revisado);
     if (filterRevision === "confirmado")
@@ -734,6 +830,7 @@ export default function AuditoriaTipoDocumentoPage() {
     if (filterRevision === "duda") r = r.filter((x) => x.revision_estado === "DUDA");
     if (filterAplicado === "aplicado") r = r.filter((x) => x.aplicado);
     if (filterAplicado === "no_aplicado") r = r.filter((x) => !x.aplicado);
+    if (filterAplicado === "aplicable") r = r.filter((x) => x.aplicable);
     if (filterTipoActual !== "todos") {
       r = r.filter((x) => {
         const raw = x.tipo_documento_actual_cedulas ?? x.tipo_documento_actual;
@@ -748,12 +845,30 @@ export default function AuditoriaTipoDocumentoPage() {
   }, [
     rows,
     filterOnlyMismatches,
-    filterClasif,
+    filterClasificacion,
     filterFuente,
     filterRevision,
     filterAplicado,
     filterTipoActual,
   ]);
+
+  const statsVista = useMemo(
+    () =>
+      calcularContadoresAuditoria(
+        filteredRows.map((r) => ({
+          revisado: r.revisado,
+          revision_estado: r.revision_estado,
+          clasificacion_pdf: r.clasificacion_pdf,
+          clasificacion_manual: r.clasificacion_manual,
+          confianza: r.confianza,
+          aplicado: r.aplicado,
+          aplicable: r.aplicable,
+          mismatch: r.mismatch,
+        })),
+        { total_guardadas: filteredRows.length }
+      ),
+    [filteredRows]
+  );
 
   const seleccionablesVisibles = useMemo(
     () => filteredRows.filter((r) => r.aplicable),
@@ -1256,6 +1371,42 @@ export default function AuditoriaTipoDocumentoPage() {
           <section>
             <div
               style={{
+                marginBottom: 16,
+                padding: 14,
+                background: "rgba(59,130,246,.1)",
+                border: "1px solid rgba(59,130,246,.35)",
+                borderRadius: 10,
+                fontSize: 13,
+                lineHeight: 1.55,
+                color: "rgba(219,234,254,.95)",
+              }}
+            >
+              <strong>Flujo de revisión y corrección</strong>
+              <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+                <li>
+                  <strong>Confirmar / Rechazar / Duda</strong> solo modifica{" "}
+                  <code>cedulas_tipo_documento_pdf_audit</code>. No cambia{" "}
+                  <code>cedulas.tipo_documento</code>.
+                </li>
+                <li>
+                  <strong>Resolver manualmente</strong> (INDETERMINADO) guarda{" "}
+                  <code>clasificacion_manual</code> en la auditoría, sin tocar cédulas.
+                </li>
+                <li>
+                  <strong>Aplicar corrección</strong> sí actualiza{" "}
+                  <code>cedulas.tipo_documento</code> (tipo nuevo = manual CEDULA/OFICIO
+                  si existe, si no el detectado).
+                </li>
+              </ul>
+            </div>
+
+            {statsGlobal && (
+              <ContadoresDashboard titulo="Global (última auditoría por cédula)" stats={statsGlobal} />
+            )}
+            <ContadoresDashboard titulo="Vista actual (filtros activos)" stats={statsVista} />
+
+            <div
+              style={{
                 display: "flex",
                 alignItems: "center",
                 gap: 12,
@@ -1302,16 +1453,25 @@ export default function AuditoriaTipoDocumentoPage() {
                 Mostrar historial completo
               </label>
               <label style={inlineLabel}>
-                Tipo detectado:
+                Clasificación:
                 <select
-                  value={filterClasif}
-                  onChange={(e) => setFilterClasif(e.target.value as "todos" | Clasif)}
+                  value={filterClasificacion}
+                  onChange={(e) =>
+                    setFilterClasificacion(e.target.value as FilterClasificacion)
+                  }
                   style={{ ...selectStyle, marginLeft: 6, padding: "3px 6px", fontSize: 12 }}
                 >
                   <option value="todos">todos</option>
-                  <option value="CEDULA">CEDULA</option>
-                  <option value="OFICIO">OFICIO</option>
-                  <option value="INDETERMINADO">INDETERMINADO</option>
+                  <optgroup label="Detectada">
+                    <option value="detectada_CEDULA">detectada CEDULA</option>
+                    <option value="detectada_OFICIO">detectada OFICIO</option>
+                    <option value="detectada_INDETERMINADO">detectada INDETERMINADO</option>
+                  </optgroup>
+                  <optgroup label="Manual">
+                    <option value="manual_CEDULA">manual CEDULA</option>
+                    <option value="manual_OFICIO">manual OFICIO</option>
+                    <option value="manual_INDETERMINADO">manual INDETERMINADO</option>
+                  </optgroup>
                 </select>
               </label>
               <label style={inlineLabel}>
@@ -1352,17 +1512,20 @@ export default function AuditoriaTipoDocumentoPage() {
                 </select>
               </label>
               <label style={inlineLabel}>
-                Aplicado:
+                Aplicación:
                 <select
                   value={filterAplicado}
                   onChange={(e) =>
-                    setFilterAplicado(e.target.value as "todos" | "aplicado" | "no_aplicado")
+                    setFilterAplicado(
+                      e.target.value as "todos" | "aplicado" | "no_aplicado" | "aplicable"
+                    )
                   }
                   style={{ ...selectStyle, marginLeft: 6, padding: "3px 6px", fontSize: 12 }}
                 >
                   <option value="todos">todos</option>
                   <option value="aplicado">aplicado</option>
                   <option value="no_aplicado">no aplicado</option>
+                  <option value="aplicable">aplicable</option>
                 </select>
               </label>
               <label style={inlineLabel}>
@@ -1579,6 +1742,21 @@ export default function AuditoriaTipoDocumentoPage() {
               />
             )}
 
+            {manualModalRow && (
+              <ManualClassificationModal
+                row={manualModalRow}
+                tipo={manualTipo}
+                nota={manualNota}
+                saving={manualSaving}
+                token={token}
+                onTipoChange={setManualTipo}
+                onNotaChange={setManualNota}
+                onCancel={() => setManualModalRow(null)}
+                onConfirm={() => void enviarClasificacionManual()}
+                onOpenPdf={() => verPdf(manualModalRow.cedula_id)}
+              />
+            )}
+
             {rows.length === 0 ? (
               <div
                 style={{
@@ -1610,8 +1788,10 @@ export default function AuditoriaTipoDocumentoPage() {
                           onChange={toggleSeleccionarTodasVisibles}
                         />
                       </th>
-                      <th style={{ width: 100 }}>Tipo actual</th>
-                      <th style={{ width: 140 }}>Detectado</th>
+                      <th style={{ width: 100 }}>Tipo actual (cedulas)</th>
+                      <th style={{ width: 120 }}>Detectado (audit)</th>
+                      <th style={{ width: 110 }}>Manual</th>
+                      <th style={{ width: 100 }}>Tipo a aplicar</th>
                       <th style={{ width: 80 }}>Confianza</th>
                       <th style={{ width: 110 }}>Revisión</th>
                       <th style={{ width: 130 }}>Aplicación</th>
@@ -1628,7 +1808,7 @@ export default function AuditoriaTipoDocumentoPage() {
                   <tbody>
                     {filteredRows.length === 0 ? (
                       <tr>
-                        <td colSpan={14} className="muted" style={{ padding: 24, textAlign: "center" }}>
+                        <td colSpan={18} className="muted" style={{ padding: 24, textAlign: "center" }}>
                           No hay registros que coincidan con los filtros activos.
                         </td>
                       </tr>
@@ -1636,6 +1816,16 @@ export default function AuditoriaTipoDocumentoPage() {
                       filteredRows.map((r) => {
                         const ta = tipoBadge(r.tipo_documento_actual_cedulas ?? r.tipo_documento_actual);
                         const td = tipoBadge(r.clasificacion_pdf);
+                        const tm = r.clasificacion_manual
+                          ? tipoBadge(r.clasificacion_manual)
+                          : null;
+                        const tn = tipoBadge(
+                          r.tipo_nuevo ??
+                            resolverTipoNuevoAudit(
+                              r.clasificacion_manual,
+                              r.clasificacion_pdf
+                            )
+                        );
                         const fb = fuenteBadge(r.fuente_texto);
                         const meta = leerMetadataGptDeRazones(r.razones);
                         const rev = revisionBadge(r);
@@ -1672,6 +1862,28 @@ export default function AuditoriaTipoDocumentoPage() {
                             <td>
                               <Badge {...td} />
                               {r.mismatch && <MismatchTag />}
+                            </td>
+                            <td>
+                              {tm ? (
+                                <Badge {...tm} />
+                              ) : (
+                                <span className="muted" style={{ fontSize: 11 }}>
+                                  —
+                                </span>
+                              )}
+                              {r.clasificacion_manual_nota && (
+                                <div
+                                  className="muted"
+                                  style={{ fontSize: 9, marginTop: 4, maxWidth: 100 }}
+                                  title={r.clasificacion_manual_nota}
+                                >
+                                  {r.clasificacion_manual_nota.slice(0, 36)}
+                                  {r.clasificacion_manual_nota.length > 36 ? "…" : ""}
+                                </div>
+                              )}
+                            </td>
+                            <td>
+                              <Badge {...tn} />
                             </td>
                             <td style={tabNum}>
                               {r.confianza != null ? r.confianza.toFixed(2) : "—"}
@@ -1875,6 +2087,22 @@ export default function AuditoriaTipoDocumentoPage() {
                                   >
                                     Duda
                                   </button>
+                                  {r.clasificacion_pdf === "INDETERMINADO" && !r.aplicado && (
+                                    <button
+                                      type="button"
+                                      className="btn"
+                                      disabled={busy}
+                                      onClick={() => abrirResolverManual(r)}
+                                      style={{
+                                        fontSize: 11,
+                                        padding: "4px 8px",
+                                        borderColor: "rgba(14,165,233,.45)",
+                                        background: "rgba(14,165,233,.15)",
+                                      }}
+                                    >
+                                      Resolver manualmente
+                                    </button>
+                                  )}
                                 </div>
                                 {!r.aplicable && !r.aplicado && r.aplicable_motivo && (
                                   <span className="muted" style={{ fontSize: 10 }}>
@@ -2060,7 +2288,11 @@ function rollbackCambioLabel(r: AuditRow): string | null {
   if (!r.aplicado || !r.rollback_data) return null;
   const rb = r.rollback_data as RollbackDataPdfAudit;
   const ant = (rb.tipo_documento_anterior ?? "NULL").toString().toUpperCase() || "NULL";
-  const nue = rb.tipo_documento_nuevo ?? r.clasificacion_pdf;
+  const nue =
+    rb.tipo_documento_nuevo ??
+    r.tipo_nuevo ??
+    resolverTipoNuevoAudit(r.clasificacion_manual, r.clasificacion_pdf) ??
+    r.clasificacion_pdf;
   return `${ant} → ${nue}`;
 }
 
@@ -2279,6 +2511,189 @@ function AutoConfirmModal({
   );
 }
 
+function ContadoresDashboard({
+  titulo,
+  stats,
+}: {
+  titulo: string;
+  stats: ContadoresAuditoria;
+}) {
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div
+        style={{
+          fontSize: 12,
+          fontWeight: 700,
+          color: "rgba(234,243,255,.75)",
+          marginBottom: 8,
+          letterSpacing: 0.3,
+        }}
+      >
+        {titulo}
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
+          gap: 8,
+        }}
+      >
+        <StatBox label="Guardadas" value={stats.total_guardadas} />
+        <StatBox label="Únicas cédula" value={stats.total_unicas_cedula} />
+        <StatBox label="Sin revisar" value={stats.sin_revisar} />
+        <StatBox label="Confirmadas" value={stats.confirmadas} />
+        <StatBox label="Rechazadas" value={stats.rechazadas} />
+        <StatBox label="Duda" value={stats.duda} />
+        <StatBox label="Indeterminadas" value={stats.indeterminadas} />
+        <StatBox label="Inconsistencias" value={stats.inconsistencias} />
+        <StatBox label="Aplicables" value={stats.aplicables} />
+        <StatBox label="Aplicadas" value={stats.aplicadas} />
+        <StatBox label="Pend. aplicar" value={stats.pendientes_aplicar} />
+        <StatBox label="No aplicables" value={stats.no_aplicables} />
+        <StatBox label="Det. CEDULA" value={stats.detectada_cedula} />
+        <StatBox label="Det. OFICIO" value={stats.detectada_oficio} />
+        <StatBox label="Det. INDET." value={stats.detectada_indeterminado} />
+      </div>
+    </div>
+  );
+}
+
+function ManualClassificationModal({
+  row,
+  tipo,
+  nota,
+  saving,
+  token,
+  onTipoChange,
+  onNotaChange,
+  onCancel,
+  onConfirm,
+  onOpenPdf,
+}: {
+  row: AuditRow;
+  tipo: ClasificacionManual;
+  nota: string;
+  saving: boolean;
+  token: string | null;
+  onTipoChange: (t: ClasificacionManual) => void;
+  onNotaChange: (n: string) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+  onOpenPdf: () => void;
+}) {
+  const notaRequerida = tipo === "CEDULA" || tipo === "OFICIO";
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 1000,
+        background: "rgba(0,0,0,.65)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+      }}
+      onClick={onCancel}
+    >
+      <div
+        style={{
+          background: "#0f172a",
+          border: "1px solid rgba(14,165,233,.4)",
+          borderRadius: 12,
+          maxWidth: 560,
+          width: "100%",
+          padding: 20,
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 style={{ margin: "0 0 12px 0", fontSize: 16 }}>
+          Resolver INDETERMINADO manualmente
+        </h3>
+        <p style={{ fontSize: 12, color: "rgba(234,243,255,.8)", lineHeight: 1.5 }}>
+          Solo actualiza la auditoría (<code>clasificacion_manual</code>). No modifica{" "}
+          <code>cedulas.tipo_documento</code>.
+        </p>
+        <dl style={{ fontSize: 13, margin: "12px 0" }}>
+          <dt className="muted" style={{ fontSize: 11 }}>
+            Expediente
+          </dt>
+          <dd style={{ margin: "0 0 8px" }}>
+            <MetaValue meta={expedienteOf(row)} />
+          </dd>
+          <dt className="muted" style={{ fontSize: 11 }}>
+            Carátula
+          </dt>
+          <dd style={{ margin: "0 0 8px" }}>
+            <MetaValue meta={caratulaOf(row)} />
+          </dd>
+          <dt className="muted" style={{ fontSize: 11 }}>
+            Juzgado
+          </dt>
+          <dd style={{ margin: "0 0 8px" }}>
+            <MetaValue meta={juzgadoOf(row)} />
+          </dd>
+        </dl>
+        <button
+          type="button"
+          className="btn primary"
+          onClick={onOpenPdf}
+          disabled={!token}
+          style={{ marginBottom: 14, fontSize: 12 }}
+        >
+          Abrir PDF
+        </button>
+        <label style={{ display: "block", marginBottom: 10, fontSize: 13 }}>
+          Clasificación manual:
+          <select
+            value={tipo}
+            onChange={(e) => onTipoChange(e.target.value as ClasificacionManual)}
+            style={{ ...selectStyle, display: "block", marginTop: 6, width: "100%" }}
+          >
+            <option value="CEDULA">CEDULA</option>
+            <option value="OFICIO">OFICIO</option>
+            <option value="INDETERMINADO">MANTENER INDETERMINADO</option>
+          </select>
+        </label>
+        <label style={{ display: "block", marginBottom: 14, fontSize: 13 }}>
+          Nota{notaRequerida ? " (obligatoria)" : " (opcional)"}:
+          <textarea
+            value={nota}
+            onChange={(e) => onNotaChange(e.target.value)}
+            rows={3}
+            style={{
+              display: "block",
+              marginTop: 6,
+              width: "100%",
+              background: "rgba(0,0,0,.25)",
+              border: "1px solid rgba(255,255,255,.15)",
+              borderRadius: 6,
+              color: "rgba(234,243,255,.92)",
+              padding: 8,
+              fontSize: 12,
+            }}
+          />
+        </label>
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+          <button type="button" className="btn" onClick={onCancel} disabled={saving}>
+            Cancelar
+          </button>
+          <button
+            type="button"
+            className="btn primary"
+            onClick={onConfirm}
+            disabled={saving || (notaRequerida && !nota.trim())}
+          >
+            {saving ? "Guardando…" : "Guardar clasificación"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ApplyConfirmModal({
   rows,
   applying,
@@ -2298,7 +2713,7 @@ function ApplyConfirmModal({
         position: "fixed",
         inset: 0,
         zIndex: 1000,
-        background: "rgba(0,0,0,.65)",
+        background: "rgba(0,0,0,.75)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -2319,13 +2734,14 @@ function ApplyConfirmModal({
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 style={{ margin: "0 0 12px 0", fontSize: 16 }}>
-          Confirmar corrección de tipo documento
+        <h3 style={{ margin: "0 0 12px 0", fontSize: 16, color: "rgba(254,226,226,.98)" }}>
+          ⚠ Esto sí modificará cedulas.tipo_documento
         </h3>
-        <p style={{ fontSize: 13, color: "rgba(234,243,255,.8)", lineHeight: 1.5 }}>
-          Esto modificará únicamente cedulas.tipo_documento.
+        <p style={{ fontSize: 13, color: "rgba(254,226,226,.9)", lineHeight: 1.5 }}>
+          Vas a escribir el tipo nuevo en la tabla <strong>cedulas</strong> para{" "}
+          {rows.length} fila(s). La auditoría quedará marcada como aplicada.
           <br />
-          No modifica PDFs, Storage, PJN ni OCR.
+          No modifica PDFs, Storage, PJN ni OCR productivo.
         </p>
         <div className="tableWrap" style={{ marginTop: 16, marginBottom: 16 }}>
           <table className="table" style={{ fontSize: 12 }}>
@@ -2356,10 +2772,23 @@ function ApplyConfirmModal({
                     />
                   </td>
                   <td>
-                    <Badge {...tipoBadge(r.clasificacion_pdf)} />
+                    <Badge
+                      {...tipoBadge(
+                        r.tipo_nuevo ??
+                          resolverTipoNuevoAudit(
+                            r.clasificacion_manual,
+                            r.clasificacion_pdf
+                          )
+                      )}
+                    />
                   </td>
                   <td style={tabNum}>
                     {r.confianza != null ? r.confianza.toFixed(2) : "—"}
+                    {r.clasificacion_manual && (
+                      <div className="muted" style={{ fontSize: 9 }}>
+                        manual
+                      </div>
+                    )}
                   </td>
                   <td>
                     <Badge {...revisionBadge(r)} />
@@ -2378,8 +2807,12 @@ function ApplyConfirmModal({
             className="btn primary"
             onClick={onConfirm}
             disabled={applying || rows.length === 0}
+            style={{
+              background: "rgba(220,38,38,.45)",
+              borderColor: "rgba(248,113,113,.65)",
+            }}
           >
-            {applying ? "Aplicando…" : "Confirmar aplicación"}
+            {applying ? "Aplicando…" : "Sí, modificar cedulas.tipo_documento"}
           </button>
         </div>
       </div>

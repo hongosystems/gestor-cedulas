@@ -4,6 +4,7 @@ import { getUserFromRequest } from "@/lib/auth-api";
 import {
   evaluarAplicabilidadAudit,
   requireSuperadmin,
+  resolverTipoNuevoAudit,
   tieneInconsistenciaTipo,
   type RollbackDataPdfAudit,
 } from "@/lib/auditoria-tipo-documento-pdf";
@@ -89,7 +90,7 @@ export async function POST(req: NextRequest) {
     const { data: audit, error: fetchErr } = await svc
       .from("cedulas_tipo_documento_pdf_audit")
       .select(
-        "id, cedula_id, tipo_documento_actual, clasificacion_pdf, confianza, aplicado, revisado, revision_estado"
+        "id, cedula_id, tipo_documento_actual, clasificacion_pdf, clasificacion_manual, confianza, aplicado, revisado, revision_estado"
       )
       .eq("id", auditId)
       .maybeSingle();
@@ -132,34 +133,37 @@ export async function POST(req: NextRequest) {
     }
 
     const tipoActualLive = cedula.tipo_documento;
+    const tipoNuevo = resolverTipoNuevoAudit(
+      audit.clasificacion_manual,
+      audit.clasificacion_pdf
+    );
+
     const evalResult = evaluarAplicabilidadAudit({
       revision_estado: audit.revision_estado,
       revisado: audit.revisado === true,
       clasificacion_pdf: audit.clasificacion_pdf,
+      clasificacion_manual: audit.clasificacion_manual,
       confianza:
         audit.confianza != null ? Number(audit.confianza) : null,
       aplicado: audit.aplicado === true,
       tipo_documento_actual: tipoActualLive,
-      mismatch: tieneInconsistenciaTipo(
-        tipoActualLive,
-        audit.clasificacion_pdf
-      ),
+      mismatch: tipoNuevo
+        ? tieneInconsistenciaTipo(tipoActualLive, tipoNuevo)
+        : false,
     });
 
-    if (!evalResult.aplicable) {
+    if (!evalResult.aplicable || !tipoNuevo) {
       rechazadas++;
       resultados.push({
         audit_id: auditId,
         status: "rejected",
-        motivo: evalResult.motivo,
+        motivo: evalResult.motivo ?? "Sin tipo aplicable",
         cedula_id: audit.cedula_id,
         tipo_documento_anterior: tipoActualLive,
-        tipo_documento_nuevo: audit.clasificacion_pdf,
+        tipo_documento_nuevo: tipoNuevo ?? undefined,
       });
       continue;
     }
-
-    const tipoNuevo = audit.clasificacion_pdf as "CEDULA" | "OFICIO";
     const appliedAt = new Date().toISOString();
     const rollbackData: RollbackDataPdfAudit = {
       cedula_id: audit.cedula_id,
@@ -170,6 +174,8 @@ export async function POST(req: NextRequest) {
       revision_estado: "CONFIRMADO",
       applied_by: user.id,
       applied_at: appliedAt,
+      clasificacion_manual: audit.clasificacion_manual ?? null,
+      clasificacion_pdf: audit.clasificacion_pdf,
     };
 
     const { error: updCedulaErr } = await svc
@@ -231,6 +237,11 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     ok: true,
+    mensaje:
+      aplicadas > 0
+        ? "Se modificó cedulas.tipo_documento en las filas aplicadas."
+        : "No se aplicaron cambios en cedulas.tipo_documento.",
+    cedulas_modificada: aplicadas > 0,
     aplicadas,
     rechazadas,
     errores,
