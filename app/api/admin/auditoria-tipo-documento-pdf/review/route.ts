@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
   const estado = String(body.estado || "").trim().toUpperCase() as RevisionEstado;
   if (!REVISION_ESTADOS.includes(estado)) {
     return NextResponse.json(
-      { error: "estado debe ser CONFIRMADO, RECHAZADO o DUDA" },
+      { error: "estado debe ser CONFIRMADO, RECHAZADO, DUDA o VALIDADO_SIN_CAMBIOS" },
       { status: 400 }
     );
   }

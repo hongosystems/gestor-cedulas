@@ -1887,12 +1887,26 @@ export async function descargarPdfDesdeStorage(
 
 export const AUDIT_APPLY_MIN_CONFIDENCE = 0.9;
 
-export type RevisionEstado = "CONFIRMADO" | "RECHAZADO" | "DUDA";
+export type RevisionEstado =
+  | "CONFIRMADO"
+  | "RECHAZADO"
+  | "DUDA"
+  | "VALIDADO_SIN_CAMBIOS";
 
 export const REVISION_ESTADOS: RevisionEstado[] = [
   "CONFIRMADO",
   "RECHAZADO",
   "DUDA",
+  "VALIDADO_SIN_CAMBIOS",
+];
+
+export type ApplyEstado = "APLICADO" | "SIN_CAMBIOS" | "RECHAZADO" | "ERROR";
+
+export const APPLY_ESTADOS: ApplyEstado[] = [
+  "APLICADO",
+  "SIN_CAMBIOS",
+  "RECHAZADO",
+  "ERROR",
 ];
 
 export type RollbackDataPdfAudit = {
@@ -1901,11 +1915,12 @@ export type RollbackDataPdfAudit = {
   tipo_documento_anterior: string | null;
   tipo_documento_nuevo: "CEDULA" | "OFICIO";
   confianza: number | null;
-  revision_estado: RevisionEstado;
+  revision_estado: RevisionEstado | string;
   applied_by: string;
   applied_at: string;
   clasificacion_pdf?: string;
   clasificacion_manual?: string | null;
+  apply_estado?: ApplyEstado;
 };
 
 /** Normaliza tipo_documento para comparar transiciones permitidas. */
@@ -1988,7 +2003,9 @@ export type FilaContadoresAuditoria = {
   confianza: number | null;
   aplicado: boolean;
   aplicable: boolean;
+  seleccionable?: boolean;
   mismatch: boolean;
+  apply_estado?: string | null;
 };
 
 export type ContadoresAuditoria = {
@@ -1996,13 +2013,16 @@ export type ContadoresAuditoria = {
   total_unicas_cedula: number;
   sin_revisar: number;
   confirmadas: number;
+  validadas_sin_cambios: number;
   rechazadas: number;
   duda: number;
   indeterminadas: number;
   inconsistencias: number;
   aplicables: number;
   aplicadas: number;
+  sin_cambios: number;
   pendientes_aplicar: number;
+  pendientes_revision: number;
   no_aplicables: number;
   detectada_cedula: number;
   detectada_oficio: number;
@@ -2011,6 +2031,83 @@ export type ContadoresAuditoria = {
   manual_oficio: number;
   manual_indeterminado: number;
 };
+
+export type AccionFilaSugerida =
+  | "validar_sin_cambios"
+  | "confirmar_correccion"
+  | "resolver_manual";
+
+/** true si tipo actual normalizado coincide con tipo_nuevo. */
+export function tiposCoinciden(
+  tipoActual: string | null | undefined,
+  tipoNuevo: "CEDULA" | "OFICIO"
+): boolean {
+  return normalizarTipoDocumento(tipoActual) === tipoNuevo;
+}
+
+export function sugerirAccionFila(input: {
+  clasificacion_pdf: string;
+  clasificacion_manual?: string | null;
+  tipo_documento_actual: string | null;
+}): AccionFilaSugerida {
+  if (input.clasificacion_pdf === "INDETERMINADO") {
+    return "resolver_manual";
+  }
+  const tipoNuevo = resolverTipoNuevoAudit(
+    input.clasificacion_manual,
+    input.clasificacion_pdf
+  );
+  if (!tipoNuevo) return "resolver_manual";
+  if (tiposCoinciden(input.tipo_documento_actual, tipoNuevo)) {
+    return "validar_sin_cambios";
+  }
+  return "confirmar_correccion";
+}
+
+export function revisionPermiteApply(revision_estado: string | null): boolean {
+  return (
+    revision_estado === "CONFIRMADO" ||
+    revision_estado === "VALIDADO_SIN_CAMBIOS"
+  );
+}
+
+export type FilaBusquedaAuditoria = {
+  id: string;
+  cedula_id: string;
+  ocr_exp_nro?: string | null;
+  caratula?: string | null;
+  ocr_caratula?: string | null;
+  juzgado?: string | null;
+  ocr_destinatario?: string | null;
+  contexto_detectado?: {
+    expediente?: string | null;
+    caratula?: string | null;
+    juzgado?: string | null;
+    destinatario?: string | null;
+  } | null;
+};
+
+export function filaCoincideBusqueda(
+  fila: FilaBusquedaAuditoria,
+  q: string
+): boolean {
+  const needle = q.trim().toLowerCase();
+  if (!needle) return true;
+  const campos: (string | null | undefined)[] = [
+    fila.id,
+    fila.cedula_id,
+    fila.ocr_exp_nro,
+    fila.caratula,
+    fila.ocr_caratula,
+    fila.juzgado,
+    fila.ocr_destinatario,
+    fila.contexto_detectado?.expediente,
+    fila.contexto_detectado?.caratula,
+    fila.contexto_detectado?.juzgado,
+    fila.contexto_detectado?.destinatario,
+  ];
+  return campos.some((c) => (c ?? "").toLowerCase().includes(needle));
+}
 
 export function calcularContadoresAuditoria(
   filas: FilaContadoresAuditoria[],
@@ -2021,13 +2118,16 @@ export function calcularContadoresAuditoria(
     total_unicas_cedula: filas.length,
     sin_revisar: 0,
     confirmadas: 0,
+    validadas_sin_cambios: 0,
     rechazadas: 0,
     duda: 0,
     indeterminadas: 0,
     inconsistencias: 0,
     aplicables: 0,
     aplicadas: 0,
+    sin_cambios: 0,
     pendientes_aplicar: 0,
+    pendientes_revision: 0,
     no_aplicables: 0,
     detectada_cedula: 0,
     detectada_oficio: 0,
@@ -2038,8 +2138,11 @@ export function calcularContadoresAuditoria(
   };
 
   for (const r of filas) {
-    if (!r.revisado) c.sin_revisar++;
-    else if (r.revision_estado === "CONFIRMADO") c.confirmadas++;
+    if (!r.revisado) {
+      c.sin_revisar++;
+      c.pendientes_revision++;
+    } else if (r.revision_estado === "CONFIRMADO") c.confirmadas++;
+    else if (r.revision_estado === "VALIDADO_SIN_CAMBIOS") c.validadas_sin_cambios++;
     else if (r.revision_estado === "RECHAZADO") c.rechazadas++;
     else if (r.revision_estado === "DUDA") c.duda++;
 
@@ -2057,12 +2160,23 @@ export function calcularContadoresAuditoria(
       c.indeterminadas++;
     }
     if (r.mismatch) c.inconsistencias++;
-    if (r.aplicado) c.aplicadas++;
+    if (r.aplicado) {
+      if (r.apply_estado === "SIN_CAMBIOS") c.sin_cambios++;
+      else c.aplicadas++;
+    }
     if (r.aplicable) {
       c.aplicables++;
       if (!r.aplicado) c.pendientes_aplicar++;
     } else if (!r.aplicado) {
       c.no_aplicables++;
+    }
+    if (
+      r.revisado &&
+      !r.aplicado &&
+      revisionPermiteApply(r.revision_estado) &&
+      r.aplicable
+    ) {
+      // ya contado en pendientes_aplicar
     }
   }
 
@@ -2077,8 +2191,8 @@ export function evaluarAplicabilidadAudit(input: {
   confianza: number | null;
   aplicado: boolean;
   tipo_documento_actual: string | null;
-  /** Si se omite, se calcula contra tipo_nuevo resuelto. */
   mismatch?: boolean;
+  allow_noop?: boolean;
 }): AplicabilidadAudit {
   if (input.aplicado) {
     return { aplicable: false, motivo: "Ya aplicado" };
@@ -2086,10 +2200,10 @@ export function evaluarAplicabilidadAudit(input: {
   if (!input.revisado) {
     return { aplicable: false, motivo: "Sin revisión humana" };
   }
-  if (input.revision_estado !== "CONFIRMADO") {
+  if (!revisionPermiteApply(input.revision_estado)) {
     return {
       aplicable: false,
-      motivo: `Revisión ${input.revision_estado ?? "sin estado"} (se requiere CONFIRMADO)`,
+      motivo: `Revisión ${input.revision_estado ?? "sin estado"} (se requiere CONFIRMADO o VALIDADO_SIN_CAMBIOS)`,
     };
   }
 
@@ -2115,16 +2229,18 @@ export function evaluarAplicabilidadAudit(input: {
     }
   }
 
-  const actualNorm = normalizarTipoDocumento(input.tipo_documento_actual);
-  const rawActual = (input.tipo_documento_actual ?? "").trim();
-  const necesitaCambio = actualNorm === null && !rawActual ? true : actualNorm !== tipoNuevo;
-  if (!necesitaCambio) {
+  const coincide = tiposCoinciden(input.tipo_documento_actual, tipoNuevo);
+  if (coincide) {
+    if (input.allow_noop) {
+      return { aplicable: true, motivo: "Sin cambios (modo experto)" };
+    }
     return {
       aplicable: false,
-      motivo: "Tipo actual ya coincide con el tipo a aplicar",
+      motivo: "Tipo actual ya coincide (usar Validar sin cambios o modo experto)",
     };
   }
 
+  const actualNorm = normalizarTipoDocumento(input.tipo_documento_actual);
   const inconsistency =
     input.mismatch ?? tieneInconsistenciaTipo(input.tipo_documento_actual, tipoNuevo);
   if (!inconsistency && actualNorm !== null) {
@@ -2138,6 +2254,12 @@ export function evaluarAplicabilidadAudit(input: {
     };
   }
   return { aplicable: true, motivo: null };
+}
+
+export function evaluarSeleccionabilidadAudit(
+  input: Parameters<typeof evaluarAplicabilidadAudit>[0]
+): AplicabilidadAudit {
+  return evaluarAplicabilidadAudit(input);
 }
 
 // =============================================================================

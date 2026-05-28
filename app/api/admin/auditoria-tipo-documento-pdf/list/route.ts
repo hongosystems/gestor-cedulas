@@ -4,10 +4,12 @@ import { getUserFromRequest } from "@/lib/auth-api";
 import {
   calcularContadoresAuditoria,
   evaluarAplicabilidadAudit,
+  filaCoincideBusqueda,
   leerContextoDeRazones,
   leerFuenteDeRazones,
   requireSuperadmin,
   resolverTipoNuevoAudit,
+  sugerirAccionFila,
 } from "@/lib/auditoria-tipo-documento-pdf";
 
 export const runtime = "nodejs";
@@ -28,6 +30,7 @@ export const runtime = "nodejs";
  *     reciente). Si true, se devuelven todas las filas (historial completo).
  *     No se borra nada en ningún caso.
  *   - limit (default 100, max 500). Se aplica DESPUÉS del dedupe.
+ *   - q=... búsqueda case-insensitive en expediente, carátula, juzgado, etc.
  */
 export async function GET(req: NextRequest) {
   const user = await getUserFromRequest(req);
@@ -47,8 +50,9 @@ export async function GET(req: NextRequest) {
   const onlyMismatches = url.get("only_mismatches") === "true";
   const mostrarHistorialCompleto =
     url.get("mostrar_historial_completo") === "true";
-  const limitRaw = parseInt(url.get("limit") ?? "100", 10);
-  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 500) : 100;
+  const limitRaw = parseInt(url.get("limit") ?? "500", 10);
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 500) : 500;
+  const q = (url.get("q") ?? "").trim();
 
   // Trae un cap razonable de filas DESC; el dedupe por cedula_id (cuando
   // mostrar_historial_completo=false) ocurre en memoria, y el limit final se
@@ -59,7 +63,7 @@ export async function GET(req: NextRequest) {
     .from("cedulas_tipo_documento_pdf_audit")
     .select(
       "id, cedula_id, tipo_documento_actual, clasificacion_pdf, clasificacion_manual, clasificacion_manual_at, clasificacion_manual_by, clasificacion_manual_nota, confianza, razones, archivo_origen, " +
-        "aplicado, aplicado_at, rollback_data, revisado, revisado_at, revisado_by, revision_estado, revision_nota, created_at, " +
+        "aplicado, aplicado_at, aplicado_by, apply_estado, rollback_data, revisado, revisado_at, revisado_by, revision_estado, revision_nota, created_at, " +
         "cedulas:cedulas!cedulas_tipo_documento_pdf_audit_cedula_id_fkey(caratula, ocr_caratula, juzgado, ocr_exp_nro, ocr_destinatario, pdf_path, estado_ocr, pjn_cargado_at, tipo_documento)"
     )
     .order("created_at", { ascending: false })
@@ -87,6 +91,8 @@ export async function GET(req: NextRequest) {
     archivo_origen: string | null;
     aplicado: boolean;
     aplicado_at: string | null;
+    aplicado_by: string | null;
+    apply_estado: string | null;
     rollback_data: unknown;
     revisado: boolean;
     revisado_at: string | null;
@@ -157,6 +163,13 @@ export async function GET(req: NextRequest) {
       revision_nota: r.revision_nota,
       aplicable: aplicabilidad.aplicable,
       aplicable_motivo: aplicabilidad.motivo,
+      sugerir_accion: sugerirAccionFila({
+        clasificacion_pdf: r.clasificacion_pdf,
+        clasificacion_manual: r.clasificacion_manual,
+        tipo_documento_actual: tipoActualLive,
+      }),
+      aplicado_by: r.aplicado_by,
+      apply_estado: r.apply_estado,
       created_at: r.created_at,
       caratula: r.cedulas?.caratula ?? null,
       ocr_caratula: r.cedulas?.ocr_caratula ?? null,
@@ -189,9 +202,27 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const filtrados = onlyMismatches
+  let filtrados = onlyMismatches
     ? despuesDeDedupe.filter((r) => r.mismatch)
     : despuesDeDedupe;
+
+  if (q) {
+    filtrados = filtrados.filter((r) =>
+      filaCoincideBusqueda(
+        {
+          id: r.id,
+          cedula_id: r.cedula_id,
+          ocr_exp_nro: r.ocr_exp_nro,
+          caratula: r.caratula,
+          ocr_caratula: r.ocr_caratula,
+          juzgado: r.juzgado,
+          ocr_destinatario: r.ocr_destinatario,
+          contexto_detectado: r.contexto_detectado,
+        },
+        q
+      )
+    );
+  }
 
   const conLimit = filtrados.slice(0, limit);
 
@@ -205,6 +236,7 @@ export async function GET(req: NextRequest) {
       aplicado: r.aplicado,
       aplicable: r.aplicable,
       mismatch: r.mismatch,
+      apply_estado: r.apply_estado,
     })),
     { total_guardadas: rows.length }
   );
@@ -212,6 +244,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     ok: true,
     generated_at: new Date().toISOString(),
+    q: q || null,
     total: conLimit.length,
     total_sin_limit: filtrados.length,
     total_filas_raw: rows.length,

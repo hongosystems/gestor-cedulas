@@ -2,10 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseService } from "@/lib/supabase-server";
 import { getUserFromRequest } from "@/lib/auth-api";
 import {
+  AUDIT_APPLY_MIN_CONFIDENCE,
   evaluarAplicabilidadAudit,
+  normalizarTipoDocumento,
   requireSuperadmin,
   resolverTipoNuevoAudit,
-  tieneInconsistenciaTipo,
+  revisionPermiteApply,
+  tieneClasificacionManualAplicable,
+  tiposCoinciden,
+  type ApplyEstado,
   type RollbackDataPdfAudit,
 } from "@/lib/auditoria-tipo-documento-pdf";
 
@@ -14,11 +19,15 @@ export const runtime = "nodejs";
 type Body = {
   audit_ids: string[];
   confirm?: boolean;
+  allow_noop?: boolean;
 };
+
+type ItemStatus = "applied" | "noop" | "rejected" | "error";
 
 type ItemResult = {
   audit_id: string;
-  status: "applied" | "rejected" | "error";
+  status: ItemStatus;
+  apply_estado?: ApplyEstado;
   motivo: string | null;
   cedula_id?: string;
   tipo_documento_anterior?: string | null;
@@ -29,6 +38,7 @@ type ItemResult = {
  * POST /api/admin/auditoria-tipo-documento-pdf/apply
  *
  * Aplica correcciones confirmadas: solo UPDATE cedulas.tipo_documento.
+ * Con allow_noop=true registra SIN_CAMBIOS sin UPDATE.
  */
 export async function POST(req: NextRequest) {
   const user = await getUserFromRequest(req);
@@ -58,6 +68,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const allowNoop = body.allow_noop === true;
   const rawIds = Array.isArray(body.audit_ids) ? body.audit_ids : [];
   const auditIds = rawIds.map((id) => String(id).trim()).filter(Boolean);
 
@@ -83,6 +94,7 @@ export async function POST(req: NextRequest) {
 
   const resultados: ItemResult[] = [];
   let aplicadas = 0;
+  let sinCambios = 0;
   let rechazadas = 0;
   let errores = 0;
 
@@ -100,6 +112,7 @@ export async function POST(req: NextRequest) {
       resultados.push({
         audit_id: auditId,
         status: "error",
+        apply_estado: "ERROR",
         motivo: fetchErr.message,
       });
       continue;
@@ -110,7 +123,64 @@ export async function POST(req: NextRequest) {
       resultados.push({
         audit_id: auditId,
         status: "rejected",
+        apply_estado: "RECHAZADO",
         motivo: "Auditoría no encontrada",
+      });
+      continue;
+    }
+
+    if (audit.aplicado === true) {
+      rechazadas++;
+      resultados.push({
+        audit_id: auditId,
+        status: "rejected",
+        apply_estado: "RECHAZADO",
+        motivo: "Ya aplicado",
+        cedula_id: audit.cedula_id,
+      });
+      continue;
+    }
+
+    if (!audit.revisado || !revisionPermiteApply(audit.revision_estado)) {
+      rechazadas++;
+      resultados.push({
+        audit_id: auditId,
+        status: "rejected",
+        apply_estado: "RECHAZADO",
+        motivo: "Revisión no válida para apply (requiere CONFIRMADO o VALIDADO_SIN_CAMBIOS)",
+        cedula_id: audit.cedula_id,
+      });
+      continue;
+    }
+
+    const tipoNuevo = resolverTipoNuevoAudit(
+      audit.clasificacion_manual,
+      audit.clasificacion_pdf
+    );
+
+    if (!tipoNuevo) {
+      rechazadas++;
+      resultados.push({
+        audit_id: auditId,
+        status: "rejected",
+        apply_estado: "RECHAZADO",
+        motivo: "tipo_nuevo inválido (INDETERMINADO)",
+        cedula_id: audit.cedula_id,
+      });
+      continue;
+    }
+
+    if (
+      !tieneClasificacionManualAplicable(audit.clasificacion_manual) &&
+      (audit.confianza == null || Number(audit.confianza) < AUDIT_APPLY_MIN_CONFIDENCE)
+    ) {
+      rechazadas++;
+      resultados.push({
+        audit_id: auditId,
+        status: "rejected",
+        apply_estado: "RECHAZADO",
+        motivo: `Confianza insuficiente (< ${AUDIT_APPLY_MIN_CONFIDENCE})`,
+        cedula_id: audit.cedula_id,
       });
       continue;
     }
@@ -126,6 +196,7 @@ export async function POST(req: NextRequest) {
       resultados.push({
         audit_id: auditId,
         status: "rejected",
+        apply_estado: "RECHAZADO",
         motivo: "Cédula no encontrada",
         cedula_id: audit.cedula_id,
       });
@@ -133,51 +204,100 @@ export async function POST(req: NextRequest) {
     }
 
     const tipoActualLive = cedula.tipo_documento;
-    const tipoNuevo = resolverTipoNuevoAudit(
-      audit.clasificacion_manual,
-      audit.clasificacion_pdf
-    );
-
     const evalResult = evaluarAplicabilidadAudit({
       revision_estado: audit.revision_estado,
-      revisado: audit.revisado === true,
+      revisado: true,
       clasificacion_pdf: audit.clasificacion_pdf,
       clasificacion_manual: audit.clasificacion_manual,
-      confianza:
-        audit.confianza != null ? Number(audit.confianza) : null,
-      aplicado: audit.aplicado === true,
+      confianza: audit.confianza != null ? Number(audit.confianza) : null,
+      aplicado: false,
       tipo_documento_actual: tipoActualLive,
-      mismatch: tipoNuevo
-        ? tieneInconsistenciaTipo(tipoActualLive, tipoNuevo)
-        : false,
+      allow_noop: allowNoop,
     });
 
-    if (!evalResult.aplicable || !tipoNuevo) {
+    if (!evalResult.aplicable) {
       rechazadas++;
       resultados.push({
         audit_id: auditId,
         status: "rejected",
-        motivo: evalResult.motivo ?? "Sin tipo aplicable",
+        apply_estado: "RECHAZADO",
+        motivo: evalResult.motivo,
         cedula_id: audit.cedula_id,
         tipo_documento_anterior: tipoActualLive,
-        tipo_documento_nuevo: tipoNuevo ?? undefined,
+        tipo_documento_nuevo: tipoNuevo,
       });
       continue;
     }
+
     const appliedAt = new Date().toISOString();
+    const revisionEstado = (audit.revision_estado ?? "CONFIRMADO") as RollbackDataPdfAudit["revision_estado"];
     const rollbackData: RollbackDataPdfAudit = {
       cedula_id: audit.cedula_id,
       audit_id: audit.id,
       tipo_documento_anterior: tipoActualLive,
       tipo_documento_nuevo: tipoNuevo,
       confianza: audit.confianza != null ? Number(audit.confianza) : null,
-      revision_estado: "CONFIRMADO",
+      revision_estado: revisionEstado,
       applied_by: user.id,
       applied_at: appliedAt,
       clasificacion_manual: audit.clasificacion_manual ?? null,
       clasificacion_pdf: audit.clasificacion_pdf,
     };
 
+    const esNoop = tiposCoinciden(tipoActualLive, tipoNuevo);
+    if (esNoop) {
+      rollbackData.apply_estado = "SIN_CAMBIOS";
+      const { error: updAuditErr } = await svc
+        .from("cedulas_tipo_documento_pdf_audit")
+        .update({
+          aplicado: true,
+          aplicado_at: appliedAt,
+          aplicado_by: user.id,
+          apply_estado: "SIN_CAMBIOS",
+          rollback_data: rollbackData,
+        })
+        .eq("id", auditId)
+        .eq("aplicado", false);
+
+      if (updAuditErr) {
+        errores++;
+        resultados.push({
+          audit_id: auditId,
+          status: "error",
+          apply_estado: "ERROR",
+          motivo: updAuditErr.message,
+          cedula_id: audit.cedula_id,
+        });
+        continue;
+      }
+
+      sinCambios++;
+      resultados.push({
+        audit_id: auditId,
+        status: "noop",
+        apply_estado: "SIN_CAMBIOS",
+        motivo: null,
+        cedula_id: audit.cedula_id,
+        tipo_documento_anterior: tipoActualLive,
+        tipo_documento_nuevo: tipoNuevo,
+      });
+      continue;
+    }
+
+    const actualNorm = normalizarTipoDocumento(tipoActualLive);
+    if (actualNorm === tipoNuevo) {
+      rechazadas++;
+      resultados.push({
+        audit_id: auditId,
+        status: "rejected",
+        apply_estado: "RECHAZADO",
+        motivo: "sin cambios",
+        cedula_id: audit.cedula_id,
+      });
+      continue;
+    }
+
+    rollbackData.apply_estado = "APLICADO";
     const { error: updCedulaErr } = await svc
       .from("cedulas")
       .update({ tipo_documento: tipoNuevo })
@@ -188,6 +308,7 @@ export async function POST(req: NextRequest) {
       resultados.push({
         audit_id: auditId,
         status: "error",
+        apply_estado: "ERROR",
         motivo: updCedulaErr.message,
         cedula_id: audit.cedula_id,
       });
@@ -199,13 +320,14 @@ export async function POST(req: NextRequest) {
       .update({
         aplicado: true,
         aplicado_at: appliedAt,
+        aplicado_by: user.id,
+        apply_estado: "APLICADO",
         rollback_data: rollbackData,
       })
       .eq("id", auditId)
       .eq("aplicado", false);
 
     if (updAuditErr) {
-      // Revertir cédula si falló marcar auditoría (best-effort)
       await svc
         .from("cedulas")
         .update({ tipo_documento: tipoActualLive })
@@ -214,6 +336,7 @@ export async function POST(req: NextRequest) {
       resultados.push({
         audit_id: auditId,
         status: "error",
+        apply_estado: "ERROR",
         motivo: `Cédula actualizada pero falló marcar auditoría: ${updAuditErr.message}`,
         cedula_id: audit.cedula_id,
       });
@@ -224,6 +347,7 @@ export async function POST(req: NextRequest) {
     resultados.push({
       audit_id: auditId,
       status: "applied",
+      apply_estado: "APLICADO",
       motivo: null,
       cedula_id: audit.cedula_id,
       tipo_documento_anterior: tipoActualLive,
@@ -232,7 +356,7 @@ export async function POST(req: NextRequest) {
   }
 
   console.info(
-    `[tipo-doc-audit][apply] user=${user.id} aplicadas=${aplicadas} rechazadas=${rechazadas} errores=${errores}`
+    `[tipo-doc-audit][apply] user=${user.id} aplicadas=${aplicadas} sin_cambios=${sinCambios} rechazadas=${rechazadas} errores=${errores}`
   );
 
   return NextResponse.json({
@@ -240,9 +364,12 @@ export async function POST(req: NextRequest) {
     mensaje:
       aplicadas > 0
         ? "Se modificó cedulas.tipo_documento en las filas aplicadas."
-        : "No se aplicaron cambios en cedulas.tipo_documento.",
+        : sinCambios > 0
+          ? "Registros marcados SIN_CAMBIOS. No se modificó cedulas.tipo_documento."
+          : "No se aplicaron cambios en cedulas.tipo_documento.",
     cedulas_modificada: aplicadas > 0,
     aplicadas,
+    sin_cambios: sinCambios,
     rechazadas,
     errores,
     total: auditIds.length,

@@ -4,9 +4,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import {
   calcularContadoresAuditoria,
+  evaluarSeleccionabilidadAudit,
+  filaCoincideBusqueda,
   normalizarTipoDocumento,
   resolverDatoConPrioridad,
   resolverTipoNuevoAudit,
+  sugerirAccionFila,
   type ClasificacionManual,
   type ContadoresAuditoria,
   type ResolucionDato,
@@ -140,6 +143,9 @@ type AuditRow = {
   revision_nota: string | null;
   aplicable: boolean;
   aplicable_motivo: string | null;
+  sugerir_accion?: "validar_sin_cambios" | "confirmar_correccion" | "resolver_manual";
+  aplicado_by: string | null;
+  apply_estado: string | null;
   created_at: string;
   caratula: string | null;
   ocr_caratula: string | null;
@@ -343,11 +349,24 @@ export default function AuditoriaTipoDocumentoPage() {
     useState<FilterClasificacion>("todos");
   const [filterFuente, setFilterFuente] = useState<"todas" | FuenteTexto>("todas");
   const [filterRevision, setFilterRevision] = useState<
-    "todos" | "sin_revisar" | "confirmado" | "rechazado" | "duda"
+    | "todos"
+    | "sin_revisar"
+    | "confirmado"
+    | "validado_sin_cambios"
+    | "rechazado"
+    | "duda"
   >("todos");
   const [filterAplicado, setFilterAplicado] = useState<
-    "todos" | "aplicado" | "no_aplicado" | "aplicable"
+    "todos" | "aplicado" | "no_aplicado" | "sin_cambios" | "aplicable"
   >("todos");
+  const [filterAplicables, setFilterAplicables] = useState<
+    "todos" | "solo_aplicables" | "no_aplicables"
+  >("todos");
+  const [filterMinConfianza, setFilterMinConfianza] = useState<number>(0);
+  const [filterDetectado, setFilterDetectado] = useState<"todos" | Clasif>("todos");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchDebounced, setSearchDebounced] = useState("");
+  const [modoExperto, setModoExperto] = useState(false);
   const [filterTipoActual, setFilterTipoActual] = useState<
     "todos" | "CEDULA" | "OFICIO" | "NULL" | "OTROS"
   >("todos");
@@ -380,6 +399,9 @@ export default function AuditoriaTipoDocumentoPage() {
   const [manualTipo, setManualTipo] = useState<ClasificacionManual>("CEDULA");
   const [manualNota, setManualNota] = useState("");
   const [manualSaving, setManualSaving] = useState(false);
+  const [verDbCedulaId, setVerDbCedulaId] = useState<string | null>(null);
+  const [verDbData, setVerDbData] = useState<Record<string, unknown> | null>(null);
+  const [verDbLoading, setVerDbLoading] = useState(false);
 
   // ── mensajes ────────────────────────────────────────────────────────────
   const [msg, setMsg] = useState<string>("");
@@ -394,15 +416,18 @@ export default function AuditoriaTipoDocumentoPage() {
     return { Authorization: `Bearer ${token}` };
   }, [token]);
 
+  useEffect(() => {
+    const t = window.setTimeout(() => setSearchDebounced(searchQuery.trim()), 400);
+    return () => window.clearTimeout(t);
+  }, [searchQuery]);
+
   const cargarPersistidos = useCallback(
-    async (opts?: { historialCompleto?: boolean }) => {
+    async (opts?: { historialCompleto?: boolean; q?: string }) => {
       const headers = authHeaders();
       if (!headers) return;
-      // Permitimos override puntual del toggle para los cambios on-toggle
-      // (donde el estado React aún no se actualizó). Si no se pasa, usamos el
-      // estado actual.
       const historialCompleto =
         opts?.historialCompleto ?? mostrarHistorialCompleto;
+      const q = opts?.q ?? searchDebounced;
       setReloadingList(true);
       try {
         const qs = new URLSearchParams();
@@ -410,6 +435,8 @@ export default function AuditoriaTipoDocumentoPage() {
           "mostrar_historial_completo",
           historialCompleto ? "true" : "false"
         );
+        qs.set("limit", "500");
+        if (q) qs.set("q", q);
         const res = await fetch(
           `/api/admin/auditoria-tipo-documento-pdf/list?${qs.toString()}`,
           { headers }
@@ -431,8 +458,50 @@ export default function AuditoriaTipoDocumentoPage() {
         setReloadingList(false);
       }
     },
-    [authHeaders, mostrarHistorialCompleto]
+    [authHeaders, mostrarHistorialCompleto, searchDebounced]
   );
+
+  useEffect(() => {
+    if (!token || !allowed) return;
+    void cargarPersistidos({ q: searchDebounced });
+  }, [searchDebounced, token, allowed, cargarPersistidos]);
+
+  function esFilaSeleccionable(r: AuditRow): boolean {
+    const tipoActual = r.tipo_documento_actual_cedulas ?? r.tipo_documento_actual;
+    return evaluarSeleccionabilidadAudit({
+      revision_estado: r.revision_estado,
+      revisado: r.revisado,
+      clasificacion_pdf: r.clasificacion_pdf,
+      clasificacion_manual: r.clasificacion_manual,
+      confianza: r.confianza,
+      aplicado: r.aplicado,
+      tipo_documento_actual: tipoActual,
+      allow_noop: modoExperto,
+    }).aplicable;
+  }
+
+  async function abrirVerDb(cedulaId: string) {
+    const headers = authHeaders();
+    if (!headers) return;
+    setVerDbCedulaId(cedulaId);
+    setVerDbLoading(true);
+    setVerDbData(null);
+    try {
+      const res = await fetch(
+        `/api/admin/auditoria-tipo-documento-pdf/cedula/${cedulaId}`,
+        { headers }
+      );
+      const j = await res.json().catch(() => ({}));
+      if (res.ok && j.cedula) setVerDbData(j.cedula as Record<string, unknown>);
+      else setVerDbData({ error: j?.error || `HTTP ${res.status}` });
+    } catch (e: unknown) {
+      setVerDbData({
+        error: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setVerDbLoading(false);
+    }
+  }
 
   const onToggleHistorialCompleto = useCallback(
     (v: boolean) => {
@@ -495,7 +564,7 @@ export default function AuditoriaTipoDocumentoPage() {
         const [previewRes, listRes] = await Promise.all([
           fetch("/api/admin/auditoria-tipo-documento-pdf/preview", { headers }),
           fetch(
-            "/api/admin/auditoria-tipo-documento-pdf/list?mostrar_historial_completo=false",
+            "/api/admin/auditoria-tipo-documento-pdf/list?mostrar_historial_completo=false&limit=500",
             { headers }
           ),
         ]);
@@ -762,6 +831,7 @@ export default function AuditoriaTipoDocumentoPage() {
         body: JSON.stringify({
           audit_ids: selectedAuditIds,
           confirm: true,
+          allow_noop: modoExperto,
         }),
       });
       const j = await res.json().catch(() => ({} as Record<string, unknown>));
@@ -773,18 +843,19 @@ export default function AuditoriaTipoDocumentoPage() {
         return;
       }
       const aplicadas = Number(j.aplicadas ?? 0);
+      const sinCambios = Number(j.sin_cambios ?? 0);
       const omitidas = Number(j.rechazadas ?? 0);
       const errores = Number(j.errores ?? 0);
       const detalle = (
         (j.resultados as Array<{ audit_id: string; status: string; motivo?: string }>) ??
         []
       )
-        .filter((x) => x.status !== "applied")
+        .filter((x) => x.status !== "applied" && x.status !== "noop")
         .slice(0, 5)
         .map((x) => `${x.audit_id.slice(0, 8)}…: ${x.motivo || x.status}`)
         .join("; ");
       const toastMsg =
-        `Aplicadas: ${aplicadas} · Omitidas: ${omitidas} · Errores: ${errores}` +
+        `Aplicadas: ${aplicadas} · Sin cambios: ${sinCambios} · Omitidas: ${omitidas} · Errores: ${errores}` +
         (detalle ? ` (${detalle})` : "");
       setMsgOk(errores === 0);
       setMsg(toastMsg);
@@ -825,12 +896,41 @@ export default function AuditoriaTipoDocumentoPage() {
     if (filterRevision === "sin_revisar") r = r.filter((x) => !x.revisado);
     if (filterRevision === "confirmado")
       r = r.filter((x) => x.revision_estado === "CONFIRMADO");
+    if (filterRevision === "validado_sin_cambios")
+      r = r.filter((x) => x.revision_estado === "VALIDADO_SIN_CAMBIOS");
     if (filterRevision === "rechazado")
       r = r.filter((x) => x.revision_estado === "RECHAZADO");
     if (filterRevision === "duda") r = r.filter((x) => x.revision_estado === "DUDA");
-    if (filterAplicado === "aplicado") r = r.filter((x) => x.aplicado);
+    if (filterAplicado === "aplicado")
+      r = r.filter((x) => x.aplicado && x.apply_estado === "APLICADO");
+    if (filterAplicado === "sin_cambios")
+      r = r.filter((x) => x.aplicado && x.apply_estado === "SIN_CAMBIOS");
     if (filterAplicado === "no_aplicado") r = r.filter((x) => !x.aplicado);
     if (filterAplicado === "aplicable") r = r.filter((x) => x.aplicable);
+    if (filterAplicables === "solo_aplicables") r = r.filter((x) => x.aplicable);
+    if (filterAplicables === "no_aplicables") r = r.filter((x) => !x.aplicable);
+    if (filterMinConfianza > 0)
+      r = r.filter((x) => (x.confianza ?? 0) >= filterMinConfianza);
+    if (filterDetectado !== "todos")
+      r = r.filter((x) => x.clasificacion_pdf === filterDetectado);
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim();
+      r = r.filter((row) =>
+        filaCoincideBusqueda(
+          {
+            id: row.id,
+            cedula_id: row.cedula_id,
+            ocr_exp_nro: row.ocr_exp_nro,
+            caratula: row.caratula,
+            ocr_caratula: row.ocr_caratula,
+            juzgado: row.juzgado,
+            ocr_destinatario: row.ocr_destinatario,
+            contexto_detectado: row.contexto_detectado,
+          },
+          q
+        )
+      );
+    }
     if (filterTipoActual !== "todos") {
       r = r.filter((x) => {
         const raw = x.tipo_documento_actual_cedulas ?? x.tipo_documento_actual;
@@ -849,6 +949,10 @@ export default function AuditoriaTipoDocumentoPage() {
     filterFuente,
     filterRevision,
     filterAplicado,
+    filterAplicables,
+    filterMinConfianza,
+    filterDetectado,
+    searchQuery,
     filterTipoActual,
   ]);
 
@@ -864,6 +968,7 @@ export default function AuditoriaTipoDocumentoPage() {
           aplicado: r.aplicado,
           aplicable: r.aplicable,
           mismatch: r.mismatch,
+          apply_estado: r.apply_estado,
         })),
         { total_guardadas: filteredRows.length }
       ),
@@ -871,8 +976,8 @@ export default function AuditoriaTipoDocumentoPage() {
   );
 
   const seleccionablesVisibles = useMemo(
-    () => filteredRows.filter((r) => r.aplicable),
-    [filteredRows]
+    () => filteredRows.filter((r) => esFilaSeleccionable(r)),
+    [filteredRows, modoExperto]
   );
 
   const todasVisiblesSeleccionadas =
@@ -1404,6 +1509,40 @@ export default function AuditoriaTipoDocumentoPage() {
               <ContadoresDashboard titulo="Global (última auditoría por cédula)" stats={statsGlobal} />
             )}
             <ContadoresDashboard titulo="Vista actual (filtros activos)" stats={statsVista} />
+            <div
+              style={{
+                marginBottom: 12,
+                fontSize: 12,
+                color: "rgba(219,234,254,.85)",
+                lineHeight: 1.5,
+              }}
+            >
+              Confirmar / Validar no modifica <code>cedulas.tipo_documento</code>. Aplicar
+              correcciones sí modifica únicamente <code>cedulas.tipo_documento</code>.
+            </div>
+            <VistaActualResumen
+              filasVisibles={filteredRows.length}
+              seleccionables={seleccionablesVisibles.length}
+              seleccionadas={selectedAuditIds.length}
+            />
+
+            <input
+              type="search"
+              placeholder="Buscar expediente, carátula, juzgado, destinatario o audit_id"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{
+                width: "100%",
+                maxWidth: 560,
+                marginBottom: 12,
+                padding: "8px 12px",
+                fontSize: 13,
+                background: "rgba(0,0,0,.25)",
+                border: "1px solid rgba(255,255,255,.15)",
+                borderRadius: 8,
+                color: "rgba(234,243,255,.92)",
+              }}
+            />
 
             <div
               style={{
@@ -1507,6 +1646,7 @@ export default function AuditoriaTipoDocumentoPage() {
                   <option value="todos">todos</option>
                   <option value="sin_revisar">sin revisar</option>
                   <option value="confirmado">confirmado</option>
+                  <option value="validado_sin_cambios">validado sin cambios</option>
                   <option value="rechazado">rechazado</option>
                   <option value="duda">duda</option>
                 </select>
@@ -1524,8 +1664,52 @@ export default function AuditoriaTipoDocumentoPage() {
                 >
                   <option value="todos">todos</option>
                   <option value="aplicado">aplicado</option>
+                  <option value="sin_cambios">sin cambios</option>
                   <option value="no_aplicado">no aplicado</option>
                   <option value="aplicable">aplicable</option>
+                </select>
+              </label>
+              <label style={inlineLabel}>
+                Aplicables:
+                <select
+                  value={filterAplicables}
+                  onChange={(e) =>
+                    setFilterAplicables(
+                      e.target.value as "todos" | "solo_aplicables" | "no_aplicables"
+                    )
+                  }
+                  style={{ ...selectStyle, marginLeft: 6, padding: "3px 6px", fontSize: 12 }}
+                >
+                  <option value="todos">todos</option>
+                  <option value="solo_aplicables">solo aplicables</option>
+                  <option value="no_aplicables">no aplicables</option>
+                </select>
+              </label>
+              <label style={inlineLabel}>
+                Conf. mín.:
+                <select
+                  value={filterMinConfianza}
+                  onChange={(e) => setFilterMinConfianza(Number(e.target.value))}
+                  style={{ ...selectStyle, marginLeft: 6, padding: "3px 6px", fontSize: 12 }}
+                >
+                  <option value={0}>todas</option>
+                  <option value={0.9}>0.90</option>
+                  <option value={0.95}>0.95</option>
+                  <option value={0.98}>0.98</option>
+                  <option value={1}>1.00</option>
+                </select>
+              </label>
+              <label style={inlineLabel}>
+                Tipo detectado:
+                <select
+                  value={filterDetectado}
+                  onChange={(e) => setFilterDetectado(e.target.value as "todos" | Clasif)}
+                  style={{ ...selectStyle, marginLeft: 6, padding: "3px 6px", fontSize: 12 }}
+                >
+                  <option value="todos">todos</option>
+                  <option value="CEDULA">CEDULA</option>
+                  <option value="OFICIO">OFICIO</option>
+                  <option value="INDETERMINADO">INDETERMINADO</option>
                 </select>
               </label>
               <label style={inlineLabel}>
@@ -1692,11 +1876,19 @@ export default function AuditoriaTipoDocumentoPage() {
                 flexWrap: "wrap",
               }}
             >
+              <label style={{ ...inlineLabel, fontSize: 12 }}>
+                <input
+                  type="checkbox"
+                  checked={modoExperto}
+                  onChange={(e) => setModoExperto(e.target.checked)}
+                />
+                Modo experto: permitir seleccionar filas sin cambios
+              </label>
               <span style={{ fontSize: 13, fontWeight: 600 }}>
                 {selectedAuditIds.length} seleccionada(s)
                 {seleccionablesVisibles.length > 0 && (
                   <span className="muted" style={{ fontWeight: 400, marginLeft: 6 }}>
-                    · {seleccionablesVisibles.length} aplicable(s) en vista
+                    · {seleccionablesVisibles.length} seleccionable(s) en vista
                   </span>
                 )}
               </span>
@@ -1727,7 +1919,7 @@ export default function AuditoriaTipoDocumentoPage() {
               >
                 {todasVisiblesSeleccionadas
                   ? "Desmarcar todas visibles"
-                  : "Seleccionar todas visibles"}
+                  : "Seleccionar todas aplicables visibles"}
               </button>
             </div>
 
@@ -1735,9 +1927,22 @@ export default function AuditoriaTipoDocumentoPage() {
               <ApplyConfirmModal
                 rows={selectedApplyRows}
                 applying={applying}
+                modoExperto={modoExperto}
                 onCancel={() => setApplyModalOpen(false)}
                 onConfirm={() => {
                   void confirmarApply();
+                }}
+              />
+            )}
+
+            {verDbCedulaId && (
+              <VerDbModal
+                cedulaId={verDbCedulaId}
+                data={verDbData}
+                loading={verDbLoading}
+                onClose={() => {
+                  setVerDbCedulaId(null);
+                  setVerDbData(null);
                 }}
               />
             )}
@@ -1829,10 +2034,22 @@ export default function AuditoriaTipoDocumentoPage() {
                         const fb = fuenteBadge(r.fuente_texto);
                         const meta = leerMetadataGptDeRazones(r.razones);
                         const rev = revisionBadge(r);
-                        const app = aplicadoBadge(r);
+                        const app = aplicadoBadge({
+                          aplicado: r.aplicado,
+                          apply_estado: r.apply_estado,
+                        });
+                        const tipoDbLive = r.tipo_documento_actual_cedulas;
                         const cambio = rollbackCambioLabel(r);
                         const busy = reviewingId === r.id;
-                        const seleccionable = r.aplicable;
+                        const seleccionable = esFilaSeleccionable(r);
+                        const accion =
+                          r.sugerir_accion ??
+                          sugerirAccionFila({
+                            clasificacion_pdf: r.clasificacion_pdf,
+                            clasificacion_manual: r.clasificacion_manual,
+                            tipo_documento_actual:
+                              r.tipo_documento_actual_cedulas ?? r.tipo_documento_actual,
+                          });
                         return (
                           <tr
                             key={r.id}
@@ -1850,7 +2067,9 @@ export default function AuditoriaTipoDocumentoPage() {
                                 disabled={!seleccionable}
                                 title={
                                   seleccionable
-                                    ? "Seleccionar para aplicar corrección"
+                                    ? modoExperto
+                                      ? "Seleccionar (incluye sin cambios en modo experto)"
+                                      : "Seleccionar para aplicar corrección"
                                     : r.aplicable_motivo || "No seleccionable"
                                 }
                                 onChange={() => toggleSelectApply(r.id, seleccionable)}
@@ -1919,6 +2138,17 @@ export default function AuditoriaTipoDocumentoPage() {
                               {r.aplicado && r.aplicado_at && (
                                 <div className="muted" style={{ fontSize: 9, marginTop: 2 }}>
                                   {fmtDate(r.aplicado_at)}
+                                </div>
+                              )}
+                              {r.aplicado && tipoDbLive && (
+                                <div
+                                  style={{
+                                    fontSize: 9,
+                                    marginTop: 4,
+                                    color: "rgba(220,252,231,.85)",
+                                  }}
+                                >
+                                  Resultado DB: {tipoDbLive}
                                 </div>
                               )}
                             </td>
@@ -2045,20 +2275,40 @@ export default function AuditoriaTipoDocumentoPage() {
                                   >
                                     PDF
                                   </button>
-                                  <button
-                                    type="button"
-                                    className="btn"
-                                    disabled={r.aplicado || busy}
-                                    onClick={() => void enviarRevision(r.id, "CONFIRMADO")}
-                                    style={{
-                                      fontSize: 11,
-                                      padding: "4px 8px",
-                                      borderColor: "rgba(46,204,113,.45)",
-                                      background: "rgba(46,204,113,.15)",
-                                    }}
-                                  >
-                                    Confirmar
-                                  </button>
+                                  {accion === "validar_sin_cambios" && (
+                                    <button
+                                      type="button"
+                                      className="btn"
+                                      disabled={r.aplicado || busy}
+                                      onClick={() =>
+                                        void enviarRevision(r.id, "VALIDADO_SIN_CAMBIOS")
+                                      }
+                                      style={{
+                                        fontSize: 11,
+                                        padding: "4px 8px",
+                                        borderColor: "rgba(34,197,94,.55)",
+                                        background: "rgba(34,197,94,.2)",
+                                      }}
+                                    >
+                                      Validar sin cambios
+                                    </button>
+                                  )}
+                                  {accion === "confirmar_correccion" && (
+                                    <button
+                                      type="button"
+                                      className="btn"
+                                      disabled={r.aplicado || busy}
+                                      onClick={() => void enviarRevision(r.id, "CONFIRMADO")}
+                                      style={{
+                                        fontSize: 11,
+                                        padding: "4px 8px",
+                                        borderColor: "rgba(46,204,113,.45)",
+                                        background: "rgba(46,204,113,.15)",
+                                      }}
+                                    >
+                                      Confirmar corrección
+                                    </button>
+                                  )}
                                   <button
                                     type="button"
                                     className="btn"
@@ -2087,7 +2337,7 @@ export default function AuditoriaTipoDocumentoPage() {
                                   >
                                     Duda
                                   </button>
-                                  {r.clasificacion_pdf === "INDETERMINADO" && !r.aplicado && (
+                                  {accion === "resolver_manual" && !r.aplicado && (
                                     <button
                                       type="button"
                                       className="btn"
@@ -2101,6 +2351,27 @@ export default function AuditoriaTipoDocumentoPage() {
                                       }}
                                     >
                                       Resolver manualmente
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    className="btn"
+                                    onClick={() => void abrirVerDb(r.cedula_id)}
+                                    style={{ fontSize: 11, padding: "4px 8px" }}
+                                  >
+                                    Ver DB
+                                  </button>
+                                  {r.rollback_data != null && (
+                                    <button
+                                      type="button"
+                                      className="btn"
+                                      title={JSON.stringify(r.rollback_data, null, 2)}
+                                      onClick={() =>
+                                        alert(JSON.stringify(r.rollback_data, null, 2))
+                                      }
+                                      style={{ fontSize: 11, padding: "4px 8px" }}
+                                    >
+                                      Rollback
                                     </button>
                                   )}
                                 </div>
@@ -2296,7 +2567,15 @@ function rollbackCambioLabel(r: AuditRow): string | null {
   return `${ant} → ${nue}`;
 }
 
-function aplicadoBadge(r: { aplicado: boolean }) {
+function aplicadoBadge(r: { aplicado: boolean; apply_estado?: string | null }) {
+  if (r.aplicado && r.apply_estado === "SIN_CAMBIOS") {
+    return {
+      label: "Sin cambios",
+      bg: "rgba(14,165,233,.18)",
+      border: "rgba(14,165,233,.45)",
+      color: "rgba(224,242,254,.96)",
+    };
+  }
   if (r.aplicado) {
     return {
       label: "Aplicado",
@@ -2330,6 +2609,14 @@ function revisionBadge(r: {
       label: "Confirmado",
       bg: "rgba(46,204,113,.18)",
       border: "rgba(46,204,113,.45)",
+      color: "rgba(220,252,231,.96)",
+    };
+  }
+  if (r.revision_estado === "VALIDADO_SIN_CAMBIOS") {
+    return {
+      label: "Validado OK",
+      bg: "rgba(34,197,94,.18)",
+      border: "rgba(34,197,94,.45)",
       color: "rgba(220,252,231,.96)",
     };
   }
@@ -2511,6 +2798,108 @@ function AutoConfirmModal({
   );
 }
 
+function VistaActualResumen({
+  filasVisibles,
+  seleccionables,
+  seleccionadas,
+}: {
+  filasVisibles: number;
+  seleccionables: number;
+  seleccionadas: number;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 16,
+        flexWrap: "wrap",
+        marginBottom: 12,
+        fontSize: 12,
+        color: "rgba(234,243,255,.85)",
+      }}
+    >
+      <span>
+        <strong>Vista:</strong> {filasVisibles} fila(s) visible(s)
+      </span>
+      <span>
+        <strong>Seleccionables:</strong> {seleccionables}
+      </span>
+      <span>
+        <strong>Seleccionadas:</strong> {seleccionadas}
+      </span>
+    </div>
+  );
+}
+
+function VerDbModal({
+  cedulaId,
+  data,
+  loading,
+  onClose,
+}: {
+  cedulaId: string;
+  data: Record<string, unknown> | null;
+  loading: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 1000,
+        background: "rgba(0,0,0,.65)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          background: "#0f172a",
+          border: "1px solid rgba(255,255,255,.2)",
+          borderRadius: 12,
+          maxWidth: 520,
+          width: "100%",
+          padding: 20,
+          maxHeight: "85vh",
+          overflow: "auto",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 style={{ margin: "0 0 12px 0", fontSize: 16 }}>Cédula en Supabase (live)</h3>
+        <p className="muted" style={{ fontSize: 11, marginBottom: 12 }}>
+          Solo lectura · <code>{cedulaId}</code>
+        </p>
+        {loading && <p>Cargando…</p>}
+        {!loading && data && (
+          <pre
+            style={{
+              fontSize: 11,
+              whiteSpace: "pre-wrap",
+              background: "rgba(0,0,0,.3)",
+              padding: 12,
+              borderRadius: 8,
+              margin: 0,
+            }}
+          >
+            {JSON.stringify(data, null, 2)}
+          </pre>
+        )}
+        <div style={{ marginTop: 16, textAlign: "right" }}>
+          <button type="button" className="btn" onClick={onClose}>
+            Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ContadoresDashboard({
   titulo,
   stats,
@@ -2542,13 +2931,16 @@ function ContadoresDashboard({
         <StatBox label="Únicas cédula" value={stats.total_unicas_cedula} />
         <StatBox label="Sin revisar" value={stats.sin_revisar} />
         <StatBox label="Confirmadas" value={stats.confirmadas} />
+        <StatBox label="Validadas OK" value={stats.validadas_sin_cambios} />
         <StatBox label="Rechazadas" value={stats.rechazadas} />
         <StatBox label="Duda" value={stats.duda} />
         <StatBox label="Indeterminadas" value={stats.indeterminadas} />
         <StatBox label="Inconsistencias" value={stats.inconsistencias} />
         <StatBox label="Aplicables" value={stats.aplicables} />
         <StatBox label="Aplicadas" value={stats.aplicadas} />
+        <StatBox label="Sin cambios" value={stats.sin_cambios} />
         <StatBox label="Pend. aplicar" value={stats.pendientes_aplicar} />
+        <StatBox label="Pend. revisión" value={stats.pendientes_revision} />
         <StatBox label="No aplicables" value={stats.no_aplicables} />
         <StatBox label="Det. CEDULA" value={stats.detectada_cedula} />
         <StatBox label="Det. OFICIO" value={stats.detectada_oficio} />
@@ -2697,11 +3089,13 @@ function ManualClassificationModal({
 function ApplyConfirmModal({
   rows,
   applying,
+  modoExperto,
   onCancel,
   onConfirm,
 }: {
   rows: AuditRow[];
   applying: boolean;
+  modoExperto: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -2740,6 +3134,12 @@ function ApplyConfirmModal({
         <p style={{ fontSize: 13, color: "rgba(254,226,226,.9)", lineHeight: 1.5 }}>
           Vas a escribir el tipo nuevo en la tabla <strong>cedulas</strong> para{" "}
           {rows.length} fila(s). La auditoría quedará marcada como aplicada.
+          {modoExperto && (
+            <>
+              <br />
+              Modo experto: filas sin cambio se marcarán SIN_CAMBIOS sin UPDATE.
+            </>
+          )}
           <br />
           No modifica PDFs, Storage, PJN ni OCR productivo.
         </p>
