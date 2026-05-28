@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseService } from "@/lib/supabase-server";
 import { getUserFromRequest } from "@/lib/auth-api";
 import {
+  evaluarAplicabilidadAudit,
   leerContextoDeRazones,
   leerFuenteDeRazones,
   requireSuperadmin,
@@ -55,7 +56,8 @@ export async function GET(req: NextRequest) {
   const { data, error } = await svc
     .from("cedulas_tipo_documento_pdf_audit")
     .select(
-      "id, cedula_id, tipo_documento_actual, clasificacion_pdf, confianza, razones, archivo_origen, aplicado, created_at, " +
+      "id, cedula_id, tipo_documento_actual, clasificacion_pdf, confianza, razones, archivo_origen, " +
+        "aplicado, aplicado_at, rollback_data, revisado, revisado_at, revisado_by, revision_estado, revision_nota, created_at, " +
         "cedulas:cedulas!cedulas_tipo_documento_pdf_audit_cedula_id_fkey(caratula, ocr_caratula, juzgado, ocr_exp_nro, ocr_destinatario, pdf_path, estado_ocr, pjn_cargado_at, tipo_documento)"
     )
     .order("created_at", { ascending: false })
@@ -78,6 +80,13 @@ export async function GET(req: NextRequest) {
     razones: unknown;
     archivo_origen: string | null;
     aplicado: boolean;
+    aplicado_at: string | null;
+    rollback_data: unknown;
+    revisado: boolean;
+    revisado_at: string | null;
+    revisado_by: string | null;
+    revision_estado: string | null;
+    revision_nota: string | null;
     created_at: string;
     cedulas: {
       caratula: string | null;
@@ -103,6 +112,15 @@ export async function GET(req: NextRequest) {
     // Reconstruir contexto detectado por GPT desde las razones meta. Para
     // registros legados (pre-GPT) será { todos null }.
     const contextoDetectado = leerContextoDeRazones(r.razones);
+    const tipoActualLive = r.cedulas?.tipo_documento ?? r.tipo_documento_actual;
+    const aplicabilidad = evaluarAplicabilidadAudit({
+      revision_estado: r.revision_estado,
+      revisado: r.revisado === true,
+      clasificacion_pdf: r.clasificacion_pdf,
+      confianza: r.confianza != null ? Number(r.confianza) : null,
+      aplicado: r.aplicado === true,
+      tipo_documento_actual: tipoActualLive,
+    });
     return {
       id: r.id,
       cedula_id: r.cedula_id,
@@ -113,6 +131,15 @@ export async function GET(req: NextRequest) {
       razones: r.razones,
       archivo_origen: r.archivo_origen,
       aplicado: r.aplicado,
+      aplicado_at: r.aplicado_at,
+      rollback_data: r.rollback_data,
+      revisado: r.revisado,
+      revisado_at: r.revisado_at,
+      revisado_by: r.revisado_by,
+      revision_estado: r.revision_estado,
+      revision_nota: r.revision_nota,
+      aplicable: aplicabilidad.aplicable,
+      aplicable_motivo: aplicabilidad.motivo,
       created_at: r.created_at,
       caratula: r.cedulas?.caratula ?? null,
       ocr_caratula: r.cedulas?.ocr_caratula ?? null,

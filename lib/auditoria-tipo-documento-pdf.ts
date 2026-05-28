@@ -1882,17 +1882,105 @@ export async function descargarPdfDesdeStorage(
 }
 
 // =============================================================================
-// FASE 7 — APPLY (NO IMPLEMENTAR EN ESTE PR)
+// Revisión humana y apply seguro (solo cedulas.tipo_documento)
 // =============================================================================
-//
-// TODO(Fase 7): exponer POST /api/admin/auditoria-tipo-documento-pdf/apply
-//   - Recibir ids[] de cedulas_tipo_documento_pdf_audit a aplicar.
-//   - Validar que clasificacion_pdf ∈ {CEDULA, OFICIO} (NO INDETERMINADO).
-//   - Snapshot {tipo_documento: <actual>} → rollback_data.
-//   - UPDATE cedulas SET tipo_documento = clasificacion_pdf.
-//   - Marcar aplicado=true, aplicado_at=now() en audit.
-//   - Confirmación fuerte (2 pasos), logueo [tipo-doc-audit][apply].
-//   - Rollback inverso: UPDATE cedulas SET tipo_documento = rollback_data->>'tipo_documento'.
-//
-// Por ahora: este endpoint NO existe, no se referencia desde UI ni se llama.
-// =============================================================================
+
+export const AUDIT_APPLY_MIN_CONFIDENCE = 0.9;
+
+export type RevisionEstado = "CONFIRMADO" | "RECHAZADO" | "DUDA";
+
+export const REVISION_ESTADOS: RevisionEstado[] = [
+  "CONFIRMADO",
+  "RECHAZADO",
+  "DUDA",
+];
+
+export type RollbackDataPdfAudit = {
+  cedula_id: string;
+  audit_id: string;
+  tipo_documento_anterior: string | null;
+  tipo_documento_nuevo: "CEDULA" | "OFICIO";
+  confianza: number | null;
+  revision_estado: RevisionEstado;
+  applied_by: string;
+  applied_at: string;
+};
+
+/** Normaliza tipo_documento para comparar transiciones permitidas. */
+export function normalizarTipoDocumento(
+  tipo: string | null | undefined
+): "CEDULA" | "OFICIO" | null {
+  const t = (tipo ?? "").trim().toUpperCase();
+  if (!t) return null;
+  if (t === "CEDULA" || t === "OFICIO") return t;
+  return null;
+}
+
+/**
+ * Transiciones permitidas al aplicar:
+ *   A) NULL → CEDULA/OFICIO
+ *   B) CEDULA → OFICIO
+ *   C) OFICIO → CEDULA
+ */
+export function esTransicionTipoPermitida(
+  tipoActual: string | null | undefined,
+  tipoNuevo: "CEDULA" | "OFICIO"
+): boolean {
+  const actual = normalizarTipoDocumento(tipoActual);
+  if (actual === null) return true;
+  if (actual === tipoNuevo) return false;
+  return (
+    (actual === "CEDULA" && tipoNuevo === "OFICIO") ||
+    (actual === "OFICIO" && tipoNuevo === "CEDULA")
+  );
+}
+
+export type AplicabilidadAudit = {
+  aplicable: boolean;
+  motivo: string | null;
+};
+
+export function evaluarAplicabilidadAudit(input: {
+  revision_estado: string | null;
+  revisado: boolean;
+  clasificacion_pdf: string;
+  confianza: number | null;
+  aplicado: boolean;
+  tipo_documento_actual: string | null;
+}): AplicabilidadAudit {
+  if (input.aplicado) {
+    return { aplicable: false, motivo: "Ya aplicado" };
+  }
+  if (!input.revisado) {
+    return { aplicable: false, motivo: "Sin revisión humana" };
+  }
+  if (input.revision_estado !== "CONFIRMADO") {
+    return {
+      aplicable: false,
+      motivo: `Revisión ${input.revision_estado ?? "sin estado"} (se requiere CONFIRMADO)`,
+    };
+  }
+  const clasif = input.clasificacion_pdf;
+  if (clasif !== "CEDULA" && clasif !== "OFICIO") {
+    return { aplicable: false, motivo: "Clasificación INDETERMINADO o inválida" };
+  }
+  const conf = input.confianza ?? 0;
+  if (conf < AUDIT_APPLY_MIN_CONFIDENCE) {
+    return {
+      aplicable: false,
+      motivo: `Confianza ${conf.toFixed(2)} < ${AUDIT_APPLY_MIN_CONFIDENCE}`,
+    };
+  }
+  const tipoNuevo = clasif as "CEDULA" | "OFICIO";
+  const actualNorm = normalizarTipoDocumento(input.tipo_documento_actual);
+  if (actualNorm === tipoNuevo) {
+    return { aplicable: false, motivo: "Tipo actual ya coincide con el detectado" };
+  }
+  if (!esTransicionTipoPermitida(input.tipo_documento_actual, tipoNuevo)) {
+    return {
+      aplicable: false,
+      motivo: `Transición no permitida (${input.tipo_documento_actual ?? "NULL"} → ${tipoNuevo})`,
+    };
+  }
+  return { aplicable: true, motivo: null };
+}
