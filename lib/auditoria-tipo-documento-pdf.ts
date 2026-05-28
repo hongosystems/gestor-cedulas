@@ -1940,6 +1940,17 @@ export type AplicabilidadAudit = {
   motivo: string | null;
 };
 
+/** Inconsistencia real: tipo actual distinto al detectado, o tipo actual vacío/NULL. */
+export function tieneInconsistenciaTipo(
+  tipoActual: string | null | undefined,
+  clasificacionPdf: string
+): boolean {
+  if (clasificacionPdf === "INDETERMINADO") return false;
+  const raw = (tipoActual ?? "").trim();
+  if (!raw) return true;
+  return raw.toUpperCase() !== clasificacionPdf;
+}
+
 export function evaluarAplicabilidadAudit(input: {
   revision_estado: string | null;
   revisado: boolean;
@@ -1947,6 +1958,8 @@ export function evaluarAplicabilidadAudit(input: {
   confianza: number | null;
   aplicado: boolean;
   tipo_documento_actual: string | null;
+  /** Si se omite, se calcula con tieneInconsistenciaTipo. */
+  mismatch?: boolean;
 }): AplicabilidadAudit {
   if (input.aplicado) {
     return { aplicable: false, motivo: "Ya aplicado" };
@@ -1970,6 +1983,12 @@ export function evaluarAplicabilidadAudit(input: {
       aplicable: false,
       motivo: `Confianza ${conf.toFixed(2)} < ${AUDIT_APPLY_MIN_CONFIDENCE}`,
     };
+  }
+  const inconsistency =
+    input.mismatch ??
+    tieneInconsistenciaTipo(input.tipo_documento_actual, clasif);
+  if (!inconsistency) {
+    return { aplicable: false, motivo: "Sin inconsistencia real" };
   }
   const tipoNuevo = clasif as "CEDULA" | "OFICIO";
   const actualNorm = normalizarTipoDocumento(input.tipo_documento_actual);

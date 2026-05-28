@@ -120,6 +120,7 @@ export async function GET(req: NextRequest) {
       confianza: r.confianza != null ? Number(r.confianza) : null,
       aplicado: r.aplicado === true,
       tipo_documento_actual: tipoActualLive,
+      mismatch,
     });
     return {
       id: r.id,

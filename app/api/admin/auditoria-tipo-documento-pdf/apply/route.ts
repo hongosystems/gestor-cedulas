@@ -4,6 +4,7 @@ import { getUserFromRequest } from "@/lib/auth-api";
 import {
   evaluarAplicabilidadAudit,
   requireSuperadmin,
+  tieneInconsistenciaTipo,
   type RollbackDataPdfAudit,
 } from "@/lib/auditoria-tipo-documento-pdf";
 
@@ -139,6 +140,10 @@ export async function POST(req: NextRequest) {
         audit.confianza != null ? Number(audit.confianza) : null,
       aplicado: audit.aplicado === true,
       tipo_documento_actual: tipoActualLive,
+      mismatch: tieneInconsistenciaTipo(
+        tipoActualLive,
+        audit.clasificacion_pdf
+      ),
     });
 
     if (!evalResult.aplicable) {

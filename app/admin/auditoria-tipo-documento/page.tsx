@@ -7,6 +7,7 @@ import {
   resolverDatoConPrioridad,
   type ResolucionDato,
   type RevisionEstado,
+  type RollbackDataPdfAudit,
 } from "@/lib/auditoria-tipo-documento-pdf";
 
 // =============================================================================
@@ -317,9 +318,12 @@ export default function AuditoriaTipoDocumentoPage() {
     useState<boolean>(false);
 
   // ── apply selección ─────────────────────────────────────────────────────
-  const [selectedApplyIds, setSelectedApplyIds] = useState<Set<string>>(new Set());
+  const [selectedAuditIds, setSelectedAuditIds] = useState<string[]>([]);
   const [applyModalOpen, setApplyModalOpen] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [toast, setToast] = useState<{ message: string; ok: boolean } | null>(
+    null
+  );
 
   // ── notas de revisión por fila ──────────────────────────────────────────
   const [notasRevision, setNotasRevision] = useState<Record<string, string>>({});
@@ -385,6 +389,12 @@ export default function AuditoriaTipoDocumentoPage() {
     },
     [cargarPersistidos]
   );
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = window.setTimeout(() => setToast(null), 9000);
+    return () => window.clearTimeout(t);
+  }, [toast]);
 
   // ────────────────────────────────────────────────────────────────────────
   // Bootstrap: sesión + rol + carga inicial.
@@ -597,11 +607,7 @@ export default function AuditoriaTipoDocumentoPage() {
       }
       setMsgOk(true);
       setMsg(`Revisión guardada: ${estado}`);
-      setSelectedApplyIds((prev) => {
-        const next = new Set(prev);
-        next.delete(auditId);
-        return next;
-      });
+      setSelectedAuditIds((prev) => prev.filter((id) => id !== auditId));
       await cargarPersistidos();
     } catch (e: unknown) {
       setMsgOk(false);
@@ -612,23 +618,26 @@ export default function AuditoriaTipoDocumentoPage() {
     }
   }
 
-  function toggleSelectApply(auditId: string, aplicable: boolean) {
-    if (!aplicable) return;
-    setSelectedApplyIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(auditId)) next.delete(auditId);
-      else next.add(auditId);
-      return next;
-    });
+  function toggleSelectApply(auditId: string, seleccionable: boolean) {
+    if (!seleccionable) return;
+    setSelectedAuditIds((prev) =>
+      prev.includes(auditId)
+        ? prev.filter((id) => id !== auditId)
+        : [...prev, auditId]
+    );
+  }
+
+  function limpiarSeleccion() {
+    setSelectedAuditIds([]);
   }
 
   const selectedApplyRows = useMemo(
-    () => rows.filter((r) => selectedApplyIds.has(r.id) && r.aplicable),
-    [rows, selectedApplyIds]
+    () => rows.filter((r) => selectedAuditIds.includes(r.id)),
+    [rows, selectedAuditIds]
   );
 
   async function confirmarApply() {
-    if (applying || selectedApplyRows.length === 0) return;
+    if (applying || selectedAuditIds.length === 0) return;
     const headers = authHeaders();
     if (!headers) return;
     setApplying(true);
@@ -638,18 +647,20 @@ export default function AuditoriaTipoDocumentoPage() {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
         body: JSON.stringify({
-          audit_ids: selectedApplyRows.map((r) => r.id),
+          audit_ids: selectedAuditIds,
           confirm: true,
         }),
       });
       const j = await res.json().catch(() => ({} as Record<string, unknown>));
       if (!res.ok) {
         setMsgOk(false);
-        setMsg(String(j?.error || `Error al aplicar (HTTP ${res.status})`));
+        const errMsg = String(j?.error || `Error al aplicar (HTTP ${res.status})`);
+        setMsg(errMsg);
+        setToast({ message: errMsg, ok: false });
         return;
       }
       const aplicadas = Number(j.aplicadas ?? 0);
-      const rechazadas = Number(j.rechazadas ?? 0);
+      const omitidas = Number(j.rechazadas ?? 0);
       const errores = Number(j.errores ?? 0);
       const detalle = (
         (j.resultados as Array<{ audit_id: string; status: string; motivo?: string }>) ??
@@ -659,18 +670,21 @@ export default function AuditoriaTipoDocumentoPage() {
         .slice(0, 5)
         .map((x) => `${x.audit_id.slice(0, 8)}…: ${x.motivo || x.status}`)
         .join("; ");
-      setMsgOk(errores === 0 && rechazadas === 0);
-      setMsg(
-        `Apply: ${aplicadas} aplicada(s), ${rechazadas} rechazada(s), ${errores} error(es).` +
-          (detalle ? ` Detalle: ${detalle}` : "")
-      );
+      const toastMsg =
+        `Aplicadas: ${aplicadas} · Omitidas: ${omitidas} · Errores: ${errores}` +
+        (detalle ? ` (${detalle})` : "");
+      setMsgOk(errores === 0);
+      setMsg(toastMsg);
+      setToast({ message: toastMsg, ok: errores === 0 && omitidas === 0 });
       setApplyModalOpen(false);
-      setSelectedApplyIds(new Set());
+      setSelectedAuditIds([]);
+      setFilterAplicado("no_aplicado");
       await cargarPersistidos();
     } catch (e: unknown) {
       setMsgOk(false);
       const m = e instanceof Error ? e.message : String(e);
       setMsg(`Error de red al aplicar: ${m}`);
+      setToast({ message: `Error de red al aplicar: ${m}`, ok: false });
     } finally {
       setApplying(false);
     }
@@ -712,6 +726,25 @@ export default function AuditoriaTipoDocumentoPage() {
     filterAplicado,
     filterTipoActual,
   ]);
+
+  const seleccionablesVisibles = useMemo(
+    () => filteredRows.filter((r) => r.aplicable),
+    [filteredRows]
+  );
+
+  const todasVisiblesSeleccionadas =
+    seleccionablesVisibles.length > 0 &&
+    seleccionablesVisibles.every((r) => selectedAuditIds.includes(r.id));
+
+  function seleccionarTodasVisibles() {
+    const ids = seleccionablesVisibles.map((r) => r.id);
+    setSelectedAuditIds(ids);
+  }
+
+  function toggleSeleccionarTodasVisibles() {
+    if (todasVisiblesSeleccionadas) limpiarSeleccion();
+    else seleccionarTodasVisibles();
+  }
 
   // ────────────────────────────────────────────────────────────────────────
   // Render gates
@@ -790,6 +823,9 @@ export default function AuditoriaTipoDocumentoPage() {
         </header>
 
         <div className="page">
+          {toast && (
+            <ApplyToast message={toast.message} ok={toast.ok} onClose={() => setToast(null)} />
+          )}
           {msg && (
             <div className={msgOk ? "success" : "error"} style={{ marginBottom: 12 }}>
               {msg}
@@ -920,15 +956,6 @@ export default function AuditoriaTipoDocumentoPage() {
                 }}
               >
                 {running ? "Guardando…" : "Guardar auditoría"}
-              </button>
-              <button
-                type="button"
-                className="btn"
-                disabled
-                title="Aplicar correcciones no está implementado en esta fase"
-                style={{ opacity: 0.4, cursor: "not-allowed" }}
-              >
-                Aplicar corrección (oculto)
               </button>
             </div>
 
@@ -1261,42 +1288,64 @@ export default function AuditoriaTipoDocumentoPage() {
               </label>
             </div>
 
-            {selectedApplyIds.size > 0 && (
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  marginBottom: 12,
-                  padding: "10px 12px",
-                  background: "rgba(59,130,246,.12)",
-                  border: "1px solid rgba(59,130,246,.35)",
-                  borderRadius: 8,
-                  flexWrap: "wrap",
-                }}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                marginBottom: 12,
+                padding: "10px 12px",
+                background:
+                  selectedAuditIds.length > 0
+                    ? "rgba(59,130,246,.12)"
+                    : "rgba(255,255,255,.03)",
+                border: `1px solid ${
+                  selectedAuditIds.length > 0
+                    ? "rgba(59,130,246,.35)"
+                    : "rgba(255,255,255,.12)"
+                }`,
+                borderRadius: 8,
+                flexWrap: "wrap",
+              }}
+            >
+              <span style={{ fontSize: 13, fontWeight: 600 }}>
+                {selectedAuditIds.length} seleccionada(s)
+                {seleccionablesVisibles.length > 0 && (
+                  <span className="muted" style={{ fontWeight: 400, marginLeft: 6 }}>
+                    · {seleccionablesVisibles.length} aplicable(s) en vista
+                  </span>
+                )}
+              </span>
+              <button
+                type="button"
+                className="btn primary"
+                disabled={selectedAuditIds.length === 0 || applying}
+                onClick={() => setApplyModalOpen(true)}
+                style={{ fontSize: 12, padding: "6px 14px", fontWeight: 700 }}
               >
-                <span style={{ fontSize: 13, fontWeight: 600 }}>
-                  {selectedApplyIds.size} seleccionada(s) para corrección
-                </span>
-                <button
-                  type="button"
-                  className="btn primary"
-                  disabled={selectedApplyRows.length === 0 || applying}
-                  onClick={() => setApplyModalOpen(true)}
-                  style={{ fontSize: 12, padding: "6px 12px" }}
-                >
-                  Aplicar seleccionadas
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => setSelectedApplyIds(new Set())}
-                  style={{ fontSize: 12, padding: "6px 12px" }}
-                >
-                  Limpiar selección
-                </button>
-              </div>
-            )}
+                Aplicar correcciones
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={selectedAuditIds.length === 0}
+                onClick={limpiarSeleccion}
+                style={{ fontSize: 12, padding: "6px 12px" }}
+              >
+                Limpiar selección
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={seleccionablesVisibles.length === 0}
+                onClick={toggleSeleccionarTodasVisibles}
+                style={{ fontSize: 12, padding: "6px 12px" }}
+              >
+                {todasVisiblesSeleccionadas
+                  ? "Desmarcar todas visibles"
+                  : "Seleccionar todas visibles"}
+              </button>
+            </div>
 
             {applyModalOpen && (
               <ApplyConfirmModal
@@ -1327,11 +1376,24 @@ export default function AuditoriaTipoDocumentoPage() {
                 <table className="table" style={{ minWidth: 1600 }}>
                   <thead>
                     <tr>
-                      <th style={{ width: 36 }} title="Solo filas aplicables (confirmadas)">✓</th>
+                      <th style={{ width: 36 }} title="Seleccionar filas aplicables">
+                        <input
+                          type="checkbox"
+                          checked={todasVisiblesSeleccionadas}
+                          disabled={seleccionablesVisibles.length === 0}
+                          title={
+                            todasVisiblesSeleccionadas
+                              ? "Desmarcar todas las visibles aplicables"
+                              : "Seleccionar todas las visibles aplicables"
+                          }
+                          onChange={toggleSeleccionarTodasVisibles}
+                        />
+                      </th>
                       <th style={{ width: 100 }}>Tipo actual</th>
                       <th style={{ width: 140 }}>Detectado</th>
                       <th style={{ width: 80 }}>Confianza</th>
                       <th style={{ width: 110 }}>Revisión</th>
+                      <th style={{ width: 130 }}>Aplicación</th>
                       <th style={{ width: 130 }}>Fuente</th>
                       <th style={{ width: 110 }}>Expediente</th>
                       <th style={{ minWidth: 220 }}>Carátula</th>
@@ -1345,7 +1407,7 @@ export default function AuditoriaTipoDocumentoPage() {
                   <tbody>
                     {filteredRows.length === 0 ? (
                       <tr>
-                        <td colSpan={13} className="muted" style={{ padding: 24, textAlign: "center" }}>
+                        <td colSpan={14} className="muted" style={{ padding: 24, textAlign: "center" }}>
                           No hay registros que coincidan con los filtros activos.
                         </td>
                       </tr>
@@ -1356,7 +1418,10 @@ export default function AuditoriaTipoDocumentoPage() {
                         const fb = fuenteBadge(r.fuente_texto);
                         const meta = leerMetadataGptDeRazones(r.razones);
                         const rev = revisionBadge(r);
+                        const app = aplicadoBadge(r);
+                        const cambio = rollbackCambioLabel(r);
                         const busy = reviewingId === r.id;
+                        const seleccionable = r.aplicable;
                         return (
                           <tr
                             key={r.id}
@@ -1370,14 +1435,14 @@ export default function AuditoriaTipoDocumentoPage() {
                             <td>
                               <input
                                 type="checkbox"
-                                checked={selectedApplyIds.has(r.id)}
-                                disabled={!r.aplicable || r.aplicado}
+                                checked={selectedAuditIds.includes(r.id)}
+                                disabled={!seleccionable}
                                 title={
-                                  r.aplicable
-                                    ? "Seleccionar para aplicar"
-                                    : r.aplicable_motivo || "No aplicable"
+                                  seleccionable
+                                    ? "Seleccionar para aplicar corrección"
+                                    : r.aplicable_motivo || "No seleccionable"
                                 }
-                                onChange={() => toggleSelectApply(r.id, r.aplicable)}
+                                onChange={() => toggleSelectApply(r.id, seleccionable)}
                               />
                             </td>
                             <td>
@@ -1392,18 +1457,6 @@ export default function AuditoriaTipoDocumentoPage() {
                             </td>
                             <td>
                               <Badge {...rev} />
-                              {r.aplicado && (
-                                <div
-                                  style={{
-                                    fontSize: 10,
-                                    color: "rgba(46,204,113,.9)",
-                                    marginTop: 4,
-                                    fontWeight: 700,
-                                  }}
-                                >
-                                  APLICADO
-                                </div>
-                              )}
                               {r.revision_nota && (
                                 <div
                                   className="muted"
@@ -1413,6 +1466,26 @@ export default function AuditoriaTipoDocumentoPage() {
                                   {r.revision_nota.length > 40
                                     ? `${r.revision_nota.slice(0, 40)}…`
                                     : r.revision_nota}
+                                </div>
+                              )}
+                            </td>
+                            <td>
+                              <Badge {...app} />
+                              {cambio && (
+                                <div
+                                  style={{
+                                    fontSize: 10,
+                                    marginTop: 4,
+                                    fontWeight: 700,
+                                    color: "rgba(220,252,231,.9)",
+                                  }}
+                                >
+                                  {cambio}
+                                </div>
+                              )}
+                              {r.aplicado && r.aplicado_at && (
+                                <div className="muted" style={{ fontSize: 9, marginTop: 2 }}>
+                                  {fmtDate(r.aplicado_at)}
                                 </div>
                               )}
                             </td>
@@ -1762,6 +1835,31 @@ function MismatchTag() {
   );
 }
 
+function rollbackCambioLabel(r: AuditRow): string | null {
+  if (!r.aplicado || !r.rollback_data) return null;
+  const rb = r.rollback_data as RollbackDataPdfAudit;
+  const ant = (rb.tipo_documento_anterior ?? "NULL").toString().toUpperCase() || "NULL";
+  const nue = rb.tipo_documento_nuevo ?? r.clasificacion_pdf;
+  return `${ant} → ${nue}`;
+}
+
+function aplicadoBadge(r: { aplicado: boolean }) {
+  if (r.aplicado) {
+    return {
+      label: "Aplicado",
+      bg: "rgba(46,204,113,.18)",
+      border: "rgba(46,204,113,.45)",
+      color: "rgba(220,252,231,.96)",
+    };
+  }
+  return {
+    label: "No aplicado",
+    bg: "rgba(255,255,255,.06)",
+    border: "rgba(255,255,255,.18)",
+    color: "rgba(234,243,255,.7)",
+  };
+}
+
 function revisionBadge(r: {
   revisado: boolean;
   revision_estado: RevisionEstado | null;
@@ -1804,6 +1902,57 @@ function revisionBadge(r: {
     border: "rgba(255,255,255,.22)",
     color: "rgba(234,243,255,.85)",
   };
+}
+
+function ApplyToast({
+  message,
+  ok,
+  onClose,
+}: {
+  message: string;
+  ok: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      role="status"
+      style={{
+        position: "fixed",
+        bottom: 24,
+        right: 24,
+        zIndex: 1100,
+        maxWidth: 420,
+        padding: "14px 16px",
+        borderRadius: 10,
+        background: ok ? "rgba(22,101,52,.95)" : "rgba(127,29,29,.95)",
+        border: `1px solid ${ok ? "rgba(74,222,128,.5)" : "rgba(248,113,113,.5)"}`,
+        color: "rgba(255,255,255,.95)",
+        boxShadow: "0 8px 32px rgba(0,0,0,.45)",
+        fontSize: 13,
+        lineHeight: 1.45,
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+        <span>{message}</span>
+        <button
+          type="button"
+          onClick={onClose}
+          style={{
+            background: "transparent",
+            border: "none",
+            color: "inherit",
+            cursor: "pointer",
+            fontSize: 16,
+            lineHeight: 1,
+            padding: 0,
+          }}
+          aria-label="Cerrar"
+        >
+          ×
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function ApplyConfirmModal({
@@ -1850,8 +1999,9 @@ function ApplyConfirmModal({
           Confirmar corrección de tipo documento
         </h3>
         <p style={{ fontSize: 13, color: "rgba(234,243,255,.8)", lineHeight: 1.5 }}>
-          Esto modificará únicamente cedulas.tipo_documento. No modifica PDFs, Storage, PJN ni OCR.
-          ¿Confirmás aplicar estas correcciones?
+          Esto modificará únicamente cedulas.tipo_documento.
+          <br />
+          No modifica PDFs, Storage, PJN ni OCR.
         </p>
         <div className="tableWrap" style={{ marginTop: 16, marginBottom: 16 }}>
           <table className="table" style={{ fontSize: 12 }}>
@@ -1905,7 +2055,7 @@ function ApplyConfirmModal({
             onClick={onConfirm}
             disabled={applying || rows.length === 0}
           >
-            {applying ? "Aplicando…" : `Aplicar ${rows.length} corrección(es)`}
+            {applying ? "Aplicando…" : "Confirmar aplicación"}
           </button>
         </div>
       </div>
