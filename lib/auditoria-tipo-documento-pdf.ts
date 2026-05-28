@@ -2003,3 +2003,91 @@ export function evaluarAplicabilidadAudit(input: {
   }
   return { aplicable: true, motivo: null };
 }
+
+// =============================================================================
+// Auto-confirmación por umbral (solo cedulas_tipo_documento_pdf_audit)
+// Lee filas ya persistidas + metadata en razones JSONB. Sin /run, GPT ni Storage.
+// =============================================================================
+
+export const AUTO_CONFIRM_MIN_CONFIDENCE_FLOOR = 0.9;
+export const AUTO_CONFIRM_DEFAULT_MIN_CONFIDENCE = 0.95;
+export const AUTO_CONFIRM_DEFAULT_LIMIT = 50;
+export const AUTO_CONFIRM_MAX_LIMIT = 200;
+
+export type AutoConfirmRow = {
+  audit_id: string;
+  cedula_id: string;
+  expediente: string | null;
+  caratula: string | null;
+  tipo_actual: string | null;
+  detectado: string;
+  confianza: number | null;
+  motivo: string | null;
+};
+
+export function pasaFiltroMismatchAutoConfirm(
+  tipoActual: string | null,
+  clasificacionPdf: string,
+  onlyMismatches: boolean,
+  includeNullActual: boolean
+): boolean {
+  if (onlyMismatches) {
+    return tieneInconsistenciaTipo(tipoActual, clasificacionPdf);
+  }
+  if (!includeNullActual) return true;
+  const raw = (tipoActual ?? "").trim();
+  if (!raw) return true;
+  return raw.toUpperCase() !== clasificacionPdf;
+}
+
+export function evaluarCandidatoAutoConfirm(input: {
+  revisado: boolean;
+  aplicado: boolean;
+  clasificacion_pdf: string;
+  confianza: number | null;
+  tipo_documento_actual: string | null;
+  fuente_texto: FuenteTexto | null;
+  only_mismatches: boolean;
+  include_null_actual: boolean;
+  min_confianza: number;
+}): { elegible: boolean; motivo: string | null } {
+  if (input.revisado) {
+    return { elegible: false, motivo: "Ya revisado" };
+  }
+  if (input.aplicado) {
+    return { elegible: false, motivo: "Ya aplicado" };
+  }
+  if (
+    input.clasificacion_pdf !== "CEDULA" &&
+    input.clasificacion_pdf !== "OFICIO"
+  ) {
+    return { elegible: false, motivo: "INDETERMINADO o clasificación inválida" };
+  }
+  const conf = input.confianza ?? 0;
+  if (conf < input.min_confianza) {
+    return {
+      elegible: false,
+      motivo: `Confianza ${conf.toFixed(2)} < ${input.min_confianza}`,
+    };
+  }
+  if (
+    input.fuente_texto != null &&
+    input.fuente_texto !== "gpt_vision"
+  ) {
+    return {
+      elegible: false,
+      motivo: `Fuente ${input.fuente_texto} (se requiere gpt_vision)`,
+    };
+  }
+  if (
+    !pasaFiltroMismatchAutoConfirm(
+      input.tipo_documento_actual,
+      input.clasificacion_pdf,
+      input.only_mismatches,
+      input.include_null_actual
+    )
+  ) {
+    return { elegible: false, motivo: "Sin inconsistencia (filtro activo)" };
+  }
+  return { elegible: true, motivo: null };
+}

@@ -144,6 +144,25 @@ type PreviewBreakdown = {
   por_tipo_actual: { CEDULA: number; OFICIO: number; NULL: number; OTROS: number };
 };
 
+type AutoConfirmResponse = {
+  ok: boolean;
+  dry_run: boolean;
+  min_confianza: number;
+  candidatos: number;
+  confirmados: number;
+  omitidos: number;
+  rows: Array<{
+    audit_id: string;
+    cedula_id: string;
+    expediente: string | null;
+    caratula: string | null;
+    tipo_actual: string | null;
+    detectado: string;
+    confianza: number | null;
+    motivo: string | null;
+  }>;
+};
+
 // =============================================================================
 // Helpers de display
 // -----------------------------------------------------------------------------
@@ -324,6 +343,15 @@ export default function AuditoriaTipoDocumentoPage() {
   const [toast, setToast] = useState<{ message: string; ok: boolean } | null>(
     null
   );
+
+  // ── auto-confirmación por umbral ────────────────────────────────────────
+  const [autoMinConfianza, setAutoMinConfianza] = useState<number>(0.95);
+  const [autoLimit, setAutoLimit] = useState<number>(50);
+  const [autoOnlyMismatches, setAutoOnlyMismatches] = useState<boolean>(true);
+  const [autoConfirmRunning, setAutoConfirmRunning] = useState(false);
+  const [autoConfirmModalOpen, setAutoConfirmModalOpen] = useState(false);
+  const [autoConfirmPreview, setAutoConfirmPreview] =
+    useState<AutoConfirmResponse | null>(null);
 
   // ── notas de revisión por fila ──────────────────────────────────────────
   const [notasRevision, setNotasRevision] = useState<Record<string, string>>({});
@@ -744,6 +772,75 @@ export default function AuditoriaTipoDocumentoPage() {
   function toggleSeleccionarTodasVisibles() {
     if (todasVisiblesSeleccionadas) limpiarSeleccion();
     else seleccionarTodasVisibles();
+  }
+
+  async function ejecutarAutoConfirm(dryRun: boolean) {
+    const headers = authHeaders();
+    if (!headers) return;
+    setAutoConfirmRunning(true);
+    setMsg("");
+    try {
+      const res = await fetch(
+        "/api/admin/auditoria-tipo-documento-pdf/auto-confirm",
+        {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            min_confianza: autoMinConfianza,
+            only_mismatches: autoOnlyMismatches,
+            include_null_actual: autoOnlyMismatches,
+            limit: autoLimit,
+            dry_run: dryRun,
+            confirm: dryRun ? undefined : true,
+          }),
+        }
+      );
+      const j = (await res.json().catch(() => ({}))) as AutoConfirmResponse & {
+        error?: string;
+      };
+      if (!res.ok) {
+        const errMsg = j?.error || `Error auto-confirm (HTTP ${res.status})`;
+        setMsgOk(false);
+        setMsg(errMsg);
+        setToast({ message: errMsg, ok: false });
+        return;
+      }
+      if (dryRun) {
+        setAutoConfirmPreview(j);
+        const previewMsg = `Previsualización: ${j.candidatos} candidata(s), se confirmarían ${j.confirmados} (límite ${autoLimit}), ${j.omitidos} omitida(s) en escaneo`;
+        setMsgOk(true);
+        setMsg(previewMsg);
+        setToast({ message: previewMsg, ok: true });
+      } else {
+        setAutoConfirmModalOpen(false);
+        setAutoConfirmPreview(null);
+        const doneMsg = `Auto-confirmadas: ${j.confirmados} de ${j.candidatos} candidata(s)`;
+        setMsgOk(true);
+        setMsg(doneMsg);
+        setToast({ message: doneMsg, ok: true });
+        setFilterRevision("confirmado");
+        setFilterAplicado("no_aplicado");
+        await cargarPersistidos();
+      }
+    } catch (e: unknown) {
+      const m = e instanceof Error ? e.message : String(e);
+      setMsgOk(false);
+      setMsg(`Error de red en auto-confirm: ${m}`);
+      setToast({ message: `Error de red en auto-confirm: ${m}`, ok: false });
+    } finally {
+      setAutoConfirmRunning(false);
+    }
+  }
+
+  function abrirModalAutoConfirm() {
+    if (!autoConfirmPreview || autoConfirmPreview.confirmados === 0) {
+      setMsgOk(false);
+      setMsg(
+        "Previsualizá primero. No hay candidatas para auto-confirmar con los filtros actuales."
+      );
+      return;
+    }
+    setAutoConfirmModalOpen(true);
   }
 
   // ────────────────────────────────────────────────────────────────────────
@@ -1287,6 +1384,130 @@ export default function AuditoriaTipoDocumentoPage() {
                 </select>
               </label>
             </div>
+
+            <div
+              style={{
+                marginBottom: 12,
+                padding: 14,
+                background: "rgba(168,85,247,.08)",
+                border: "1px solid rgba(168,85,247,.28)",
+                borderRadius: 10,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 13,
+                  fontWeight: 700,
+                  marginBottom: 10,
+                  color: "rgba(243,232,255,.95)",
+                }}
+              >
+                Auto-confirmar confiables (solo auditorías guardadas)
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 14,
+                  flexWrap: "wrap",
+                  alignItems: "flex-end",
+                  marginBottom: 10,
+                }}
+              >
+                <label style={inlineLabel}>
+                  min confianza:
+                  <select
+                    value={autoMinConfianza}
+                    onChange={(e) => setAutoMinConfianza(Number(e.target.value))}
+                    disabled={autoConfirmRunning}
+                    style={{
+                      ...selectStyle,
+                      marginLeft: 6,
+                      padding: "3px 6px",
+                      fontSize: 12,
+                    }}
+                  >
+                    <option value={0.9}>0.90</option>
+                    <option value={0.95}>0.95</option>
+                    <option value={0.98}>0.98</option>
+                    <option value={1}>1.00</option>
+                  </select>
+                </label>
+                <label style={inlineLabel}>
+                  límite:
+                  <select
+                    value={autoLimit}
+                    onChange={(e) => setAutoLimit(Number(e.target.value))}
+                    disabled={autoConfirmRunning}
+                    style={{
+                      ...selectStyle,
+                      marginLeft: 6,
+                      padding: "3px 6px",
+                      fontSize: 12,
+                    }}
+                  >
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                    <option value={200}>200</option>
+                  </select>
+                </label>
+                <label style={inlineLabel}>
+                  <input
+                    type="checkbox"
+                    checked={autoOnlyMismatches}
+                    onChange={(e) => setAutoOnlyMismatches(e.target.checked)}
+                    disabled={autoConfirmRunning}
+                  />
+                  Solo inconsistencias y tipo actual vacío
+                </label>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={autoConfirmRunning}
+                  onClick={() => void ejecutarAutoConfirm(true)}
+                  style={{ fontSize: 12, padding: "6px 12px" }}
+                >
+                  {autoConfirmRunning ? "Procesando…" : "Previsualizar auto-confirmación"}
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={autoConfirmRunning}
+                  onClick={abrirModalAutoConfirm}
+                  style={{
+                    fontSize: 12,
+                    padding: "6px 12px",
+                    borderColor: "rgba(168,85,247,.45)",
+                    background: "rgba(168,85,247,.18)",
+                    color: "rgba(243,232,255,.96)",
+                  }}
+                >
+                  Confirmar automáticamente
+                </button>
+                {autoConfirmPreview && (
+                  <span className="muted" style={{ fontSize: 12, alignSelf: "center" }}>
+                    Última preview: {autoConfirmPreview.confirmados} a confirmar /{" "}
+                    {autoConfirmPreview.candidatos} candidatas
+                  </span>
+                )}
+              </div>
+              <p className="muted" style={{ margin: "10px 0 0", fontSize: 11, lineHeight: 1.5 }}>
+                Lee registros ya guardados en <code>cedulas_tipo_documento_pdf_audit</code> (sin
+                /run, sin GPT, sin Storage ni PDFs). Solo marca CONFIRMADO; no modifica{" "}
+                <code>cedulas.tipo_documento</code>. Luego usá &quot;Aplicar correcciones&quot;.
+              </p>
+            </div>
+
+            {autoConfirmModalOpen && autoConfirmPreview && (
+              <AutoConfirmModal
+                preview={autoConfirmPreview}
+                running={autoConfirmRunning}
+                onCancel={() => setAutoConfirmModalOpen(false)}
+                onConfirm={() => void ejecutarAutoConfirm(false)}
+              />
+            )}
 
             <div
               style={{
@@ -1950,6 +2171,109 @@ function ApplyToast({
         >
           ×
         </button>
+      </div>
+    </div>
+  );
+}
+
+function AutoConfirmModal({
+  preview,
+  running,
+  onCancel,
+  onConfirm,
+}: {
+  preview: AutoConfirmResponse;
+  running: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 1000,
+        background: "rgba(0,0,0,.65)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+      }}
+      onClick={onCancel}
+    >
+      <div
+        style={{
+          background: "#0f172a",
+          border: "1px solid rgba(168,85,247,.35)",
+          borderRadius: 12,
+          maxWidth: 960,
+          width: "100%",
+          maxHeight: "90vh",
+          overflow: "auto",
+          padding: 20,
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 style={{ margin: "0 0 12px 0", fontSize: 16 }}>
+          Auto-confirmar auditorías confiables
+        </h3>
+        <p style={{ fontSize: 13, color: "rgba(234,243,255,.85)", lineHeight: 1.5 }}>
+          Se marcarán como <strong>CONFIRMADO</strong>{" "}
+          <strong>{preview.confirmados}</strong> auditoría(s) (confianza ≥{" "}
+          {preview.min_confianza}).
+          <br />
+          Esto <strong>NO</strong> modifica <code>cedulas.tipo_documento</code>. Luego deberás
+          aplicar correcciones con el flujo apply.
+        </p>
+        <div className="tableWrap" style={{ marginTop: 16, marginBottom: 16 }}>
+          <table className="table" style={{ fontSize: 12 }}>
+            <thead>
+              <tr>
+                <th>Expediente</th>
+                <th>Carátula</th>
+                <th>Tipo actual</th>
+                <th>Detectado</th>
+                <th>Confianza</th>
+              </tr>
+            </thead>
+            <tbody>
+              {preview.rows.map((r) => (
+                <tr key={r.audit_id}>
+                  <td>{r.expediente || "—"}</td>
+                  <td style={{ maxWidth: 220 }}>{r.caratula || "—"}</td>
+                  <td>
+                    <Badge {...tipoBadge(r.tipo_actual)} />
+                  </td>
+                  <td>
+                    <Badge {...tipoBadge(r.detectado)} />
+                  </td>
+                  <td style={tabNum}>
+                    {r.confianza != null ? r.confianza.toFixed(2) : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+          <button type="button" className="btn" onClick={onCancel} disabled={running}>
+            Cancelar
+          </button>
+          <button
+            type="button"
+            className="btn primary"
+            onClick={onConfirm}
+            disabled={running || preview.confirmados === 0}
+            style={{
+              background: "rgba(168,85,247,.35)",
+              borderColor: "rgba(168,85,247,.55)",
+            }}
+          >
+            {running ? "Confirmando…" : `Confirmar ${preview.confirmados} auditoría(s)`}
+          </button>
+        </div>
       </div>
     </div>
   );
