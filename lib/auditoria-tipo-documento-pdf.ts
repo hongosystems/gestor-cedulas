@@ -4,6 +4,7 @@ import {
   extraerDestinatarioOficio,
   extraerDestinatarioOficioDePaginas,
 } from "@/lib/oficio-destinatario";
+import { GPT_TIPO_DOCUMENTO_PROMPT } from "@/lib/gpt-vision-tipo-documento-prompt";
 
 /**
  * Helper compartido por:
@@ -180,7 +181,8 @@ export const PDF_AUDIT_OCR_TIMEOUT_MS = 35_000;
 // OpenAI vía la Responses API (campo `input_file`). El modelo devuelve JSON
 // estructurado con la clasificación CEDULA/OFICIO/INDETERMINADO.
 //
-// NO se usa para flujos productivos (OCR de cédulas/oficios sigue en Railway).
+// También usado en detect-type-upload (GPT Vision) además de auditoría admin.
+// El OCR de campos sigue en Railway según tipo_documento ya guardado.
 // NO se llama a /procesar ni /procesar-oficio de cedula-mvp.
 // =============================================================================
 
@@ -861,46 +863,7 @@ export async function recortarPdfPrimeraPaginas(
 
 // ─── Prompt y schema ─────────────────────────────────────────────────────────
 
-const GPT_VISION_PROMPT = `Sos un clasificador de documentos judiciales argentinos.
-Analizá las imágenes del PDF y determiná si el documento completo es una CÉDULA judicial, un OFICIO judicial o INDETERMINADO.
-
-Respondé SOLO JSON válido con este formato:
-
-{
-  "tipo_documento": "CEDULA" | "OFICIO" | "INDETERMINADO",
-  "confianza": number entre 0 y 1,
-  "razones": string[],
-  "texto_relevante": string,
-  "expediente": string | null,
-  "caratula": string | null,
-  "juzgado": string | null,
-  "destinatario": string | null
-}
-
-Criterios de clasificación:
-- CEDULA: cédula de notificación, domicilio, notificación, oficial notificador, zona, traslado, se notifica, cédula ley, constancia de diligenciamiento.
-- OFICIO: oficio judicial, dirigido a banco, hospital, registro, empleador, organismo, director, entidad, pedido de informe, líbrese oficio, mandamiento/oficio dirigido a tercero institucional.
-- INDETERMINADO: si no hay evidencia clara o la imagen no permite leer suficiente.
-
-Reglas:
-- No inventes.
-- Si no se lee bien, INDETERMINADO.
-- No clasifiques por el nombre del archivo.
-- No clasifiques por metadatos técnicos.
-- Clasificá por contenido visible del documento.
-- Si hay varias páginas, evaluá el conjunto.
-- "texto_relevante" debe ser breve: solo frases o palabras que justifiquen la clasificación, no transcripción completa.
-
-Metadatos contextuales (para revisión humana, NO para clasificar):
-- "expediente": número/identificador del expediente tal como aparece (ej "104277/2026"). Si no se lee, null.
-- "caratula": carátula completa o lo más cercano (ej "TAPIA c/ FORNERO s/ DAÑOS"). Si no se lee, null.
-- "juzgado": juzgado/tribunal interviniente (ej "JUZGADO NACIONAL EN LO CIVIL N° 1"). Si no se lee, null.
-- "destinatario": destinatario del documento (ej "BANCO DE LA NACIÓN ARGENTINA", "Hospital Zubizarreta"). Si no se lee, null.
-
-Reglas para metadatos:
-- No inventes. Si dudás, devolvé null en ese campo.
-- Devolvé exactamente lo que se lee, sin reformular ni acortar arbitrariamente.
-- No incluyas etiquetas como "Expediente:" o "Carátula:" — solo el valor.`;
+const GPT_VISION_PROMPT = GPT_TIPO_DOCUMENTO_PROMPT;
 
 // ─── Sanitización de campos opcionales del response GPT ──────────────────────
 
@@ -971,15 +934,25 @@ export type GptVisionClient = {
  * NOTA: La clave es server-side (process.env, jamás expuesta al cliente).
  * NUNCA usar `NEXT_PUBLIC_OPENAI_API_KEY`.
  */
-export function createGptVisionClient(): GptVisionClient | null {
+export type CreateGptVisionClientOptions = {
+  prompt?: string;
+  timeoutMs?: number;
+};
+
+export function createGptVisionClient(
+  options?: CreateGptVisionClientOptions
+): GptVisionClient | null {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) return null;
+
+  const prompt = options?.prompt ?? GPT_VISION_PROMPT;
+  const timeoutMs = options?.timeoutMs ?? AUDIT_GPT_TIMEOUT_MS;
 
   return {
     async invocar(pdfBuf: Buffer, modelo: string): Promise<GptVisionResultado> {
       try {
         const { default: OpenAI } = await import("openai");
-        const client = new OpenAI({ apiKey, timeout: AUDIT_GPT_TIMEOUT_MS });
+        const client = new OpenAI({ apiKey, timeout: timeoutMs });
 
         const b64 = pdfBuf.toString("base64");
         const fileData = `data:application/pdf;base64,${b64}`;
@@ -990,7 +963,7 @@ export function createGptVisionClient(): GptVisionClient | null {
             {
               role: "user",
               content: [
-                { type: "input_text", text: GPT_VISION_PROMPT },
+                { type: "input_text", text: prompt },
                 {
                   type: "input_file",
                   filename: "documento.pdf",

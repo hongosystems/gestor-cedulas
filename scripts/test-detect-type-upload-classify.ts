@@ -2,6 +2,7 @@
  * npx tsx scripts/test-detect-type-upload-classify.ts
  */
 import { resolveTipoFromRailwayAttempts } from "../lib/detect-type-upload-classify";
+import { gptTipoEsDefinitivo } from "../lib/gpt-vision-tipo-documento";
 
 function assert(cond: boolean, msg: string) {
   if (!cond) {
@@ -40,13 +41,14 @@ const soloCedulaConHint = resolveTipoFromRailwayAttempts(
 );
 assert(soloCedulaConHint?.tipo === "CEDULA", "solo /procesar + hint CEDULA → CEDULA");
 
-// Ambos OK → OFICIO por defecto
+// Ambos OK sin hint → ambiguo (no default OFICIO)
 const ambos = resolveTipoFromRailwayAttempts(
   { ok: true, expNro: "1/2024", caratula: "A", tipoDocumento: null },
   { ok: true, expNro: "1/2024", caratula: "B", tipoDocumento: null },
   null
 );
-assert(ambos?.tipo === "OFICIO", "ambos endpoints OK → OFICIO");
+assert(ambos?.tipo === null, "ambos endpoints OK sin hint → tipo null");
+assert(ambos?.autoDetected === false, "ambos OK sin hint → no auto");
 
 // Ambos OK + hint CEDULA
 const ambosCed = resolveTipoFromRailwayAttempts(
@@ -56,6 +58,24 @@ const ambosCed = resolveTipoFromRailwayAttempts(
 );
 assert(ambosCed?.tipo === "CEDULA", "ambos OK + hint CEDULA → CEDULA");
 
+// Ambos OK + headers en conflicto → ambiguo
+const ambosConflicto = resolveTipoFromRailwayAttempts(
+  {
+    ok: true,
+    expNro: "1/2024",
+    caratula: "A",
+    tipoDocumento: "CEDULA",
+  },
+  {
+    ok: true,
+    expNro: "1/2024",
+    caratula: "B",
+    tipoDocumento: "OFICIO",
+  },
+  null
+);
+assert(ambosConflicto?.tipo === null, "ambos OK headers CEDULA+OFICIO → tipo null");
+
 // Solo oficio endpoint
 const soloOfi = resolveTipoFromRailwayAttempts(
   empty,
@@ -63,5 +83,9 @@ const soloOfi = resolveTipoFromRailwayAttempts(
   null
 );
 assert(soloOfi?.tipo === "OFICIO", "solo /procesar-oficio → OFICIO");
+
+assert(gptTipoEsDefinitivo("CEDULA", 0.6), "gptTipoEsDefinitivo CEDULA 0.6");
+assert(!gptTipoEsDefinitivo("CEDULA", 0.4), "gptTipoEsDefinitivo CEDULA 0.4 no");
+assert(!gptTipoEsDefinitivo("INDETERMINADO", 1), "gptTipoEsDefinitivo INDETERMINADO no");
 
 console.log(process.exitCode === 1 ? "FALLÓ" : "OK");

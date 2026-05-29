@@ -117,7 +117,16 @@ export function resolveTipoFromRailwayAttempts(
   }
 
   if (ced.ok && ofi.ok) {
-    if (textHint === "CEDULA" || (headerCed === "CEDULA" && headerOfi !== "OFICIO")) {
+    if (textHint === "CEDULA" || textHint === "OFICIO") {
+      const pickCed = textHint === "CEDULA";
+      return {
+        tipo: textHint,
+        autoDetected: true,
+        expNro: pickCed ? ced.expNro ?? ofi.expNro : ofi.expNro ?? ced.expNro,
+        caratula: pickCed ? ced.caratula ?? ofi.caratula : ofi.caratula ?? ced.caratula,
+      };
+    }
+    if (headerCed === "CEDULA" && headerOfi !== "OFICIO") {
       return {
         tipo: "CEDULA",
         autoDetected: true,
@@ -125,11 +134,20 @@ export function resolveTipoFromRailwayAttempts(
         caratula: ced.caratula ?? ofi.caratula,
       };
     }
+    if (headerOfi === "OFICIO" && headerCed !== "CEDULA") {
+      return {
+        tipo: "OFICIO",
+        autoDetected: true,
+        expNro: ofi.expNro ?? ced.expNro,
+        caratula: ofi.caratula ?? ced.caratula,
+      };
+    }
+    // Ambos endpoints OK pero tipos en conflicto (p. ej. cédula con resolución embebida).
     return {
-      tipo: headerOfi ?? (textHint === "OFICIO" ? "OFICIO" : "OFICIO"),
-      autoDetected: true,
-      expNro: ofi.expNro ?? ced.expNro,
-      caratula: ofi.caratula ?? ced.caratula,
+      tipo: null,
+      autoDetected: false,
+      expNro: ced.expNro ?? ofi.expNro,
+      caratula: ced.caratula ?? ofi.caratula,
     };
   }
 
