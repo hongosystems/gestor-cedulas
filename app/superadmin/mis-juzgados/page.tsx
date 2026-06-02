@@ -7,9 +7,19 @@ import { pjnScraperSupabase } from "@/lib/pjn-scraper-supabase";
 import { daysSince, isLegacySemaforoDate } from "@/lib/semaforo";
 import { stripAutoNotasTimestamp, withAutoNotasTimestamp } from "@/lib/notas-timestamp";
 import { FilterableTh } from "@/app/components/FilterableTh";
-import NotificationBell from "@/app/components/NotificationBell";
 import ResponsableAvatars from "@/app/components/ResponsableAvatars";
 import { useColumnFilters, uniqueOptionsFromField } from "@/app/hooks/useColumnFilters";
+import { usePageSearchBridge } from "@/app/hooks/usePageSearchBridge";
+import { loadMentionUsersOnce } from "@/lib/users-list-cache";
+import {
+  isExpedientePjnMergeEnabled,
+  mergeLocalsWithPjnFavoritos,
+  resolveObservacionesFromFavorito,
+} from "@/lib/expediente-pjn-merge";
+import MisJuzgadosTableRows, {
+  getMisJuzgadosTableColSpan,
+} from "@/app/components/mis-juzgados/MisJuzgadosTableRows";
+import MisJuzgadosMobileCards from "@/app/components/mis-juzgados/MisJuzgadosMobileCards";
 
 // Estilos globales para mejorar contraste del dropdown
 if (typeof document !== 'undefined') {
@@ -360,82 +370,23 @@ function NotasTextarea({
   const value = editedValue !== undefined ? editedValue : editableInitialValue;
   const displayValue = (editedValue !== undefined ? editedValue : initialValue || "").trim();
 
-  // Cargar usuarios del sistema desde API (incluye todos los usuarios de auth.users)
+  const usersLoadedRef = React.useRef(false);
+
   React.useEffect(() => {
-    (async () => {
-      try {
-        const { data: session } = await supabase.auth.getSession();
-        if (!session.session?.access_token) {
-          const { data: profiles } = await supabase
-            .from("profiles")
-            .select("id, email, full_name")
-            .order("full_name", { ascending: true });
-          if (profiles) {
-            const fallbackUsers: User[] = profiles.map((p: any) => ({
-              id: p.id,
-              email: p.email || "",
-              full_name: p.full_name,
-              username: (p.email || "").split("@")[0].toLowerCase(),
-            }));
-            setUsers(fallbackUsers);
-          }
-          return;
-        }
-
-        const res = await fetch("/api/users/list", {
-          headers: {
-            "Authorization": `Bearer ${session.session.access_token}`,
-          },
-        });
-
-        if (res.ok) {
-          const { users: usersList } = await res.json();
-          console.log(`[NotasTextarea] Usuarios cargados desde API: ${usersList?.length || 0}`);
-          console.log(`[NotasTextarea] Primeros usuarios:`, usersList?.slice(0, 5).map((u: any) => `${u.full_name || u.email} (@${u.username})`));
-          setUsers(usersList || []);
-        } else {
-          console.error("Error al cargar usuarios:", await res.text());
-          // Fallback: intentar cargar desde profiles
-          const { data: profiles } = await supabase
-            .from("profiles")
-            .select("id, email, full_name")
-            .order("full_name", { ascending: true });
-          
-          if (profiles) {
-            const fallbackUsers: User[] = profiles.map((p: any) => {
-              const username = (p.email || "").split("@")[0].toLowerCase();
-              return {
-                id: p.id,
-                email: p.email || "",
-                full_name: p.full_name,
-                username,
-              };
-            });
-            setUsers(fallbackUsers);
-          }
-        }
-      } catch (err) {
+    if (usersLoadedRef.current) return;
+    usersLoadedRef.current = true;
+    let cancelled = false;
+    loadMentionUsersOnce()
+      .then((list) => {
+        if (!cancelled) setUsers(list as User[]);
+      })
+      .catch((err) => {
         console.error("Error al cargar usuarios:", err);
-        // Fallback: intentar cargar desde profiles
-        const { data: profiles } = await supabase
-          .from("profiles")
-          .select("id, email, full_name")
-          .order("full_name", { ascending: true });
-        
-        if (profiles) {
-          const fallbackUsers: User[] = profiles.map((p: any) => {
-            const username = (p.email || "").split("@")[0].toLowerCase();
-            return {
-              id: p.id,
-              email: p.email || "",
-              full_name: p.full_name,
-              username,
-            };
-          });
-          setUsers(fallbackUsers);
-        }
-      }
-    })();
+        usersLoadedRef.current = false;
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Detectar menciones en el texto y crear notificaciones
@@ -1239,6 +1190,7 @@ export default function MisJuzgadosPage() {
   const [expedientes, setExpedientes] = useState<Expediente[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"expedientes" | "cedulas" | "oficios">("expedientes");
+  const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
   const [sortField, setSortField] = useState<SortField>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc"); // Por defecto: más viejo primero
   const { filters, setFilter, clearAll, hasActiveFilters, openFilter, setOpenFilter } =
@@ -1258,6 +1210,7 @@ export default function MisJuzgadosPage() {
   const itemsPerPage = 15;
   const [currentUserName, setCurrentUserName] = useState<string>("");
   const [searchTerm, setSearchTerm] = useState<string>("");
+  usePageSearchBridge(searchTerm, setSearchTerm);
   const [lastSyncDate, setLastSyncDate] = useState<string | null>(null);
   const [usuariosByKey, setUsuariosByKey] = useState<Record<string, { id: string; nombre: string; email?: string }[]>>({});
   const [responsableLoading, setResponsableLoading] = useState(false);
@@ -2032,49 +1985,40 @@ export default function MisJuzgadosPage() {
         console.log(`[Mis Juzgados] Mostrando TODOS los favoritos (sin filtrar por juzgados)`);
       }
 
-      // Convertir favoritos a formato Expediente y combinar con expedientes locales
-      const favoritosComoExpedientes: Expediente[] = favoritosFiltrados.map((f: PjnFavorito) => {
-        const numeroExpediente = `${f.jurisdiccion} ${f.numero}/${f.anio}`;
-        // Convertir fecha_ultima_carga a ISO para fecha_ultima_modificacion
-        // Si la conversión falla, fecha_ultima_modificacion será null pero mantendremos fecha_ultima_carga
-        const fechaISO = ddmmaaaaToISO(f.fecha_ultima_carga);
-        
-        // Debug: verificar expediente específico (manejar ceros a la izquierda)
-        const numeroSinCeros = String(f.numero).replace(/^0+/, "");
-        if ((numeroSinCeros === "35586" || f.numero === "35586") && f.anio === 2025) {
-          console.log(`[Mis Juzgados] 🔍 Expediente 35586/2025 encontrado en favoritos:`, {
-            id: f.id,
-            jurisdiccion: f.jurisdiccion,
-            numero: f.numero,
-            numeroSinCeros: numeroSinCeros,
-            anio: f.anio,
-            juzgado: f.juzgado,
-            observaciones: f.observaciones,
-            caratula: f.caratula?.substring(0, 50),
-            tieneJuzgado: !!f.juzgado,
-            tieneObservaciones: !!f.observaciones
+      // Enriquecer manuales con pjn_favoritos ANTES de filtrar por juzgado (así 35586/2025 recibe juzgado PJN)
+      let expedientesBase: any[] = allExpsData ?? [];
+      let favoritosParaLista = favoritosFiltrados;
+
+      if (isExpedientePjnMergeEnabled()) {
+        const { mergedLocals, unmatchedFavoritos, mergedCount } = mergeLocalsWithPjnFavoritos(
+          expedientesBase,
+          pjnFavoritos,
+          { ddmmaaaaToISO, normalizeJuzgado }
+        );
+        expedientesBase = mergedLocals;
+        const unmatchedIds = new Set(unmatchedFavoritos.map((f) => f.id));
+        favoritosParaLista = favoritosFiltrados.filter((f) => unmatchedIds.has(f.id));
+        console.log(
+          `[Mis Juzgados] Merge PJN: ${mergedCount} manuales enlazados, ${favoritosParaLista.length} favoritos en lista (${pjnFavoritos.length - unmatchedFavoritos.length} consumidos por match)`
+        );
+        const ej35586 = mergedLocals.find(
+          (e: any) =>
+            e.pjn_merge_applied &&
+            (String(e.numero_expediente || "").includes("35586/2025") ||
+              String(e.numero_expediente || "").includes("035586/2025"))
+        );
+        if (ej35586) {
+          console.log(`[Mis Juzgados] 🔍 35586/2025 tras merge PJN:`, {
+            juzgado: ej35586.juzgado,
+            observaciones: ej35586.observaciones?.substring?.(0, 80),
+            fecha_ultima_modificacion: ej35586.fecha_ultima_modificacion,
+            linked_pjn_favorito_id: ej35586.linked_pjn_favorito_id,
           });
         }
-        
-        return {
-          id: `pjn_${f.id}`, // Prefijo para identificar que viene de pjn
-          owner_user_id: "", // Los favoritos no tienen owner
-          caratula: f.caratula,
-          juzgado: f.juzgado, // Asegurar que se pasa el juzgado
-          numero_expediente: numeroExpediente,
-          fecha_ultima_modificacion: fechaISO, // ISO para cálculos, puede ser null si fecha_ultima_carga no es válida
-          fecha_ultima_carga: f.fecha_ultima_carga, // Guardar la fecha original en formato DD/MM/AAAA
-          estado: "ABIERTO", // Los favoritos siempre están abiertos
-          observaciones: f.observaciones, // Asegurar que se pasan las observaciones
-          notas: (f as any).notas || null, // Usar notas del favorito si existe
-          created_by_user_id: null,
-          created_by_name: "PJN Favoritos", // Indicar que viene de favoritos
-          is_pjn_favorito: true,
-        };
-      });
+      }
 
       // Filtrar expedientes según el filtro seleccionado
-      let exps = allExpsData ?? [];
+      let exps = expedientesBase;
       
       // Solo filtrar por juzgados si el filtro es "mis_juzgados" y hay juzgados asignados
       if (juzgadoFilter === "mis_juzgados" && juzgadosNormalizados.length > 0) {
@@ -2122,7 +2066,27 @@ export default function MisJuzgadosPage() {
         console.log(`[Mis Juzgados] Expedientes filtrados por juzgado específico "${juzgadoFilter}": ${exps.length}`);
       }
 
-      // Combinar expedientes locales con favoritos de pjn
+      const favoritosComoExpedientes: Expediente[] = favoritosParaLista.map((f: PjnFavorito) => {
+        const numeroExpediente = `${f.jurisdiccion} ${f.numero}/${f.anio}`;
+        const fechaISO = ddmmaaaaToISO(f.fecha_ultima_carga);
+        return {
+          id: `pjn_${f.id}`,
+          owner_user_id: "",
+          caratula: f.caratula,
+          juzgado: f.juzgado,
+          numero_expediente: numeroExpediente,
+          fecha_ultima_modificacion: fechaISO,
+          fecha_ultima_carga: f.fecha_ultima_carga,
+          estado: "ABIERTO",
+          observaciones: resolveObservacionesFromFavorito(f),
+          notas: (f as any).notas || null,
+          created_by_user_id: null,
+          created_by_name: "PJN Favoritos",
+          is_pjn_favorito: true,
+        };
+      });
+
+      // Combinar expedientes locales (enriquecidos) con favoritos PJN sin par local
       const todosLosExpedientes = [...exps, ...favoritosComoExpedientes];
       console.log(`[Mis Juzgados] Total expedientes (locales + favoritos): ${todosLosExpedientes.length} (${exps.length} locales + ${favoritosComoExpedientes.length} favoritos)`);
 
@@ -2915,7 +2879,12 @@ export default function MisJuzgadosPage() {
   // Resetear a página 1 cuando cambia el filtro o el tab
   useEffect(() => {
     setCurrentPage(1);
+    setExpandedRowId(null);
   }, [juzgadoFilter, createdByFilter, filters, activeTab, searchTerm]);
+
+  useEffect(() => {
+    setExpandedRowId(null);
+  }, [currentPage]);
 
   async function logout() {
     await supabase.auth.signOut();
@@ -2939,11 +2908,16 @@ export default function MisJuzgadosPage() {
     await loadData();
   }
 
+  const tableColSpan = getMisJuzgadosTableColSpan(activeTab, isAbogado);
+  const toggleExpandedRow = (id: string) => {
+    setExpandedRowId((prev) => (prev === id ? null : id));
+  };
+
   if (loading) {
     return (
-      <main className="container">
-        <section className="card">
-          <div className="page">
+      <main className="mj-page">
+        <section className="mj-panel">
+          <div className="mj-panel__body">
             <p className="helper">Cargando…</p>
           </div>
         </section>
@@ -2952,9 +2926,9 @@ export default function MisJuzgadosPage() {
   }
 
   return (
-    <main className="container" style={{ maxWidth: '95%', width: 'min(2400px, calc(100% - 32px))' }}>
-      <section className="card">
-        <header style={{
+    <main className="mj-page">
+      <section className="mj-panel">
+        <header className="mj-panel__header" style={{
           background: "linear-gradient(135deg, rgba(0,82,156,.25), rgba(0,82,156,.08))",
           borderBottom: "1px solid rgba(255,255,255,.12)",
           padding: "16px 24px",
@@ -2966,7 +2940,8 @@ export default function MisJuzgadosPage() {
           position: "relative"
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            {/* Menú Hamburguesa */}
+            <div className="legacy-inline-nav">
+            {/* Menú Hamburguesa — oculto con shell global */}
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -3199,6 +3174,7 @@ export default function MisJuzgadosPage() {
                 </button>
               </div>
             )}
+            </div>
 
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flex: 1, gap: 16, minWidth: 0 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -3267,6 +3243,7 @@ export default function MisJuzgadosPage() {
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             {currentUserName && (
               <div
+                className="legacy-user-chip"
                 style={{
                   padding: "8px 14px",
                   background: "rgba(255,255,255,.06)",
@@ -3299,8 +3276,6 @@ export default function MisJuzgadosPage() {
                 <span>{currentUserName}</span>
               </div>
             )}
-            {currentUserName && <NotificationBell />}
-
             <button
               onClick={refreshData}
               disabled={loading}
@@ -3336,7 +3311,7 @@ export default function MisJuzgadosPage() {
           </div>
         </header>
 
-        <div className="page">
+        <div className="mj-panel__body">
           <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
             <span style={{ color: "var(--muted)", fontSize: 13 }}>
               Semáforo automático por antigüedad:
@@ -3418,8 +3393,8 @@ export default function MisJuzgadosPage() {
               </button>
             )}
 
-            {/* Campo de búsqueda */}
-            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            {/* Búsqueda: controlada por topbar global (page-local-search oculto con shell) */}
+            <div className="page-local-search" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <span style={{ color: "var(--muted)", fontSize: 13, fontWeight: 600 }}>
                 Buscar:
               </span>
@@ -3609,215 +3584,184 @@ export default function MisJuzgadosPage() {
             </button>
           </div>
 
-          {/* Tabla */}
-          <div className="tableWrap" style={{ marginTop: 10 }}>
-            <table className="table" style={{ minWidth: '1800px' }}>
-              <thead>
-                <tr>
-                  <FilterableTh
-                    label="Semáforo"
-                    filterKey="semaforo"
-                    options={[
-                      { value: "VERDE", label: "VERDE" },
-                      { value: "AMARILLO", label: "AMARILLO" },
-                      { value: "ROJO", label: "ROJO" },
-                    ]}
-                    activeFilter={filters.semaforo}
-                    onFilter={(v) => setFilter("semaforo", v)}
-                    isOpen={openFilter === "semaforo"}
-                    onToggle={() => setOpenFilter((p) => (p === "semaforo" ? null : "semaforo"))}
-                    sortable
-                    sortField={sortField}
-                    sortDirection={sortDirection}
-                    onSort={() => handleSort("semaforo")}
-                    width={130}
-                  />
-                  <th>Carátula</th>
-                  <FilterableTh
-                    label="Juzgado"
-                    filterKey="tablaJuzgado"
-                    options={tablaJuzgadoFilterOptions}
-                    activeFilter={filters.tablaJuzgado}
-                    onFilter={(v) => setFilter("tablaJuzgado", v)}
-                    isOpen={openFilter === "tablaJuzgado"}
-                    onToggle={() => setOpenFilter((p) => (p === "tablaJuzgado" ? null : "tablaJuzgado"))}
-                    sortable
-                    sortField={sortField}
-                    sortDirection={sortDirection}
-                    onSort={() => handleSort("juzgado")}
-                    sortColumnId="juzgado"
-                    menuMinWidth={250}
-                    menuScrollable
-                    optionWhiteSpaceNormal
-                  />
-                  <th style={{ width: 80, textAlign: "center" }} title="Responsable según juzgado asignado">
-                    <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 500 }}>Responsable</span>
-                  </th>
-                  <th 
-                    style={{ width: 220, cursor: "pointer" }}
-                    onClick={() => handleSort("fecha")}
-                    title="Haz clic para ordenar"
-                  >
-                    {activeTab === "expedientes" ? "Fecha Última Modificación" : "Fecha de Carga"}{" "}
-                    <span style={{ opacity: 1 }}>
-                      {sortField === "fecha" ? (sortDirection === "asc" ? "↑" : "↓") : "↑"}
-                    </span>
-                  </th>
-                  <th 
-                    style={{ width: 56, minWidth: 56, textAlign: "left", cursor: "pointer" }}
-                    onClick={() => handleSort("dias")}
-                    title="Haz clic para ordenar"
-                  >
-                    Días{" "}
-                    <span style={{ opacity: sortField === "dias" ? 1 : 0.4 }}>
-                      {sortField === "dias" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
-                    </span>
-                  </th>
-                  {(activeTab === "cedulas" || activeTab === "oficios") && (
+          {/* Listado master-detail (desktop) + cards (móvil) */}
+          <div className="mj-data-region">
+            <div className="mj-desktop-table">
+              <table className="table master-detail-table">
+                <thead>
+                  <tr>
                     <FilterableTh
-                      label="Estado"
-                      filterKey="estado"
+                      label="Semáforo"
+                      filterKey="semaforo"
                       options={[
-                        { value: "Pendiente", label: "Pendiente" },
-                        { value: "En Trámite", label: "En Trámite" },
-                        { value: "En Diligenciamiento", label: "En Diligenciamiento" },
-                        { value: "Completa", label: "Completa" },
+                        { value: "VERDE", label: "VERDE" },
+                        { value: "AMARILLO", label: "AMARILLO" },
+                        { value: "ROJO", label: "ROJO" },
                       ]}
-                      activeFilter={filters.estado}
-                      onFilter={(v) => setFilter("estado", v)}
-                      isOpen={openFilter === "estado"}
-                      onToggle={() => setOpenFilter((p) => (p === "estado" ? null : "estado"))}
-                      width={110}
-                      menuMinWidth={190}
+                      activeFilter={filters.semaforo}
+                      onFilter={(v) => setFilter("semaforo", v)}
+                      isOpen={openFilter === "semaforo"}
+                      onToggle={() => setOpenFilter((p) => (p === "semaforo" ? null : "semaforo"))}
+                      sortable
+                      sortField={sortField}
+                      sortDirection={sortDirection}
+                      onSort={() => handleSort("semaforo")}
+                      width={130}
                     />
-                  )}
-                  {activeTab === "expedientes" && (
-                    <th style={{ width: 200 }}>Expediente</th>
-                  )}
-                  <th style={{ width: 180 }}>Cargado por</th>
-                  {isAbogado && (activeTab === "cedulas" || activeTab === "oficios") && (
-                    <th style={{ width: 140 }}>Acción</th>
-                  )}
-                  {activeTab === "expedientes" && (
-                    <th style={{ width: 380, minWidth: 380, textAlign: "center" }}>Observaciones</th>
-                  )}
-                  {activeTab === "expedientes" && (
-                    <th style={{ width: 380, minWidth: 380, textAlign: "center" }}>Notas</th>
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {paginatedItems.map((item: any) => {
-                  const dias = item.dias ?? null;
-                  const sem = item.semaforo || (dias !== null ? semaforoByAge(dias) : "VERDE");
-                  
-                  return (
-                    <tr key={item.id} style={{ verticalAlign: "top" }}>
-                      <td>
-                        <SemaforoChip value={sem as Semaforo} />
-                      </td>
-                      <td style={{ fontWeight: 650 }}>
-                        {item.caratula?.trim() ? item.caratula : <span className="muted">Sin carátula</span>}
-                      </td>
-                      <td>{item.juzgado ? limpiarJuzgadoParaMostrar(item.juzgado) : <span className="muted">—</span>}</td>
-                      <td style={{ textAlign: "center", verticalAlign: "middle" }}>
-                        {!item.juzgado?.trim() ? (
-                          <span className="muted" style={{ fontSize: 12 }}>—</span>
-                        ) : responsableLoading && usuariosByKey[getResponsableKey(item.juzgado, item.caratula)] === undefined ? (
-                          <span className="muted" style={{ fontSize: 11 }} title="Cargando responsable…">...</span>
-                        ) : (
-                          <ResponsableAvatars
-                            usuarios={usuariosByKey[getResponsableKey(item.juzgado, item.caratula)] || []}
-                          />
-                        )}
-                      </td>
-                      <td>
-                        {item.fecha_ultima_carga 
-                          ? formatFecha(item.fecha_ultima_carga)
-                          : item.fecha 
-                            ? formatFecha(item.fecha) 
-                            : <span className="muted">—</span>}
-                      </td>
-                      <td style={{ textAlign: "left", fontVariantNumeric: "tabular-nums" }}>
-                        {typeof dias === "number" && !isNaN(dias) ? dias : <span className="muted">—</span>}
-                      </td>
-                      {(activeTab === "cedulas" || activeTab === "oficios") && (
-                        <td>
-                          {item.estado ? (
+                    <th className="mj-col-primary">
+                      {activeTab === "expedientes" ? "Expediente / Carátula" : "Carátula"}
+                    </th>
+                    <FilterableTh
+                      label="Juzgado"
+                      filterKey="tablaJuzgado"
+                      options={tablaJuzgadoFilterOptions}
+                      activeFilter={filters.tablaJuzgado}
+                      onFilter={(v) => setFilter("tablaJuzgado", v)}
+                      isOpen={openFilter === "tablaJuzgado"}
+                      onToggle={() => setOpenFilter((p) => (p === "tablaJuzgado" ? null : "tablaJuzgado"))}
+                      sortable
+                      sortField={sortField}
+                      sortDirection={sortDirection}
+                      onSort={() => handleSort("juzgado")}
+                      sortColumnId="juzgado"
+                      menuMinWidth={250}
+                      menuScrollable
+                      optionWhiteSpaceNormal
+                    />
+                    <th className="mj-col-responsable" title="Responsable según juzgado asignado">
+                      <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 500 }}>Resp.</span>
+                    </th>
+                    <th
+                      style={{ width: 200, cursor: "pointer" }}
+                      onClick={() => handleSort("fecha")}
+                      title="Haz clic para ordenar"
+                    >
+                      {activeTab === "expedientes" ? "Últ. modificación" : "Fecha carga"}{" "}
+                      <span style={{ opacity: 1 }}>
+                        {sortField === "fecha" ? (sortDirection === "asc" ? "↑" : "↓") : "↑"}
+                      </span>
+                    </th>
+                    <th
+                      className="mj-col-dias"
+                      style={{ cursor: "pointer" }}
+                      onClick={() => handleSort("dias")}
+                      title="Haz clic para ordenar"
+                    >
+                      Días{" "}
+                      <span style={{ opacity: sortField === "dias" ? 1 : 0.4 }}>
+                        {sortField === "dias" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
+                      </span>
+                    </th>
+                    {(activeTab === "cedulas" || activeTab === "oficios") && (
+                      <FilterableTh
+                        label="Estado"
+                        filterKey="estado"
+                        options={[
+                          { value: "Pendiente", label: "Pendiente" },
+                          { value: "En Trámite", label: "En Trámite" },
+                          { value: "En Diligenciamiento", label: "En Diligenciamiento" },
+                          { value: "Completa", label: "Completa" },
+                        ]}
+                        activeFilter={filters.estado}
+                        onFilter={(v) => setFilter("estado", v)}
+                        isOpen={openFilter === "estado"}
+                        onToggle={() => setOpenFilter((p) => (p === "estado" ? null : "estado"))}
+                        width={110}
+                        menuMinWidth={190}
+                      />
+                    )}
+                    <th className="mj-col-cargado">Cargado por</th>
+                    {isAbogado && (activeTab === "cedulas" || activeTab === "oficios") && (
+                      <th className="mj-col-accion">Acción</th>
+                    )}
+                    <th className="mj-col-detail">Detalle</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedItems.map((item: any) => {
+                    const dias = item.dias ?? null;
+                    const sem = item.semaforo || (dias !== null ? semaforoByAge(dias) : "VERDE");
+                    return (
+                      <MisJuzgadosTableRows
+                        key={item.id}
+                        item={item}
+                        activeTab={activeTab}
+                        isAbogado={isAbogado}
+                        isExpanded={expandedRowId === item.id}
+                        colSpan={tableColSpan}
+                        onToggleExpand={toggleExpandedRow}
+                        formatCaratulaFull={(t) => (t || "").trim()}
+                        renderSemaforo={() => <SemaforoChip value={sem as Semaforo} />}
+                        renderJuzgado={() =>
+                          item.juzgado ? (
+                            limpiarJuzgadoParaMostrar(item.juzgado)
+                          ) : (
+                            <span className="muted">—</span>
+                          )
+                        }
+                        renderResponsable={() =>
+                          !item.juzgado?.trim() ? (
+                            <span className="muted" style={{ fontSize: 12 }}>—</span>
+                          ) : responsableLoading &&
+                            usuariosByKey[getResponsableKey(item.juzgado, item.caratula)] === undefined ? (
+                            <span className="muted" style={{ fontSize: 11 }} title="Cargando responsable…">
+                              ...
+                            </span>
+                          ) : (
+                            <ResponsableAvatars
+                              usuarios={usuariosByKey[getResponsableKey(item.juzgado, item.caratula)] || []}
+                            />
+                          )
+                        }
+                        renderFecha={() =>
+                          item.fecha_ultima_carga ? (
+                            formatFecha(item.fecha_ultima_carga)
+                          ) : item.fecha ? (
+                            formatFecha(item.fecha)
+                          ) : (
+                            <span className="muted">—</span>
+                          )
+                        }
+                        renderEstado={() =>
+                          item.estado ? (
                             <EstadoChip value={item.estado as EstadoCedula} />
                           ) : (
                             <EstadoChip value="Pendiente" />
-                          )}
-                        </td>
-                      )}
-                      {activeTab === "expedientes" && (
-                        <td>
-                          {item.numero?.trim() ? item.numero : <span className="muted">—</span>}
-                        </td>
-                      )}
-                      <td>
-                        {item.created_by ? (
-                          <span style={{ fontSize: 13 }}>{item.created_by}</span>
-                        ) : (
-                          <span className="muted">—</span>
-                        )}
-                      </td>
-                      {isAbogado && (activeTab === "cedulas" || activeTab === "oficios") && (
-                        <td>
-                          {item.pdf_path ? (
+                          )
+                        }
+                        renderAccion={() =>
+                          item.pdf_path ? (
                             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
                               <button
+                                type="button"
                                 className="btn primary"
                                 onClick={() => abrirArchivo(item.pdf_path, item.id)}
-                                style={{
-                                  fontSize: 12,
-                                  padding: "6px 12px",
-                                  whiteSpace: "nowrap"
-                                }}
+                                style={{ fontSize: 12, padding: "6px 12px", whiteSpace: "nowrap" }}
                               >
-                                {item.tipo_documento === "OFICIO" ? "VER OFICIO" : item.tipo_documento === "OTROS_ESCRITOS" ? "VER CAUSAS PENALES" : "VER CÉDULA"}
+                                {item.tipo_documento === "OFICIO"
+                                  ? "VER OFICIO"
+                                  : item.tipo_documento === "OTROS_ESCRITOS"
+                                    ? "VER CAUSAS PENALES"
+                                    : "VER CÉDULA"}
                               </button>
                               {item.read_by_name && (
-                                <div style={{ 
-                                  fontSize: 10, 
-                                  color: "rgba(234,243,255,.6)",
-                                  textAlign: "center",
-                                  fontStyle: "italic"
-                                }}>
+                                <div
+                                  style={{
+                                    fontSize: 10,
+                                    color: "rgba(234,243,255,.6)",
+                                    textAlign: "center",
+                                    fontStyle: "italic",
+                                  }}
+                                >
                                   LEIDA POR {item.read_by_name.toUpperCase()}
                                 </div>
                               )}
                             </div>
                           ) : (
                             <span className="muted" style={{ fontSize: 12 }}>—</span>
-                          )}
-                        </td>
-                      )}
-                      {activeTab === "expedientes" && (
-                        <td style={{ fontSize: 13, width: 380, minWidth: 380, textAlign: "center", padding: "11px 12px" }}>
-                          {item.observaciones?.trim() ? (
-                            <div style={{ 
-                              padding: "8px 10px",
-                              background: "rgba(255,255,255,.03)",
-                              borderRadius: 8,
-                              border: "1px solid rgba(255,255,255,.06)",
-                              lineHeight: 1.6,
-                              whiteSpace: "pre-wrap",
-                              wordBreak: "break-word",
-                              color: "rgba(234,243,255,.88)",
-                              fontSize: 12.5,
-                              letterSpacing: "0.01em",
-                              textAlign: "left"
-                            }}>
-                              {item.observaciones}
-                            </div>
-                          ) : (
-                            <span className="muted">—</span>
-                          )}
-                        </td>
-                      )}
-                      {activeTab === "expedientes" && (
-                        <td style={{ fontSize: 13, width: 380, minWidth: 380, textAlign: "center", padding: "11px 12px" }}>
+                          )
+                        }
+                        renderNotasEditor={() => (
                           <NotasTextarea
                             itemId={item.id}
                             isPjnFavorito={item.is_pjn_favorito === true}
@@ -3831,26 +3775,96 @@ export default function MisJuzgadosPage() {
                             numeroExpediente={item.numero}
                             juzgado={item.juzgado}
                           />
-                        </td>
-                      )}
+                        )}
+                      />
+                    );
+                  })}
+                  {sortedItems.length === 0 && (
+                    <tr>
+                      <td colSpan={tableColSpan} className="muted" style={{ padding: 24, textAlign: "center" }}>
+                        No hay{" "}
+                        {activeTab === "expedientes"
+                          ? "expedientes"
+                          : activeTab === "cedulas"
+                            ? "cédulas"
+                            : "oficios"}{" "}
+                        cargados para tus juzgados asignados.
+                      </td>
                     </tr>
-                  );
-                })}
-                {sortedItems.length === 0 && (
-                  <tr>
-                    <td colSpan={
-                      activeTab === "expedientes" 
-                        ? 10 
-                        : isAbogado 
-                          ? 9 
-                          : 8
-                    } className="muted">
-                      No hay {activeTab === "expedientes" ? "expedientes" : activeTab === "cedulas" ? "cédulas" : "oficios"} cargados para tus juzgados asignados.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <MisJuzgadosMobileCards
+              items={paginatedItems}
+              activeTab={activeTab}
+              isAbogado={isAbogado}
+              expandedId={expandedRowId}
+              onToggleExpand={toggleExpandedRow}
+              formatCaratulaFull={(t) => (t || "").trim()}
+              renderSemaforo={(item) => {
+                const dias = item.dias ?? null;
+                const sem = item.semaforo || (dias !== null ? semaforoByAge(dias) : "VERDE");
+                return <SemaforoChip value={sem as Semaforo} />;
+              }}
+              renderJuzgado={(item) =>
+                item.juzgado ? limpiarJuzgadoParaMostrar(item.juzgado) : "—"
+              }
+              renderResponsable={(item) =>
+                !item.juzgado?.trim() ? (
+                  <span className="muted">—</span>
+                ) : responsableLoading &&
+                  usuariosByKey[getResponsableKey(item.juzgado, item.caratula)] === undefined ? (
+                  <span className="muted">…</span>
+                ) : (
+                  <ResponsableAvatars
+                    usuarios={usuariosByKey[getResponsableKey(item.juzgado, item.caratula)] || []}
+                  />
+                )
+              }
+              renderFecha={(item) =>
+                item.fecha_ultima_carga
+                  ? formatFecha(item.fecha_ultima_carga)
+                  : item.fecha
+                    ? formatFecha(item.fecha)
+                    : "—"
+              }
+              renderEstado={(item) =>
+                item.estado ? (
+                  <EstadoChip value={item.estado as EstadoCedula} />
+                ) : (
+                  <EstadoChip value="Pendiente" />
+                )
+              }
+              renderAccion={(item) =>
+                item.pdf_path ? (
+                  <button
+                    type="button"
+                    className="btn primary"
+                    onClick={() => abrirArchivo(item.pdf_path!, item.id)}
+                    style={{ fontSize: 12, padding: "8px 14px", width: "100%" }}
+                  >
+                    {item.tipo_documento === "OFICIO" ? "Ver oficio" : "Ver documento"}
+                  </button>
+                ) : null
+              }
+              renderNotasEditor={(item) => (
+                <NotasTextarea
+                  itemId={item.id}
+                  isPjnFavorito={item.is_pjn_favorito === true}
+                  initialValue={item.notas || ""}
+                  notasEditables={notasEditables}
+                  setNotasEditables={setNotasEditables}
+                  notasGuardando={notasGuardando}
+                  setNotasGuardando={setNotasGuardando}
+                  setMsg={setMsg}
+                  caratula={item.caratula}
+                  numeroExpediente={item.numero}
+                  juzgado={item.juzgado}
+                />
+              )}
+            />
           </div>
 
           {/* Paginación - solo para expedientes */}
