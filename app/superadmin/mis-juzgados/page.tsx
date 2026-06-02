@@ -12,6 +12,7 @@ import { useColumnFilters, uniqueOptionsFromField } from "@/app/hooks/useColumnF
 import { usePageSearchBridge } from "@/app/hooks/usePageSearchBridge";
 import { loadMentionUsersOnce } from "@/lib/users-list-cache";
 import {
+  dedupeExpedientesByMatchKey,
   isExpedientePjnMergeEnabled,
   mergeLocalsWithPjnFavoritos,
   resolveObservacionesFromFavorito,
@@ -1431,15 +1432,24 @@ export default function MisJuzgadosPage() {
       try {
         console.log(`[Mis Juzgados] Intentando cargar favoritos de pjn_favoritos...`);
         
-        // Intentar primero con el cliente principal (misma base de datos)
-        // IMPORTANTE: Filtrar favoritos removidos (si existe columna removido o estado)
+        // Cargar solo columnas base (evita fallo si removido/movimientos/notas no existen en el proyecto)
         let { data: favoritosData, error: favoritosErr } = await supabase
           .from("pjn_favoritos")
-          .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones, notas, removido, estado, movimientos")
+          .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones")
           .order("updated_at", { ascending: false });
-        
-        // Si falla porque la columna no existe, intentar cargar las columnas disponibles
-        if (favoritosErr && (favoritosErr.message?.includes("removido") || favoritosErr.message?.includes("estado") || favoritosErr.message?.includes("notas") || favoritosErr.message?.includes("movimientos"))) {
+
+        if (!favoritosErr && favoritosData) {
+          favoritosData = (favoritosData as PjnFavorito[]).map((f) => ({
+            ...f,
+            removido: false,
+            estado: null,
+            notas: null,
+            movimientos: null,
+          })) as typeof favoritosData;
+        }
+
+        // Fallback legacy: si falla la carga base, reintentar sin columnas opcionales
+        if (favoritosErr && (favoritosErr.message?.includes("removido") || favoritosErr.message?.includes("estado") || favoritosErr.message?.includes("notas") || favoritosErr.message?.includes("movimientos") || favoritosErr.message?.includes("observaciones"))) {
           console.log(`[Mis Juzgados] Algunas columnas no encontradas, intentando cargar sin ellas...`);
           
           // Intentar primero cargar sin las columnas problemáticas (incluyendo movimientos)
@@ -1993,7 +2003,7 @@ export default function MisJuzgadosPage() {
         const { mergedLocals, unmatchedFavoritos, mergedCount } = mergeLocalsWithPjnFavoritos(
           expedientesBase,
           pjnFavoritos,
-          { ddmmaaaaToISO, normalizeJuzgado }
+          { ddmmaaaaToISO, normalizeJuzgado: (raw) => normalizeJuzgado(raw ?? null) }
         );
         expedientesBase = mergedLocals;
         const unmatchedIds = new Set(unmatchedFavoritos.map((f) => f.id));
@@ -2001,65 +2011,67 @@ export default function MisJuzgadosPage() {
         console.log(
           `[Mis Juzgados] Merge PJN: ${mergedCount} manuales enlazados, ${favoritosParaLista.length} favoritos en lista (${pjnFavoritos.length - unmatchedFavoritos.length} consumidos por match)`
         );
-        const ej35586 = mergedLocals.find(
-          (e: any) =>
-            e.pjn_merge_applied &&
-            (String(e.numero_expediente || "").includes("35586/2025") ||
-              String(e.numero_expediente || "").includes("035586/2025"))
+        const ej35586Merged = mergedLocals.find((e: any) =>
+          String(e.numero_expediente || "").includes("35586/2025")
         );
-        if (ej35586) {
+        if (ej35586Merged?.pjn_merge_applied) {
           console.log(`[Mis Juzgados] 🔍 35586/2025 tras merge PJN:`, {
-            juzgado: ej35586.juzgado,
-            observaciones: ej35586.observaciones?.substring?.(0, 80),
-            fecha_ultima_modificacion: ej35586.fecha_ultima_modificacion,
-            linked_pjn_favorito_id: ej35586.linked_pjn_favorito_id,
+            juzgado: ej35586Merged.juzgado,
+            observaciones: ej35586Merged.observaciones?.substring?.(0, 80),
+            fecha_ultima_modificacion: ej35586Merged.fecha_ultima_modificacion,
+            linked_pjn_favorito_id: ej35586Merged.linked_pjn_favorito_id,
           });
+        } else if (ej35586Merged) {
+          console.warn(
+            `[Mis Juzgados] ⚠️ 35586/2025 manual sin merge (favoritos en memoria: ${pjnFavoritos.length}). ¿pjn_favoritos cargó vacío por RLS o .env distinto al SQL?`
+          );
         }
+      } else if (
+        (allExpsData ?? []).some((e: any) => String(e.numero_expediente || "").includes("35586/2025"))
+      ) {
+        console.warn(
+          `[Mis Juzgados] ⚠️ Merge PJN desactivado (NEXT_PUBLIC_EXPEDIENTE_PJN_MERGE=0). 35586/2025 no se enriquecerá en pantalla.`
+        );
       }
 
-      // Filtrar expedientes según el filtro seleccionado
+      // Filtrar expedientes según el filtro seleccionado (siempre sobre expedientesBase = merge PJN aplicado)
       let exps = expedientesBase;
-      
-      // Solo filtrar por juzgados si el filtro es "mis_juzgados" y hay juzgados asignados
+
       if (juzgadoFilter === "mis_juzgados" && juzgadosNormalizados.length > 0) {
-        exps = allExpsData?.filter((e: any) => {
+        exps = expedientesBase.filter((e: any) => {
           if (!e.juzgado) return false;
-          return juzgadosNormalizados.some(jAsignado => {
-            return juzgadosCoinciden(e.juzgado, jAsignado);
-          });
-        }) ?? [];
-        console.log(`[Mis Juzgados] Expedientes filtrados por juzgados: ${exps.length} de ${allExpsData?.length || 0}`);
+          return juzgadosNormalizados.some((jAsignado) => juzgadosCoinciden(e.juzgado, jAsignado));
+        });
+        console.log(
+          `[Mis Juzgados] Expedientes filtrados por juzgados: ${exps.length} de ${expedientesBase.length}`
+        );
       } else if (juzgadoFilter === "todos") {
-        // No filtrar, mostrar todos los expedientes
-        exps = allExpsData ?? [];
+        exps = expedientesBase;
         console.log(`[Mis Juzgados] Mostrando TODOS los expedientes: ${exps.length}`);
       } else if (juzgadoFilter === "beneficio") {
-        // Filtrar por "BENEFICIO DE LITIGAR SIN GASTOS" en la carátula
         const fraseBeneficio = "BENEFICIO DE LITIGAR SIN GASTOS";
-        exps = (allExpsData ?? []).filter((e: any) => {
+        exps = expedientesBase.filter((e: any) => {
           if (!e.caratula) return false;
           const caratulaUpper = e.caratula.toUpperCase();
           if (!caratulaUpper.includes(fraseBeneficio)) return false;
-          
-          // Respetar la distribución por juzgados asignados
           if (juzgadosNormalizados.length > 0) {
             if (!e.juzgado) return false;
-            return juzgadosNormalizados.some(jAsignado => {
-              return juzgadosCoinciden(e.juzgado, jAsignado);
-            });
+            return juzgadosNormalizados.some((jAsignado) => juzgadosCoinciden(e.juzgado, jAsignado));
           }
           return true;
         });
-        console.log(`[Mis Juzgados] Expedientes con BENEFICIO: ${exps.length} de ${allExpsData?.length || 0}`);
+        console.log(`[Mis Juzgados] Expedientes con BENEFICIO: ${exps.length} de ${expedientesBase.length}`);
       } else if (juzgadoFilter === "prueba_pericia") {
-        // Filtrar expedientes por Prueba/Pericia
-        // Los expedientes locales no tienen movimientos, así que este filtro solo aplica a favoritos
-        // Los favoritos ya están filtrados arriba, así que aquí solo filtramos expedientes locales (que no tienen movimientos)
         exps = [];
         console.log(`[Mis Juzgados] Filtro "prueba_pericia" solo aplica a favoritos de PJN con movimientos`);
-      } else if (juzgadoFilter && juzgadoFilter !== "mis_juzgados" && juzgadoFilter !== "todos" && juzgadoFilter !== "beneficio" && juzgadoFilter !== "prueba_pericia") {
-        // Filtro por juzgado específico
-        exps = (allExpsData ?? []).filter((e: any) => {
+      } else if (
+        juzgadoFilter &&
+        juzgadoFilter !== "mis_juzgados" &&
+        juzgadoFilter !== "todos" &&
+        juzgadoFilter !== "beneficio" &&
+        juzgadoFilter !== "prueba_pericia"
+      ) {
+        exps = expedientesBase.filter((e: any) => {
           if (!e.juzgado) return false;
           return juzgadosCoinciden(e.juzgado, juzgadoFilter);
         });
@@ -2087,7 +2099,10 @@ export default function MisJuzgadosPage() {
       });
 
       // Combinar expedientes locales (enriquecidos) con favoritos PJN sin par local
-      const todosLosExpedientes = [...exps, ...favoritosComoExpedientes];
+      let todosLosExpedientes = [...exps, ...favoritosComoExpedientes];
+      if (isExpedientePjnMergeEnabled()) {
+        todosLosExpedientes = dedupeExpedientesByMatchKey(todosLosExpedientes);
+      }
       console.log(`[Mis Juzgados] Total expedientes (locales + favoritos): ${todosLosExpedientes.length} (${exps.length} locales + ${favoritosComoExpedientes.length} favoritos)`);
 
       // Debug: verificar created_by_user_id en los expedientes
@@ -2686,17 +2701,9 @@ export default function MisJuzgadosPage() {
           
           // Debug: verificar expediente específico
           if (e.numero_expediente && (e.numero_expediente.includes("35586/2025") || e.numero_expediente.includes("035586/2025"))) {
-            console.log(`[Mis Juzgados] 🔍 Expediente 35586/2025 en itemsToShow:`, {
-              id: e.id,
-              numero_expediente: e.numero_expediente,
-              juzgado: e.juzgado,
-              observaciones: e.observaciones,
-              is_pjn_favorito: e.is_pjn_favorito,
-              tieneJuzgado: !!e.juzgado,
-              tieneObservaciones: !!e.observaciones,
-              juzgadoLength: e.juzgado?.length || 0,
-              observacionesLength: e.observaciones?.length || 0
-            });
+            console.log(
+              `[Mis Juzgados] 🔍 35586/2025 en itemsToShow → juzgado="${e.juzgado ?? ""}" obs=${(e.observaciones?.length ?? 0)} chars pjn_merge=${Boolean((e as { pjn_merge_applied?: boolean }).pjn_merge_applied)}`
+            );
           }
           
           return {
@@ -2796,11 +2803,16 @@ export default function MisJuzgadosPage() {
     if (searchTerm.trim()) {
       const searchLower = searchTerm.trim().toLowerCase();
       filtered = filtered.filter((item: any) => {
-        // Buscar en número de expediente (la propiedad se llama "numero" en los items mapeados)
         const numeroExpediente = (item.numero || "").toLowerCase();
-        // Buscar en carátula
         const caratula = (item.caratula || "").toLowerCase();
-        return numeroExpediente.includes(searchLower) || caratula.includes(searchLower);
+        const juzgado = (item.juzgado || "").toLowerCase();
+        const observaciones = (item.observaciones || "").toLowerCase();
+        return (
+          numeroExpediente.includes(searchLower) ||
+          caratula.includes(searchLower) ||
+          juzgado.includes(searchLower) ||
+          observaciones.includes(searchLower)
+        );
       });
     }
 
@@ -3583,6 +3595,22 @@ export default function MisJuzgadosPage() {
               Oficios ({oficiosFiltered.length})
             </button>
           </div>
+
+          {(searchTerm.trim() || hasActiveFilters) && activeTab === "expedientes" && (
+            <p className="helper" style={{ marginBottom: 12 }}>
+              {searchTerm.trim() ? (
+                <>
+                  Búsqueda &quot;{searchTerm.trim()}&quot;:{" "}
+                  <strong>{sortedItems.length}</strong> de {expedientes.length} expedientes
+                  {sortedItems.length === 0 ? " — probá limpiar filtros de columna o semáforo." : ""}
+                </>
+              ) : (
+                <>
+                  Filtros activos: <strong>{sortedItems.length}</strong> expedientes visibles
+                </>
+              )}
+            </p>
+          )}
 
           {/* Listado master-detail (desktop) + cards (móvil) */}
           <div className="mj-data-region">

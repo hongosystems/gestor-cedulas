@@ -260,3 +260,38 @@ export function mergeLocalsWithPjnFavoritos<T extends LocalExpedienteForMerge>(
 
   return { mergedLocals, unmatchedFavoritos, mergedCount };
 }
+
+/** Evita dos filas del mismo expediente (manual enriquecido + favorito PJN). */
+export function dedupeExpedientesByMatchKey<T extends LocalExpedienteForMerge & { is_pjn_favorito?: boolean }>(
+  items: T[]
+): T[] {
+  const byKey = new Map<string, T>();
+
+  const score = (item: T): number => {
+    let s = 0;
+    if ((item as { pjn_merge_applied?: boolean }).pjn_merge_applied) s += 4;
+    if (!item.is_pjn_favorito) s += 2;
+    if (item.juzgado?.trim()) s += 1;
+    if (item.observaciones?.trim()) s += 1;
+    return s;
+  };
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const parsed = item.numero_expediente
+      ? parseExpedienteFromNumero(item.numero_expediente)
+      : null;
+    const key =
+      matchKeyFromLocal(item) || (parsed ? matchKeyFromParts(parsed) : null);
+    if (!key) {
+      byKey.set(`__no_key_${(item as { id?: string }).id ?? i}`, item);
+      continue;
+    }
+    const prev = byKey.get(key);
+    if (!prev || score(item) > score(prev)) {
+      byKey.set(key, item);
+    }
+  }
+
+  return Array.from(byKey.values());
+}
