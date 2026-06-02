@@ -11,6 +11,7 @@ const EMPTY_ROLES: UserRoleFlags = {
   isAdminCedulas: false,
   isAdminMediaciones: false,
   isMediador: false,
+  isAdminOrdenesMedicas: false,
 };
 
 export function useUserRoles() {
@@ -44,7 +45,7 @@ export function useUserRoles() {
         supabase
           .from("user_roles")
           .select(
-            "is_superadmin, is_abogado, is_admin_expedientes, is_admin_cedulas, is_admin_mediaciones, is_mediador"
+            "is_superadmin, is_abogado, is_admin_expedientes, is_admin_cedulas, is_admin_mediaciones, is_mediador, is_admin_ordenes_medicas"
           )
           .eq("user_id", uid)
           .maybeSingle(),
@@ -60,6 +61,7 @@ export function useUserRoles() {
         isAdminCedulas: roleData?.is_admin_cedulas === true,
         isAdminMediaciones: roleData?.is_admin_mediaciones === true,
         isMediador: roleData?.is_mediador === true,
+        isAdminOrdenesMedicas: roleData?.is_admin_ordenes_medicas === true,
       });
       setUserName(prof?.full_name?.trim() || null);
       setLoading(false);

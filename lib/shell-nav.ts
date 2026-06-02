@@ -5,6 +5,7 @@ export type UserRoleFlags = {
   isAdminCedulas: boolean;
   isAdminMediaciones: boolean;
   isMediador: boolean;
+  isAdminOrdenesMedicas: boolean;
 };
 
 /** Fila de user_roles (campos usados en login y shell). */
@@ -15,6 +16,7 @@ export type UserRoleRow = {
   is_abogado?: boolean | null;
   is_admin_mediaciones?: boolean | null;
   is_mediador?: boolean | null;
+  is_admin_ordenes_medicas?: boolean | null;
 };
 
 export function roleRowToFlags(row: UserRoleRow): UserRoleFlags {
@@ -25,6 +27,7 @@ export function roleRowToFlags(row: UserRoleRow): UserRoleFlags {
     isAdminCedulas: row.is_admin_cedulas === true,
     isAdminMediaciones: row.is_admin_mediaciones === true,
     isMediador: row.is_mediador === true,
+    isAdminOrdenesMedicas: row.is_admin_ordenes_medicas === true,
   };
 }
 
@@ -96,7 +99,8 @@ export function getShellNavItems(roles: UserRoleFlags): ShellNavItem[] {
   const canMediaciones =
     roles.isSuperadmin || roles.isAdminMediaciones || roles.isMediador;
   const canMediacionesLotes = roles.isSuperadmin || roles.isAdminMediaciones;
-  const canPericias = roles.isAbogado || roles.isSuperadmin;
+  const canPericias =
+    roles.isAbogado || roles.isSuperadmin || roles.isAdminOrdenesMedicas;
   const canWorkflowCedulas =
     roles.isSuperadmin ||
     roles.isAbogado ||
@@ -220,7 +224,7 @@ export function getShellNavItems(roles: UserRoleFlags): ShellNavItem[] {
     },
     {
       id: "pericias",
-      label: "Turnos Pericias",
+      label: "Prueba/Pericia",
       href: "/prueba-pericia",
       group: "modulos",
       match: (p) => p === "/prueba-pericia" || p.startsWith("/prueba-pericia/"),
