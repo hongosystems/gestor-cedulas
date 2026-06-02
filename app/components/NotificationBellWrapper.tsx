@@ -23,6 +23,7 @@ export default function NotificationBellWrapper() {
 
   return (
     <div
+      className="notification-bell-floating"
       style={{
         position: "fixed",
         top: 80,

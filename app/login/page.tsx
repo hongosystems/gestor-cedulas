@@ -1,11 +1,18 @@
 "use client";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { redirectAfterRoleCheck } from "@/lib/post-login-redirect";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [pass, setPass] = useState("");
   const [msg, setMsg] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    document.body.classList.add("auth-login-active");
+    return () => document.body.classList.remove("auth-login-active");
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -31,174 +38,149 @@ export default function LoginPage() {
         .eq("user_id", uid)
         .maybeSingle();
 
-      if (roleErr || !roleData) {
+      if (roleErr) {
         window.location.href = "/app";
         return;
       }
 
-      const isSuperadmin = roleData.is_superadmin === true;
-      const isAdminExp = roleData.is_admin_expedientes === true;
-      const isAdminCedulas = roleData.is_admin_cedulas === true;
-      const isAbogado = roleData.is_abogado === true;
-      const isAdminMediaciones = roleData.is_admin_mediaciones === true;
-      const isMediador = roleData.is_mediador === true;
-
-      // Prioridad: Abogado/Superadmin siempre entra directo al Dashboard
-      // (evitar pantalla intermedia aunque tenga roles adicionales)
-      if (isSuperadmin || isAbogado) {
-        window.location.href = "/superadmin";
-        return;
-      }
-
-      // Contar cuántos roles tiene
-      const roleCount = [isSuperadmin, isAdminExp, isAdminCedulas, isAbogado, isAdminMediaciones, isMediador].filter(Boolean).length;
-
-      // Si tiene múltiples roles, redirigir a selección de rol
-      if (roleCount > 1) {
-        window.location.href = "/select-role";
-        return;
-      }
-
-      // Si solo tiene un rol, redirigir directamente
-      if (isAdminExp) {
-        window.location.href = "/app/expedientes";
-        return;
-      }
-
-      if (isAdminCedulas) {
-        window.location.href = "/app";
-        return;
-      }
-
-      if (isAdminMediaciones) {
-        window.location.href = "/app/mediaciones";
-        return;
-      }
-      if (isMediador) {
-        window.location.href = "/app/mediaciones";
-        return;
-      }
-
-      window.location.href = "/app";
+      redirectAfterRoleCheck(roleData);
     })();
   }, []);
 
   async function signIn(e: React.FormEvent) {
     e.preventDefault();
     setMsg("");
+    setSubmitting(true);
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
-    if (error) { setMsg(error.message); return; }
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
+      if (error) {
+        setMsg(error.message);
+        return;
+      }
 
-    const { data: sess } = await supabase.auth.getSession();
-    const uid = sess.session?.user.id;
-    if (!uid) { window.location.href = "/login"; return; }
+      const { data: sess } = await supabase.auth.getSession();
+      const uid = sess.session?.user.id;
+      if (!uid) {
+        window.location.href = "/login";
+        return;
+      }
 
-    const { data: prof, error: pErr } = await supabase
-      .from("profiles")
-      .select("must_change_password")
-      .eq("id", uid)
-      .single();
+      const { data: prof, error: pErr } = await supabase
+        .from("profiles")
+        .select("must_change_password")
+        .eq("id", uid)
+        .single();
 
-    if (pErr) { setMsg(pErr.message); return; }
+      if (pErr) {
+        setMsg(pErr.message);
+        return;
+      }
 
-    if (prof?.must_change_password) {
-      window.location.href = "/cambiar-password";
-      return;
+      if (prof?.must_change_password) {
+        window.location.href = "/cambiar-password";
+        return;
+      }
+
+      // Verificar todos los roles del usuario
+      const { data: roleData, error: roleErr } = await supabase
+        .from("user_roles")
+        .select("is_superadmin, is_admin_expedientes, is_admin_cedulas, is_abogado, is_admin_mediaciones, is_mediador")
+        .eq("user_id", uid)
+        .maybeSingle();
+
+      if (roleErr) {
+        window.location.href = "/app";
+        return;
+      }
+
+      redirectAfterRoleCheck(roleData);
+    } finally {
+      setSubmitting(false);
     }
-
-    // Verificar todos los roles del usuario
-    const { data: roleData, error: roleErr } = await supabase
-      .from("user_roles")
-      .select("is_superadmin, is_admin_expedientes, is_admin_cedulas, is_abogado, is_admin_mediaciones, is_mediador")
-      .eq("user_id", uid)
-      .maybeSingle();
-
-    if (roleErr || !roleData) {
-      window.location.href = "/app";
-      return;
-    }
-
-    const isSuperadmin = roleData.is_superadmin === true;
-    const isAdminExp = roleData.is_admin_expedientes === true;
-    const isAdminCedulas = roleData.is_admin_cedulas === true;
-    const isAbogado = roleData.is_abogado === true;
-    const isAdminMediaciones = roleData.is_admin_mediaciones === true;
-    const isMediador = roleData.is_mediador === true;
-
-    // Prioridad: Abogado/Superadmin siempre entra directo al Dashboard
-    // (evitar pantalla intermedia aunque tenga roles adicionales)
-    if (isSuperadmin || isAbogado) {
-      window.location.href = "/superadmin";
-      return;
-    }
-
-    // Contar cuántos roles tiene
-    const roleCount = [isSuperadmin, isAdminExp, isAdminCedulas, isAbogado, isAdminMediaciones, isMediador].filter(Boolean).length;
-
-    // Si tiene múltiples roles, redirigir a selección de rol
-    if (roleCount > 1) {
-      window.location.href = "/select-role";
-      return;
-    }
-
-    // Si solo tiene un rol, redirigir directamente
-    if (isAdminExp) {
-      window.location.href = "/app/expedientes";
-      return;
-    }
-
-    if (isAdminCedulas) {
-      window.location.href = "/app";
-      return;
-    }
-
-    if (isAdminMediaciones) {
-      window.location.href = "/app/mediaciones";
-      return;
-    }
-    if (isMediador) {
-      window.location.href = "/app/mediaciones";
-      return;
-    }
-
-    window.location.href = "/app";
   }
 
   return (
-    <main className="container">
-      <section className="card">
-        <header className="nav">
-          <img className="logoLogin" src="/logo.png" alt="Estudio" />
-          <div>
-            <h1 style={{ marginBottom: 2 }}>Ingreso</h1>
-            <div className="muted" style={{ fontSize: 13 }}>
-              Accedé a tu tablero de cédulas y vencimientos
+    <main className="auth-page">
+      <div className="auth-page__center">
+        <section className="auth-card" aria-labelledby="auth-login-title">
+          <header className="auth-card__header">
+            <img className="auth-card__logo" src="/logo.png" alt="" width={56} height={56} />
+            <div className="auth-card__brand">
+              <span className="auth-card__brand-name">Estudio HIF — Sistemas</span>
+              <h1 id="auth-login-title" className="auth-card__title">
+                Ingreso
+              </h1>
+              <p className="auth-card__tagline">
+                Gestión de cédulas, oficios y expedientes
+              </p>
             </div>
-          </div>
-          <div className="spacer" />
-        </header>
+          </header>
 
-        <div className="page">
-          <form className="form narrow" onSubmit={signIn}>
-            <div className="field">
-              <div className="label">Email</div>
-              <input className="input" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
+          <form className="auth-form" onSubmit={signIn} noValidate={false}>
+            {msg ? (
+              <div className="auth-alert auth-alert--error" role="alert">
+                {msg}
+              </div>
+            ) : null}
+
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="login-email">
+                Email
+              </label>
+              <input
+                id="login-email"
+                className="auth-input"
+                type="email"
+                name="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
+                inputMode="email"
+                autoCapitalize="none"
+                autoCorrect="off"
+                required
+                disabled={submitting}
+                placeholder="tu@correo.com"
+              />
             </div>
 
-            <div className="field">
-              <div className="label">Contraseña</div>
-              <input className="input" type="password" value={pass} onChange={(e) => setPass(e.target.value)} autoComplete="current-password" />
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="login-password">
+                Contraseña
+              </label>
+              <input
+                id="login-password"
+                className="auth-input"
+                type="password"
+                name="password"
+                value={pass}
+                onChange={(e) => setPass(e.target.value)}
+                autoComplete="current-password"
+                required
+                disabled={submitting}
+                placeholder="••••••••"
+              />
             </div>
 
-            <div className="actions">
-              <button className="btn primary" type="submit">Ingresar</button>
-            </div>
+            <button
+              className="auth-submit btn primary"
+              type="submit"
+              disabled={submitting}
+              aria-busy={submitting}
+            >
+              {submitting ? "Ingresando…" : "Ingresar"}
+            </button>
 
-            {msg && <div className="error">{msg}</div>}
+            <p className="auth-help">
+              Usá las credenciales asignadas por el estudio. Si no podés acceder, contactá a
+              administración.
+            </p>
           </form>
-        </div>
-      </section>
+        </section>
+
+        <p className="auth-page__footnote">Gestor de Cédulas · Estudio HIF</p>
+      </div>
     </main>
   );
 }

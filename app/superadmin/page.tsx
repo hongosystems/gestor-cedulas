@@ -5,7 +5,9 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { pjnScraperSupabase } from "@/lib/pjn-scraper-supabase";
 import jsPDF from "jspdf";
-import NotificationBell from "@/app/components/NotificationBell";
+import SuperadminDashboardPanels from "@/app/components/dashboard/SuperadminDashboardPanels";
+import type { BarChartItem } from "@/app/components/ui/CssBarChart";
+import type { OperationalMetrics } from "@/app/components/dashboard/SuperadminDashboardPanels";
 
 type Cedula = {
   id: string;
@@ -17,6 +19,9 @@ type Cedula = {
   estado: string;
   tipo_documento: "CEDULA" | "OFICIO" | "OTROS_ESCRITOS" | null;
   created_by_user_id?: string | null;
+  pjn_cargado_at?: string | null;
+  estado_ocr?: string | null;
+  ocr_error?: string | null;
 };
 
 type Expediente = {
@@ -603,28 +608,45 @@ export default function SuperAdminPage() {
       // Intentar obtener con tipo_documento, created_by_user_id y fecha_vencimiento, pero hacer fallback si no existen las columnas
       const query = supabase
         .from("cedulas")
-        .select("id, owner_user_id, caratula, juzgado, fecha_carga, fecha_vencimiento, estado, tipo_documento, created_by_user_id")
+        .select(
+          "id, owner_user_id, caratula, juzgado, fecha_carga, fecha_vencimiento, estado, tipo_documento, created_by_user_id, pjn_cargado_at, estado_ocr, ocr_error"
+        )
         .neq("estado", "CERRADA")
         .order("fecha_carga", { ascending: true });
 
       const { data: cs, error: cErr } = await query;
 
       if (cErr) {
-        // Si falla por columna inexistente, reintentar sin ellas
-        if (cErr.message?.includes("tipo_documento") || cErr.message?.includes("created_by_user_id") || cErr.message?.includes("fecha_vencimiento")) {
+        const msg = cErr.message || "";
+        const optionalCols =
+          msg.includes("tipo_documento") ||
+          msg.includes("created_by_user_id") ||
+          msg.includes("fecha_vencimiento") ||
+          msg.includes("pjn_cargado_at") ||
+          msg.includes("estado_ocr") ||
+          msg.includes("ocr_error");
+        if (optionalCols) {
           const { data: cs2, error: cErr2 } = await supabase
-        .from("cedulas")
-        .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado")
-        .neq("estado", "CERRADA")
+            .from("cedulas")
+            .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado")
+            .neq("estado", "CERRADA")
             .order("fecha_carga", { ascending: true });
-          
-          if (cErr2) { 
-            setMsg(cErr2.message); 
-            setChecking(false); 
-            return; 
+
+          if (cErr2) {
+            setMsg(cErr2.message);
+            setChecking(false);
+            return;
           }
-          
-          const csWithNull = (cs2 ?? []).map((c) => ({ ...(c as Record<string, unknown>), tipo_documento: null, created_by_user_id: null, fecha_vencimiento: null }));
+
+          const csWithNull = (cs2 ?? []).map((c) => ({
+            ...(c as Record<string, unknown>),
+            tipo_documento: null,
+            created_by_user_id: null,
+            fecha_vencimiento: null,
+            pjn_cargado_at: null,
+            estado_ocr: null,
+            ocr_error: null,
+          }));
           setAllCedulas(csWithNull as Cedula[]);
         } else {
           setMsg(cErr.message);
@@ -1834,6 +1856,92 @@ export default function SuperAdminPage() {
     };
   }, [cedulas, expedientes, ranking, rankingExpedientes, selectedUserId, juzgadoFilter, selectedUserJuzgados, allExpedientes, favoritosComoExpedientes, userJuzgadosMap]);
 
+  const operationalMetrics = useMemo((): OperationalMetrics => {
+    let pjnCargados = 0;
+    let ocrPendiente = 0;
+    let ocrError = 0;
+    let reiteratorioCandidatos = 0;
+
+    for (const c of cedulas) {
+      if (c.pjn_cargado_at) pjnCargados++;
+      const estado = (c.estado_ocr || "").toLowerCase();
+      if (!estado || (estado !== "listo" && estado !== "ok")) ocrPendiente++;
+      if (estado === "error" || (c.ocr_error && c.ocr_error.trim())) ocrError++;
+
+      if (c.tipo_documento === "OFICIO" && estado === "listo" && c.pjn_cargado_at) {
+        const dias = daysSince(c.pjn_cargado_at);
+        if (dias >= 14) reiteratorioCandidatos++;
+      }
+    }
+
+    let ultimaSyncPjn: string | null = null;
+    for (const f of pjnFavoritos) {
+      const raw = f.fecha_ultima_carga?.trim();
+      if (!raw) continue;
+      if (!ultimaSyncPjn || raw > ultimaSyncPjn) ultimaSyncPjn = raw;
+    }
+
+    return { pjnCargados, ocrPendiente, ocrError, reiteratorioCandidatos, ultimaSyncPjn };
+  }, [cedulas, pjnFavoritos]);
+
+  const juzgadoRojos = useMemo((): BarChartItem[] => {
+    const perJuzgado: Record<string, number> = {};
+    const bump = (juzgado: string | null | undefined, s: string) => {
+      if (s !== "ROJO") return;
+      const key = (juzgado || "Sin juzgado").trim() || "Sin juzgado";
+      perJuzgado[key] = (perJuzgado[key] || 0) + 1;
+    };
+    for (const c of cedulas) {
+      const fechaBase = getFechaBaseParaSemaforo(c.fecha_carga, null, false);
+      bump(c.juzgado, semaforoPorAntiguedad(daysSince(fechaBase)));
+    }
+    for (const e of expedientes) {
+      const fechaBase = getFechaBaseParaSemaforo(null, e.fecha_ultima_modificacion, true);
+      if (!fechaBase) continue;
+      bump(e.juzgado, semaforoPorAntiguedad(daysSince(fechaBase)));
+    }
+    return Object.entries(perJuzgado)
+      .map(([label, value]) => ({ label, value, tone: "red" as const }))
+      .sort((a, b) => b.value - a.value);
+  }, [cedulas, expedientes]);
+
+  const responsableRojos = useMemo((): BarChartItem[] => {
+    return ranking
+      .filter((r) => r.rojos > 0)
+      .slice(0, 8)
+      .map((r) => ({ label: r.name, value: r.rojos, tone: "red" as const }));
+  }, [ranking]);
+
+  const antiguedadBuckets = useMemo(
+    () => ({
+      verde: metrics.totalVerdes,
+      amarillo: metrics.totalAmarillas,
+      rojo: metrics.totalRojas,
+    }),
+    [metrics.totalVerdes, metrics.totalAmarillas, metrics.totalRojas]
+  );
+
+  const dashboardAlertas = useMemo(() => {
+    const list: string[] = [];
+    if (metrics.totalRojas > 0) {
+      list.push(`${metrics.totalRojas} documentos en estado crítico (rojo).`);
+    }
+    if (operationalMetrics.reiteratorioCandidatos > 0) {
+      list.push(`${operationalMetrics.reiteratorioCandidatos} oficios candidatos a reiteratorio (≥14 días en PJN).`);
+    }
+    if (operationalMetrics.ocrError > 0) {
+      list.push(`${operationalMetrics.ocrError} documentos con error de OCR.`);
+    }
+    if (operationalMetrics.ocrPendiente > 0) {
+      list.push(`${operationalMetrics.ocrPendiente} documentos con OCR pendiente o sin procesar.`);
+    }
+    const topJuzgado = juzgadoRojos[0];
+    if (topJuzgado && topJuzgado.value >= 5) {
+      list.push(`Juzgado con más rojos: ${topJuzgado.label} (${topJuzgado.value}).`);
+    }
+    return list.slice(0, 6);
+  }, [metrics.totalRojas, operationalMetrics, juzgadoRojos]);
+
   async function logout() {
     await supabase.auth.signOut();
     window.location.href = "/login";
@@ -2105,7 +2213,8 @@ export default function SuperAdminPage() {
         position: "relative"
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          {/* Menú Hamburguesa */}
+          <div className="legacy-inline-nav">
+          {/* Menú Hamburguesa — oculto con shell global */}
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -2505,6 +2614,7 @@ export default function SuperAdminPage() {
               </button>
             </div>
           )}
+          </div>
 
           <div>
             <h1 style={{ 
@@ -2530,6 +2640,7 @@ export default function SuperAdminPage() {
           {/* Nombre del usuario */}
           {currentUserName && (
             <div
+              className="legacy-user-chip"
               title={currentUserName}
               style={{
                 display: "flex",
@@ -2564,7 +2675,6 @@ export default function SuperAdminPage() {
               </span>
             </div>
           )}
-          {currentUserName && <NotificationBell />}
           <button
             onClick={imprimirDashboard}
             style={{
@@ -2617,13 +2727,8 @@ export default function SuperAdminPage() {
         )}
 
         {/* Filtros */}
-        <section style={{ 
+        <section className="dashboard-filters-card section-card" style={{ 
           marginBottom: 32,
-          padding: "20px",
-          background: "#ffffff",
-          border: "1px solid rgba(0,0,0,.12)",
-          borderRadius: 16,
-          boxShadow: "0 4px 12px rgba(0,0,0,.08)"
         }}>
           <h3 style={{ 
             margin: "0 0 16px 0", 
@@ -2897,7 +3002,24 @@ export default function SuperAdminPage() {
           </div>
         </section>
 
-        {/* Métricas Generales */}
+        <SuperadminDashboardPanels
+          metrics={{
+            totalExpedientes: metrics.totalExpedientes,
+            totalCedulas: metrics.totalCedulas,
+            totalOficios: metrics.totalOficios,
+            totalRojas: metrics.totalRojas,
+            totalAmarillas: metrics.totalAmarillas,
+            totalVerdes: metrics.totalVerdes,
+            totalAbiertas: metrics.totalAbiertas,
+          }}
+          operational={operationalMetrics}
+          juzgadoRojos={juzgadoRojos}
+          responsableRojos={responsableRojos}
+          antiguedadBuckets={antiguedadBuckets}
+          alertas={dashboardAlertas}
+        />
+
+        {/* Métricas Generales (detalle existente) */}
         <section style={{ marginBottom: 32 }}>
           <h2 style={{ 
             margin: "0 0 20px 0", 

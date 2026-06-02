@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { usePageSearchBridge } from "@/app/hooks/usePageSearchBridge";
 import {
   calcularContadoresAuditoria,
   evaluarSeleccionabilidadAudit,
@@ -365,6 +366,7 @@ export default function AuditoriaTipoDocumentoPage() {
   const [filterMinConfianza, setFilterMinConfianza] = useState<number>(0);
   const [filterDetectado, setFilterDetectado] = useState<"todos" | Clasif>("todos");
   const [searchQuery, setSearchQuery] = useState("");
+  usePageSearchBridge(searchQuery, setSearchQuery);
   const [searchDebounced, setSearchDebounced] = useState("");
   const [modoExperto, setModoExperto] = useState(false);
   const [filterTipoActual, setFilterTipoActual] = useState<
@@ -1339,8 +1341,8 @@ export default function AuditoriaTipoDocumentoPage() {
                 <StatBox label="Sin texto" value={lastRun.por_fuente_texto.sin_texto} />
               </div>
 
-              <div className="tableWrap">
-                <table className="table" style={{ minWidth: 1400 }}>
+              <div className="tableWrap data-table-shell" style={{ ["--table-min-width" as string]: "1400px" }}>
+                <table className="table">
                   <thead>
                     <tr>
                       <th style={{ width: 100 }}>Tipo actual</th>
@@ -1528,6 +1530,7 @@ export default function AuditoriaTipoDocumentoPage() {
 
             <input
               type="search"
+              className="page-local-search"
               placeholder="Buscar expediente, carátula, juzgado, destinatario o audit_id"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -1976,8 +1979,8 @@ export default function AuditoriaTipoDocumentoPage() {
                 panel superior.
               </div>
             ) : (
-              <div className="tableWrap">
-                <table className="table" style={{ minWidth: 1600 }}>
+              <div className="tableWrap data-table-shell" style={{ ["--table-min-width" as string]: "1600px" }}>
+                <table className="table">
                   <thead>
                     <tr>
                       <th style={{ width: 36 }} title="Seleccionar filas aplicables">

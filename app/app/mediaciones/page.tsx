@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase";
 import { FilterableTh } from "@/app/components/FilterableTh";
 import NotificationBell from "@/app/components/NotificationBell";
 import { useColumnFilters } from "@/app/hooks/useColumnFilters";
+import { usePageSearchBridge } from "@/app/hooks/usePageSearchBridge";
 
 type MediacionRow = {
   id: string;
@@ -73,6 +74,7 @@ export default function MediacionesPage() {
       estado: null as string | null,
     });
   const [search, setSearch] = useState("");
+  usePageSearchBridge(search, setSearch);
   const [menuOpen, setMenuOpen] = useState(false);
   const [isAdminMediaciones, setIsAdminMediaciones] = useState(false);
   const [isSuperadmin, setIsSuperadmin] = useState(false);
@@ -309,8 +311,7 @@ export default function MediacionesPage() {
             ))}
           </div>
 
-          {/* Búsqueda */}
-          <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <div className="page-local-search" style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <input
               className="input"
               type="text"

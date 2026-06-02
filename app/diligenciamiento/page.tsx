@@ -5,8 +5,11 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { getAuthHeaders, getFreshAccessToken } from "@/lib/auth-client";
 import { FilterableTh } from "@/app/components/FilterableTh";
-import NotificationBell from "@/app/components/NotificationBell";
 import { useColumnFilters, uniqueOptionsFromField } from "@/app/hooks/useColumnFilters";
+import { usePageSearchBridge } from "@/app/hooks/usePageSearchBridge";
+import DiligenciamientoTableRow, {
+  getDiligenciamientoColSpan,
+} from "@/app/components/diligenciamiento/DiligenciamientoTableRow";
 import styles from "./page.module.css";
 
 type CedulaDiligenciamiento = {
@@ -201,6 +204,9 @@ export default function DiligenciamientoPage() {
   const [isAbogado, setIsAbogado] = useState(false);
   const [isSuperadmin, setIsSuperadmin] = useState(false);
   const [isAdminCedulas, setIsAdminCedulas] = useState(false);
+  const [buscarTexto, setBuscarTexto] = useState("");
+  const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
+  usePageSearchBridge(buscarTexto, setBuscarTexto);
   const { filters, setFilter, clearAll, hasActiveFilters, openFilter, setOpenFilter } =
     useColumnFilters<DiligenciamientoFilterKey>({
       tipo_documento: null as string | null,
@@ -231,8 +237,22 @@ export default function DiligenciamientoPage() {
       const jf = filters.juzgado;
       r = r.filter((c) => (c.juzgado || "").trim() === jf);
     }
+    const q = buscarTexto.trim().toLowerCase();
+    if (q) {
+      r = r.filter((c) => {
+        const hay = [
+          c.caratula,
+          c.ocr_exp_nro,
+          c.juzgado,
+          c.tipo_documento,
+        ]
+          .map((x) => (x || "").toLowerCase())
+          .join(" ");
+        return hay.includes(q);
+      });
+    }
     return r;
-  }, [cedulas, filters]);
+  }, [cedulas, filters, buscarTexto]);
 
   const muestraAvisoOcrColgado = useMemo(
     () => filteredCedulas.some((c) => c.estado_ocr === "procesando"),
@@ -481,11 +501,16 @@ export default function DiligenciamientoPage() {
     }
   }
 
+  const tableColSpan = getDiligenciamientoColSpan(canOperarPjn);
+  const toggleExpandedRow = (id: string) => {
+    setExpandedRowId((prev) => (prev === id ? null : id));
+  };
+
   if (loading) {
     return (
-      <main className="container">
-        <section className="card">
-          <div className="page">
+      <main className="mj-page">
+        <section className="mj-panel">
+          <div className="mj-panel__body">
             <p className="helper">Cargando…</p>
           </div>
         </section>
@@ -532,9 +557,10 @@ export default function DiligenciamientoPage() {
   }
 
   return (
-    <main className="container">
-      <section className="card" style={{ overflow: "visible" }}>
+    <main className="mj-page">
+      <section className="mj-panel" style={{ overflow: "visible" }}>
         <header
+          className="mj-panel__header"
           style={{
             background: "linear-gradient(135deg, rgba(0,82,156,.25), rgba(0,82,156,.08))",
             borderBottom: "1px solid rgba(255,255,255,.12)",
@@ -549,6 +575,7 @@ export default function DiligenciamientoPage() {
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <div className="legacy-inline-nav">
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -626,6 +653,7 @@ export default function DiligenciamientoPage() {
                 </button>
               </div>
             )}
+            </div>
 
             <img className="logoMini" src="/logo.png" alt="Logo" style={{ marginRight: 12 }} />
             <div>
@@ -638,6 +666,7 @@ export default function DiligenciamientoPage() {
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             {currentUserName && (
               <div
+                className="legacy-user-chip"
                 style={{
                   padding: "8px 14px",
                   background: "rgba(255,255,255,.06)",
@@ -662,11 +691,10 @@ export default function DiligenciamientoPage() {
                 <span>{currentUserName}</span>
               </div>
             )}
-            {currentUserName && <NotificationBell />}
           </div>
         </header>
 
-        <div className="page">
+        <div className="mj-panel__body">
           {msg && (
             <div className={msgSuccess ? "success" : "error"}>{msg}</div>
           )}
@@ -679,124 +707,74 @@ export default function DiligenciamientoPage() {
             </div>
           )}
 
-          <div className="tableWrap" style={{ marginTop: 10 }}>
-            <table className="table" style={{ minWidth: 900 }}>
-              <thead>
-                <tr>
-                  <FilterableTh
-                    label="Tipo"
-                    filterKey="tipo_documento"
-                    options={[
-                      { value: "CEDULA", label: "CEDULA" },
-                      { value: "OFICIO", label: "OFICIO" },
-                      { value: "SIN_DEFINIR", label: "Sin definir" },
-                    ]}
-                    activeFilter={filters.tipo_documento}
-                    onFilter={(v) => setFilter("tipo_documento", v)}
-                    isOpen={openFilter === "tipo_documento"}
-                    onToggle={() => setOpenFilter((p) => (p === "tipo_documento" ? null : "tipo_documento"))}
-                    width={110}
-                    menuMinWidth={160}
-                  />
-                  <th style={{ width: 180 }}>Carátula</th>
-                  <th style={{ width: 120 }}>Exp. Nro</th>
-                  <FilterableTh
-                    label="Juzgado"
-                    filterKey="juzgado"
-                    options={juzgadoOptions}
-                    activeFilter={filters.juzgado}
-                    onFilter={(v) => setFilter("juzgado", v)}
-                    isOpen={openFilter === "juzgado"}
-                    onToggle={() => setOpenFilter((p) => (p === "juzgado" ? null : "juzgado"))}
-                    width={220}
-                    menuMinWidth={250}
-                    menuScrollable
-                    optionWhiteSpaceNormal
-                  />
-                  <th style={{ width: 140 }}>Fecha procesado</th>
-                  <th style={{ width: 220 }}>Acciones</th>
-                  {canOperarPjn && <th style={{ width: 140 }}>Estado PJN</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {cedulas.length === 0 ? (
+          <div className="mj-data-region">
+            <div className="mj-desktop-table">
+              <table className="table master-detail-table">
+                <thead>
                   <tr>
-                    <td colSpan={canOperarPjn ? 7 : 6} className="muted" style={{ padding: 24, textAlign: "center" }}>
-                      No hay cédulas ni oficios listos para diligenciamiento.
-                    </td>
+                    <FilterableTh
+                      label="Tipo"
+                      filterKey="tipo_documento"
+                      options={[
+                        { value: "CEDULA", label: "CEDULA" },
+                        { value: "OFICIO", label: "OFICIO" },
+                        { value: "SIN_DEFINIR", label: "Sin definir" },
+                      ]}
+                      activeFilter={filters.tipo_documento}
+                      onFilter={(v) => setFilter("tipo_documento", v)}
+                      isOpen={openFilter === "tipo_documento"}
+                      onToggle={() => setOpenFilter((p) => (p === "tipo_documento" ? null : "tipo_documento"))}
+                      width={110}
+                      menuMinWidth={160}
+                    />
+                    <th className="mj-col-primary">Expediente / Carátula</th>
+                    <FilterableTh
+                      label="Juzgado"
+                      filterKey="juzgado"
+                      options={juzgadoOptions}
+                      activeFilter={filters.juzgado}
+                      onFilter={(v) => setFilter("juzgado", v)}
+                      isOpen={openFilter === "juzgado"}
+                      onToggle={() => setOpenFilter((p) => (p === "juzgado" ? null : "juzgado"))}
+                      width={180}
+                      menuMinWidth={250}
+                      menuScrollable
+                      optionWhiteSpaceNormal
+                    />
+                    <th style={{ width: 130 }}>Fecha proc.</th>
+                    <th className="mj-col-acciones-compact">Acciones</th>
+                    {canOperarPjn && <th style={{ width: 110 }}>PJN</th>}
+                    <th className="mj-col-detail">Detalle</th>
                   </tr>
-                ) : filteredCedulas.length === 0 ? (
-                  <tr>
-                    <td colSpan={canOperarPjn ? 7 : 6} className="muted" style={{ padding: 24, textAlign: "center" }}>
-                      Ningún resultado con los filtros seleccionados.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredCedulas.map((item) => (
-                    <tr key={item.id}>
-                      <td>
-                        <span
-                          title={
-                            isTipoSinDefinir(item.tipo_documento)
-                              ? "tipo_documento sin definir — requiere revisión"
-                              : undefined
-                          }
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            minWidth: 74,
-                            padding: "5px 10px",
-                            borderRadius: 999,
-                            border:
-                              item.tipo_documento === "OFICIO"
-                                ? "1px solid rgba(168,85,247,.45)"
-                                : item.tipo_documento === "CEDULA"
-                                  ? "1px solid rgba(59,130,246,.45)"
-                                  : "1px solid rgba(245,158,11,.55)",
-                            background:
-                              item.tipo_documento === "OFICIO"
-                                ? "rgba(168,85,247,.18)"
-                                : item.tipo_documento === "CEDULA"
-                                  ? "rgba(59,130,246,.18)"
-                                  : "rgba(245,158,11,.18)",
-                            color:
-                              item.tipo_documento === "OFICIO"
-                                ? "rgba(243,232,255,.96)"
-                                : item.tipo_documento === "CEDULA"
-                                  ? "rgba(219,234,254,.96)"
-                                  : "rgba(254,243,199,.97)",
-                            fontSize: 11,
-                            fontWeight: 700,
-                            letterSpacing: 0.3,
-                          }}
-                        >
-                          {getTipoLabel(item.tipo_documento)}
-                        </span>
+                </thead>
+                <tbody>
+                  {cedulas.length === 0 ? (
+                    <tr>
+                      <td colSpan={tableColSpan} className="muted" style={{ padding: 24, textAlign: "center" }}>
+                        No hay cédulas ni oficios listos para diligenciamiento.
                       </td>
-                      <td style={{ fontWeight: 600 }}>
-                        {item.caratula?.trim() || <span className="muted">Sin carátula</span>}
+                    </tr>
+                  ) : filteredCedulas.length === 0 ? (
+                    <tr>
+                      <td colSpan={tableColSpan} className="muted" style={{ padding: 24, textAlign: "center" }}>
+                        Ningún resultado con los filtros seleccionados.
                       </td>
-                      <td style={{ fontVariantNumeric: "tabular-nums" }}>
-                        {item.ocr_exp_nro?.trim() || <span className="muted">—</span>}
-                      </td>
-                      <td>{item.juzgado?.trim() || <span className="muted">—</span>}</td>
-                      <td>{fmtDate(item.ocr_procesado_at)}</td>
-                      <td>
-                        <div className={styles.accionesRow}>
-                          <EstadoProcesoAutomaticoBubble
-                            item={item}
-                            pjnCargaEnCursoId={cargandoPjnId}
-                          />
+                    </tr>
+                  ) : (
+                    filteredCedulas.map((item) => {
+                      const renderAcciones = (full: boolean) => (
+                        <div className={full ? styles.accionesRow : styles.accionesRow} style={full ? undefined : { flexWrap: "nowrap", gap: 6 }}>
+                          <EstadoProcesoAutomaticoBubble item={item} pjnCargaEnCursoId={cargandoPjnId} />
                           <button
                             type="button"
                             className="btn primary"
                             onClick={() => verPdf(item)}
-                            style={{ fontSize: 12, padding: "6px 12px" }}
+                            style={{ fontSize: 12, padding: "6px 10px" }}
                           >
                             Ver PDF
                           </button>
-                          {item.estado_ocr !== "procesando" &&
+                          {full &&
+                            item.estado_ocr !== "procesando" &&
                             (item.estado_ocr === "listo" || !!item.observaciones_pjn) && (
                               <button
                                 type="button"
@@ -828,45 +806,105 @@ export default function DiligenciamientoPage() {
                               </button>
                             )}
                         </div>
-                      </td>
-                      {canOperarPjn && (
-                        <td>
-                          <button
-                            type="button"
-                            onClick={() => togglePjnEstado(item)}
-                            title={item.pjn_cargado_at ? `Cargado: ${fmtDate(item.pjn_cargado_at)} · Click para volver a Pendiente` : "Pendiente"}
-                            style={{
-                              border: "1px solid",
-                              borderColor: item.pjn_cargado_at ? "rgba(46, 204, 113, 0.5)" : "rgba(255,255,255,.24)",
-                              background: item.pjn_cargado_at ? "rgba(46, 204, 113, 0.22)" : "rgba(70,78,92,.7)",
-                              color: "rgba(255,255,255,.96)",
-                              borderRadius: 999,
-                              padding: "5px 11px",
-                              fontSize: 12,
-                              fontWeight: 700,
-                              letterSpacing: 0.2,
-                              cursor: item.pjn_cargado_at ? "pointer" : "default",
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: 6,
-                            }}
-                          >
-                            {item.pjn_cargado_at ? (
-                              <>
-                                <span aria-hidden style={{ fontSize: 10 }}>●</span>
-                                Cargado
-                              </>
-                            ) : (
-                              "Pendiente"
-                            )}
-                          </button>
-                        </td>
-                      )}
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                      );
+
+                      return (
+                        <DiligenciamientoTableRow
+                          key={item.id}
+                          item={item}
+                          isExpanded={expandedRowId === item.id}
+                          colSpan={tableColSpan}
+                          showPjnColumn={canOperarPjn}
+                          onToggleExpand={toggleExpandedRow}
+                          renderTipo={() => (
+                            <span
+                              title={
+                                isTipoSinDefinir(item.tipo_documento)
+                                  ? "tipo_documento sin definir — requiere revisión"
+                                  : undefined
+                              }
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                minWidth: 74,
+                                padding: "5px 10px",
+                                borderRadius: 999,
+                                border:
+                                  item.tipo_documento === "OFICIO"
+                                    ? "1px solid rgba(168,85,247,.45)"
+                                    : item.tipo_documento === "CEDULA"
+                                      ? "1px solid rgba(59,130,246,.45)"
+                                      : "1px solid rgba(245,158,11,.55)",
+                                background:
+                                  item.tipo_documento === "OFICIO"
+                                    ? "rgba(168,85,247,.18)"
+                                    : item.tipo_documento === "CEDULA"
+                                      ? "rgba(59,130,246,.18)"
+                                      : "rgba(245,158,11,.18)",
+                                color:
+                                  item.tipo_documento === "OFICIO"
+                                    ? "rgba(243,232,255,.96)"
+                                    : item.tipo_documento === "CEDULA"
+                                      ? "rgba(219,234,254,.96)"
+                                      : "rgba(254,243,199,.97)",
+                                fontSize: 11,
+                                fontWeight: 700,
+                                letterSpacing: 0.3,
+                              }}
+                            >
+                              {getTipoLabel(item.tipo_documento)}
+                            </span>
+                          )}
+                          renderFecha={() => fmtDate(item.ocr_procesado_at)}
+                          renderAccionesCompact={() => renderAcciones(false)}
+                          renderAccionesDetail={() => renderAcciones(true)}
+                          renderPjnEstado={() => (
+                            <button
+                              type="button"
+                              onClick={() => togglePjnEstado(item)}
+                              title={
+                                item.pjn_cargado_at
+                                  ? `Cargado: ${fmtDate(item.pjn_cargado_at)} · Click para volver a Pendiente`
+                                  : "Pendiente"
+                              }
+                              style={{
+                                border: "1px solid",
+                                borderColor: item.pjn_cargado_at
+                                  ? "rgba(46, 204, 113, 0.5)"
+                                  : "rgba(255,255,255,.24)",
+                                background: item.pjn_cargado_at
+                                  ? "rgba(46, 204, 113, 0.22)"
+                                  : "rgba(70,78,92,.7)",
+                                color: "rgba(255,255,255,.96)",
+                                borderRadius: 999,
+                                padding: "5px 11px",
+                                fontSize: 12,
+                                fontWeight: 700,
+                                cursor: item.pjn_cargado_at ? "pointer" : "default",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 6,
+                              }}
+                            >
+                              {item.pjn_cargado_at ? (
+                                <>
+                                  <span aria-hidden style={{ fontSize: 10 }}>●</span>
+                                  Cargado
+                                </>
+                              ) : (
+                                "Pendiente"
+                              )}
+                            </button>
+                          )}
+                        />
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
             {muestraAvisoOcrColgado && (
               <p
                 className="muted"
@@ -884,7 +922,6 @@ export default function DiligenciamientoPage() {
                 el panel principal (o que revise los logs del servicio Railway).
               </p>
             )}
-          </div>
         </div>
       </section>
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { usePageSearchBridge } from "@/app/hooks/usePageSearchBridge";
 
 type ReiteratorioRow = {
   id: string;
@@ -50,6 +51,8 @@ export default function ReiteratoriosPage() {
   const [msgOk, setMsgOk] = useState(false);
   const [enProcesoId, setEnProcesoId] = useState<string | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const [buscarTexto, setBuscarTexto] = useState("");
+  usePageSearchBridge(buscarTexto, setBuscarTexto);
 
   useEffect(() => {
     (async () => {
@@ -96,11 +99,20 @@ export default function ReiteratoriosPage() {
   }, []);
 
   const filas = useMemo(() => {
-    return rows
+    let list = rows
       .map((r) => ({ ...r, dias: r.pjn_cargado_at ? diasDesde(r.pjn_cargado_at) : 0 }))
-      .filter((r) => r.dias >= 14)
-      .sort((a, b) => b.dias - a.dias);
-  }, [rows]);
+      .filter((r) => r.dias >= 14);
+    const q = buscarTexto.trim().toLowerCase();
+    if (q) {
+      list = list.filter((r) => {
+        const hay = [r.ocr_exp_nro, r.ocr_caratula, r.caratula, r.ocr_destinatario, r.juzgado]
+          .map((x) => (x || "").toLowerCase())
+          .join(" ");
+        return hay.includes(q);
+      });
+    }
+    return list.sort((a, b) => b.dias - a.dias);
+  }, [rows, buscarTexto]);
 
   async function presentar(id: string) {
     setMsg("");
@@ -213,21 +225,22 @@ export default function ReiteratoriosPage() {
   return (
     <main className="container">
       <section className="card" style={{ overflow: "visible" }}>
-        <div className="nav">
-          <img className="logoMini" src="/logo.png" alt="" />
-          <h1>Oficios Reiteratorios</h1>
-          <div className="spacer" />
-        </div>
+        <header className="page-header">
+          <div className="page-header__main">
+            <div>
+              <h1 className="page-header__title">Oficios Reiteratorios</h1>
+              <p className="page-header__subtitle">
+                Oficios cargados en PJN hace 14 días o más sin respuesta del juzgado.
+              </p>
+            </div>
+          </div>
+        </header>
 
         <div className="page">
-          <p className="helper">
-            Oficios cargados en PJN hace 14 días o más sin respuesta del juzgado.
-          </p>
-
           {msg && <div className={msgOk ? "success" : "error"}>{msg}</div>}
 
-          <div className="tableWrap" style={{ marginTop: 14 }}>
-            <table className="table" style={{ minWidth: 1100 }}>
+          <div className="tableWrap data-table-shell" style={{ marginTop: 14, ["--table-min-width" as string]: "1100px" }}>
+            <table className="table">
               <thead>
                 <tr>
                   <th style={{ width: 140 }}>Expediente</th>
@@ -262,7 +275,7 @@ export default function ReiteratoriosPage() {
                         <td style={{ fontVariantNumeric: "tabular-nums" }}>
                           {r.ocr_exp_nro?.trim() || <span className="muted">—</span>}
                         </td>
-                        <td style={{ fontWeight: 600 }}>
+                        <td className="col-caratula">
                           {r.ocr_caratula?.trim() || (
                             <span className="muted">Sin carátula</span>
                           )}

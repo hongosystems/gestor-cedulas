@@ -6,9 +6,9 @@ import { supabase } from "@/lib/supabase";
 import { daysBetween, daysSince, isLegacySemaforoDate } from "@/lib/semaforo";
 import { stripAutoNotasTimestamp, withAutoNotasTimestamp } from "@/lib/notas-timestamp";
 import { FilterableTh } from "@/app/components/FilterableTh";
-import NotificationBell from "@/app/components/NotificationBell";
 import ResponsableAvatars from "@/app/components/ResponsableAvatars";
 import { useColumnFilters, uniqueOptionsFromField } from "@/app/hooks/useColumnFilters";
+import { usePageSearchBridge } from "@/app/hooks/usePageSearchBridge";
 
 type Cedula = {
   id: string;
@@ -842,6 +842,7 @@ export default function MisCedulasPage() {
   const [notasGuardando, setNotasGuardando] = useState<Record<string, boolean>>({});
   const [menuOpen, setMenuOpen] = useState(false);
   const [isAdminCedulas, setIsAdminCedulas] = useState(false);
+  usePageSearchBridge(buscarTexto, setBuscarTexto, isAdminCedulas);
   const [isAdminMediaciones, setIsAdminMediaciones] = useState(false);
   const [pjnCargadoNombres, setPjnCargadoNombres] = useState<Record<string, string>>({});
   const [popupEnTramite, setPopupEnTramite] = useState<{ cedula: Cedula; abogados: AbogadoInfo[] } | null>(null);
@@ -1439,7 +1440,8 @@ export default function MisCedulasPage() {
       <section className="card">
         <header className="nav">
           <div style={{ display: "flex", alignItems: "center", gap: 16, position: "relative" }}>
-            {/* Menú Hamburguesa */}
+            <div className="legacy-inline-nav">
+            {/* Menú Hamburguesa — oculto con shell global */}
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -1639,6 +1641,7 @@ export default function MisCedulasPage() {
                 </button>
               </div>
             )}
+            </div>
 
             <img className="logoMini" src="/logo.png" alt="Logo" />
             <h1>Mis Cédulas/Oficios</h1>
@@ -1646,6 +1649,7 @@ export default function MisCedulasPage() {
           <div className="spacer" />
           {currentUserName && (
             <div
+              className="legacy-user-chip"
               title={currentUserName}
               style={{
                 display: "flex",
@@ -1681,7 +1685,6 @@ export default function MisCedulasPage() {
               </span>
             </div>
           )}
-          {currentUserName && <NotificationBell />}
         </header>
 
         <div className="page">
@@ -1777,6 +1780,7 @@ export default function MisCedulasPage() {
             )}
             {isAdminCedulas && (
               <>
+                <span className="page-local-search" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                 <span style={{ color: "var(--muted)", fontSize: 13 }}>Buscar:</span>
                 <input
                   type="text"
@@ -1795,6 +1799,7 @@ export default function MisCedulasPage() {
                   }}
                   className="buscar-cedulas-input"
                 />
+                </span>
                 <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <button
                   onClick={() => {
@@ -1851,7 +1856,7 @@ export default function MisCedulasPage() {
 
           {msg && <div className="error">{msg}</div>}
 
-          <div className="tableWrap" style={{ marginTop: 10 }}>
+          <div className="tableWrap data-table-shell" style={{ marginTop: 10, ["--table-min-width" as string]: "1400px" }}>
             <table className="table">
               <thead>
                 <tr>

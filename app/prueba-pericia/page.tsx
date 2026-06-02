@@ -1,14 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { pjnScraperSupabase } from "@/lib/pjn-scraper-supabase";
 import { daysSince } from "@/lib/semaforo";
 import { stripAutoNotasTimestamp, withAutoNotasTimestamp } from "@/lib/notas-timestamp";
 import { FilterableTh } from "@/app/components/FilterableTh";
-import NotificationBell from "@/app/components/NotificationBell";
 import { useColumnFilters } from "@/app/hooks/useColumnFilters";
+import { usePageSearchBridge } from "@/app/hooks/usePageSearchBridge";
+import ExpedienteMasterDetailRow, {
+  getExpedienteMasterDetailColSpan,
+} from "@/app/components/ui/ExpedienteMasterDetailRow";
 
 // Estilos globales para mejorar contraste del dropdown
 if (typeof document !== 'undefined') {
@@ -1389,6 +1392,7 @@ export default function PruebaPericiaPage() {
   const [notasGuardando, setNotasGuardando] = useState<Record<string, boolean>>({});
   const [createdByFilter, setCreatedByFilter] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState(1);
+  const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
   const itemsPerPage = 15;
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [createdByOptions, setCreatedByOptions] = useState<Array<{ id: string; name: string }>>([]);
@@ -1427,6 +1431,16 @@ export default function PruebaPericiaPage() {
     centro_medico: null as string | null,
   });
   const [searchTermOrdenes, setSearchTermOrdenes] = useState<string>("");
+  const pageSearchValue =
+    FEATURE_ORDENES_SEGUIMIENTO && activeTab === "ordenes" ? searchTermOrdenes : searchTerm;
+  const handlePageSearchChange = useCallback(
+    (v: string) => {
+      if (FEATURE_ORDENES_SEGUIMIENTO && activeTab === "ordenes") setSearchTermOrdenes(v);
+      else setSearchTerm(v);
+    },
+    [activeTab]
+  );
+  usePageSearchBridge(pageSearchValue, handlePageSearchChange);
   const [createdByFilterOrdenes, setCreatedByFilterOrdenes] = useState<string>("all");
   const [createdByOptionsOrdenes, setCreatedByOptionsOrdenes] = useState<Array<{ id: string; name: string }>>([]);
   
@@ -2338,19 +2352,33 @@ export default function PruebaPericiaPage() {
     return ordenesFiltradas;
   }, [ordenesData, ordenesCol.filters, searchTermOrdenes, createdByFilterOrdenes]);
 
+  const deteccionColSpan = getExpedienteMasterDetailColSpan(
+    FEATURE_ORDENES_SEGUIMIENTO ? 1 : 0
+  );
+  const toggleExpandedRow = (id: string) => {
+    setExpandedRowId((prev) => (prev === id ? null : id));
+  };
+
+  useEffect(() => {
+    setExpandedRowId(null);
+  }, [activeTab, currentPage, searchTerm, createdByFilter, juzgadoFilter, deteccionCol.filters]);
+
   if (loading) {
     return (
-      <div style={{ padding: "40px 20px", textAlign: "center", color: "var(--text)" }}>
-        Cargando...
-      </div>
+      <main className="mj-page">
+        <div className="mj-panel__body" style={{ padding: 40, textAlign: "center" }}>
+          Cargando...
+        </div>
+      </main>
     );
   }
 
   return (
-    <div style={{ padding: "24px", maxWidth: "100%", overflowX: "auto" }}>
+    <main className="mj-page">
       <div style={{ marginBottom: 24, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16, position: "relative" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          {/* Menú Hamburguesa */}
+          <div className="legacy-inline-nav">
+          {/* Menú Hamburguesa — oculto con shell global */}
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -2694,6 +2722,7 @@ export default function PruebaPericiaPage() {
               </button>
             </div>
           )}
+          </div>
 
           <img className="logoMini" src="/logo.png" alt="Logo" style={{ width: 32, height: 32 }} />
         <h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, color: "var(--text)" }}>
@@ -2750,6 +2779,7 @@ export default function PruebaPericiaPage() {
         )}
         {currentUserName && (
           <div
+            className="legacy-user-chip"
             title={currentUserName}
             style={{
               display: "flex",
@@ -2767,7 +2797,6 @@ export default function PruebaPericiaPage() {
             {currentUserName}
           </div>
         )}
-        {currentUserName && <NotificationBell />}
       </div>
 
       {/* Tabs (solo si el flag está activo) */}
@@ -2941,8 +2970,7 @@ export default function PruebaPericiaPage() {
                   )}
                 </div>
 
-                {/* Buscador */}
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 200 }}>
+                <div className="page-local-search" style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 200 }}>
                   <span style={{ color: "var(--text)", fontSize: 13, fontWeight: 600 }}>Buscar:</span>
                   <input
                     type="text"
@@ -2989,7 +3017,7 @@ export default function PruebaPericiaPage() {
                 </div>
               </div>
 
-              <div className="tableWrap" style={{ marginTop: 10 }}>
+              <div className="tableWrap data-table-shell" style={{ marginTop: 10, ["--table-min-width" as string]: "1600px" }}>
               <table className="table" style={{ minWidth: '1400px' }}>
                 <thead>
                   <tr>
@@ -3295,8 +3323,7 @@ export default function PruebaPericiaPage() {
           )}
         </div>
 
-        {/* Campo de búsqueda */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div className="page-local-search" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <span style={{ color: "var(--muted)", fontSize: 13, fontWeight: 600 }}>
             Buscar:
           </span>
@@ -3417,9 +3444,10 @@ export default function PruebaPericiaPage() {
 
       {msg && <div className="error">{msg}</div>}
 
-      {/* Tabla */}
-      <div className="tableWrap" style={{ marginTop: 10 }}>
-        <table className="table" style={{ minWidth: '1800px' }}>
+      {/* Tabla detección — master-detail */}
+      <div className="mj-data-region">
+        <div className="mj-desktop-table">
+          <table className="table master-detail-table">
           <thead>
             <tr>
               <FilterableTh
@@ -3444,7 +3472,7 @@ export default function PruebaPericiaPage() {
                 sortColumnId="semaforo"
                 menuMinWidth={170}
               />
-              <th>Carátula</th>
+              <th className="mj-col-primary">Expediente / Carátula</th>
               <FilterableTh
                 className="sortable"
                 style={{ cursor: "pointer" }}
@@ -3467,17 +3495,18 @@ export default function PruebaPericiaPage() {
                 optionWhiteSpaceNormal
               />
               <th 
-                style={{ width: 220, cursor: "pointer" }}
+                style={{ width: 200, cursor: "pointer" }}
                 onClick={() => handleSort("fecha")}
                 title="Haz clic para ordenar"
               >
-                Fecha Última Modificación{" "}
+                Últ. modificación{" "}
                 <span style={{ opacity: 1 }}>
                   {sortField === "fecha" ? (sortDirection === "asc" ? "↑" : "↓") : "↑"}
                 </span>
               </th>
               <th 
-                style={{ width: 80, textAlign: "right", cursor: "pointer" }}
+                className="mj-col-dias"
+                style={{ cursor: "pointer" }}
                 onClick={() => handleSort("dias")}
                 title="Haz clic para ordenar"
               >
@@ -3486,13 +3515,11 @@ export default function PruebaPericiaPage() {
                   {sortField === "dias" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
                 </span>
               </th>
-              <th style={{ width: 200 }}>Expediente</th>
-              <th style={{ width: 180 }}>Cargado por</th>
-              <th style={{ width: 380, minWidth: 380, textAlign: "center" }}>Observaciones</th>
-              <th style={{ width: 380, minWidth: 380, textAlign: "center" }}>Notas</th>
+              <th className="mj-col-cargado">Cargado por</th>
               {FEATURE_ORDENES_SEGUIMIENTO && (
                 <th style={{ width: 150, textAlign: "center" }}>Acciones</th>
               )}
+              <th className="mj-col-detail">Detalle</th>
             </tr>
           </thead>
           <tbody>
@@ -3502,61 +3529,30 @@ export default function PruebaPericiaPage() {
               const sem = isRenunciado
                 ? "ROJO"
                 : item.semaforo || (dias !== null ? semaforoByAgePruebaPericia(dias) : "VERDE");
+              const rowStyle = renunciadoRowStyle(isRenunciado);
 
               return (
-                <tr
+                <ExpedienteMasterDetailRow
                   key={item.id}
-                  style={{ verticalAlign: "top", ...renunciadoRowStyle(isRenunciado) }}
-                >
-                  <td>
-                    <SemaforoChip value={sem as Semaforo} />
-                  </td>
-                  <td style={{ fontWeight: 650 }}>
-                    {item.caratula?.trim() ? item.caratula : <span className="muted">Sin carátula</span>}
-                  </td>
-                  <td>{item.juzgado ? limpiarJuzgadoParaMostrar(item.juzgado) : <span className="muted">—</span>}</td>
-                  <td>
-                    {item.fecha_ultima_carga 
-                      ? formatFecha(item.fecha_ultima_carga)
-                      : item.fecha 
-                        ? formatFecha(item.fecha) 
-                        : <span className="muted">—</span>}
-                  </td>
-                  <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                    {typeof dias === "number" && !isNaN(dias) ? dias : <span className="muted">—</span>}
-                  </td>
-                  <td>
-                    {item.numero?.trim() ? item.numero : <span className="muted">—</span>}
-                  </td>
-                  <td>
-                    {item.created_by ? (
-                      <span style={{ fontSize: 13 }}>{item.created_by}</span>
+                  item={item}
+                  isExpanded={expandedRowId === item.id}
+                  colSpan={deteccionColSpan}
+                  onToggleExpand={toggleExpandedRow}
+                  rowStyle={rowStyle}
+                  renderSemaforo={() => <SemaforoChip value={sem as Semaforo} />}
+                  renderJuzgado={() =>
+                    item.juzgado ? limpiarJuzgadoParaMostrar(item.juzgado) : <span className="muted">—</span>
+                  }
+                  renderFecha={() =>
+                    item.fecha_ultima_carga ? (
+                      formatFecha(item.fecha_ultima_carga)
+                    ) : item.fecha ? (
+                      formatFecha(item.fecha)
                     ) : (
                       <span className="muted">—</span>
-                    )}
-                  </td>
-                  <td style={{ fontSize: 13, width: 380, minWidth: 380, textAlign: "center", padding: "11px 12px" }}>
-                    {item.observaciones?.trim() ? (
-                      <div style={{ 
-                        padding: "8px 10px",
-                        background: "rgba(255,255,255,.03)",
-                        borderRadius: 8,
-                        border: "1px solid rgba(255,255,255,.06)",
-                        lineHeight: 1.6,
-                        whiteSpace: "pre-wrap",
-                        wordBreak: "break-word",
-                        color: "rgba(234,243,255,.88)",
-                        fontSize: 12.5,
-                        letterSpacing: "0.01em",
-                        textAlign: "left"
-                      }}>
-                        {item.observaciones}
-                      </div>
-                    ) : (
-                      <span className="muted">—</span>
-                    )}
-                  </td>
-                  <td style={{ fontSize: 13, width: 380, minWidth: 380, textAlign: "center", padding: "11px 12px" }}>
+                    )
+                  }
+                  renderNotasEditor={() => (
                     <NotasTextarea
                       itemId={item.id}
                       isPjnFavorito={item.is_pjn_favorito === true}
@@ -3570,8 +3566,10 @@ export default function PruebaPericiaPage() {
                       numeroExpediente={item.numero}
                       juzgado={item.juzgado}
                     />
-                  </td>
-                  {FEATURE_ORDENES_SEGUIMIENTO && (() => {
+                  )}
+                  renderTrailingCells={
+                    FEATURE_ORDENES_SEGUIMIENTO
+                      ? () => {
                     const caseRef = item.numero || item.caratula || "Sin referencia";
                     const tieneOrden = ordenesExistentes[caseRef] || (!item.is_pjn_favorito && ordenesExistentes[item.id]);
                     const isUploading = uploadingOrden[item.id] === true;
@@ -3721,19 +3719,22 @@ export default function PruebaPericiaPage() {
                         </div>
                       </td>
                     );
-                  })()}
-                </tr>
+                      }
+                      : undefined
+                  }
+                />
               );
             })}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={FEATURE_ORDENES_SEGUIMIENTO ? 10 : 9} className="muted">
+                <td colSpan={deteccionColSpan} className="muted" style={{ padding: 24, textAlign: "center" }}>
                   No hay expedientes de Prueba/Pericia cargados.
                 </td>
               </tr>
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* Paginación */}
@@ -4895,6 +4896,6 @@ export default function PruebaPericiaPage() {
         }}
         confirming={renunciando}
       />
-    </div>
+    </main>
   );
 }

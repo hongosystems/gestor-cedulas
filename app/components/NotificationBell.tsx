@@ -12,7 +12,12 @@ type Notif = {
   created_at: string;
 };
 
-export default function NotificationBell() {
+type NotificationBellProps = {
+  /** inline = campana en páginas legacy; topbar = shell global */
+  variant?: "inline" | "topbar";
+};
+
+export default function NotificationBell({ variant = "inline" }: NotificationBellProps) {
   const [items, setItems] = useState<Notif[]>([]);
   const unread = items.filter((n) => !n.is_read).length;
 
@@ -78,7 +83,7 @@ export default function NotificationBell() {
   }
 
   return (
-    <div style={{ position: "relative" }}>
+    <div style={{ position: "relative" }} data-notification-bell={variant}>
       <button
         onClick={handleBellClick}
         aria-label="Notificaciones"

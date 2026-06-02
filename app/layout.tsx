@@ -1,5 +1,7 @@
 import "./globals.css";
 import NotificationBellWrapper from "./components/NotificationBellWrapper";
+import AppShellGate from "./components/shell/AppShellGate";
+import ThemeScript from "./components/shell/ThemeScript";
 
 export const metadata = {
   title: "Gestor de Cédulas",
@@ -8,17 +10,15 @@ export const metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="es">
+    <html lang="es" suppressHydrationWarning>
+      <head>
+        <ThemeScript />
+      </head>
       <body>
-        {children}
+        <AppShellGate>{children}</AppShellGate>
 
-        {/* Campanita de notificaciones fija en todas las páginas */}
+        {/* Campanita de notificaciones fija en páginas sin sesión (login, etc.) */}
         <NotificationBellWrapper />
-
-        {/* watermark sutil en toda la app */}
-        <div className="watermark" aria-hidden="true">
-          <img src="/logo.png" alt="" />
-        </div>
       </body>
     </html>
   );
