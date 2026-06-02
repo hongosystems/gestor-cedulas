@@ -10,6 +10,7 @@
     "pjn:login": "tsx scripts/pjn-scraper.ts login",
     "pjn:check": "tsx scripts/pjn-scraper.ts check",
     "sync:pjn-favoritos": "node scripts/sync-pjn-favoritos.mjs",
+    "test:pjn-parse": "tsx scripts/test-pjn-expediente-parse.ts",
     "remove:duplicates-cases": "node scripts/remove-duplicates-cases.mjs",
     "verify:favoritos": "node scripts/verify-favoritos-discrepancy.mjs",
     "test:pjn-merge": "tsx scripts/test-expediente-pjn-merge.ts",

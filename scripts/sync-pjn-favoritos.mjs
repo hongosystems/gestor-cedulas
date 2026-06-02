@@ -15,6 +15,11 @@ import { createClient } from '@supabase/supabase-js';
 import * as dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import {
+  parseExpedienteFromCasesKey,
+  favoritoMatchKeyFromRow,
+  favoritoMatchKeyVariants,
+} from '../lib/pjn-expediente-parse.mjs';
 
 // Cargar variables de entorno
 const __filename = fileURLToPath(import.meta.url);
@@ -44,29 +49,6 @@ if (!pjnSupabaseUrl || !pjnSupabaseAnonKey) {
 
 const mainSupabase = createClient(mainSupabaseUrl, mainSupabaseServiceKey);
 const pjnSupabase = createClient(pjnSupabaseUrl, pjnSupabaseAnonKey);
-
-// Función para parsear expediente (ACTUALIZADA)
-function parseExpediente(expText) {
-  if (!expText) return null;
-  
-  // Primero intentar match al inicio (para compatibilidad con formato estándar)
-  let match = expText.match(/^([A-Z]+)\s+(\d+)\/(\d+)/);
-  
-  // Si no hay match al inicio, buscar en cualquier parte del texto
-  // Esto permite parsear casos como "INCIDENTE N° 1 - ... CIV 123456/2024"
-  if (!match) {
-    match = expText.match(/\b([A-Z]+)\s+(\d+)\/(\d+)\b/);
-  }
-  
-  if (!match) return null;
-  
-  const [, jurisdiccion, numero, anioStr] = match;
-  const anio = parseInt(anioStr, 10);
-  
-  if (!jurisdiccion || !numero || isNaN(anio)) return null;
-  
-  return { jurisdiccion, numero, anio };
-}
 
 // Normalizar juzgado
 function normalizeJuzgado(raw) {
@@ -189,7 +171,7 @@ async function syncFavoritos() {
 
     for (const c of casesData) {
       const expText = c.key || c.expediente;
-      const parsed = parseExpediente(expText);
+      const parsed = parseExpedienteFromCasesKey(expText);
       
       // Logging para casos con "BENEFICIO DE LITIGAR SIN GASTOS" que no se pueden parsear
       const hasBeneficio = c.caratula && c.caratula.toUpperCase().includes("BENEFICIO DE LITIGAR SIN GASTOS");
@@ -206,11 +188,7 @@ async function syncFavoritos() {
         continue;
       }
 
-      // Normalizar número para la key (agregar ceros a la izquierda para consistencia)
-      const numeroNormalizado = parsed.numero.padStart(6, '0');
-      const key = `${parsed.jurisdiccion}|${numeroNormalizado}|${parsed.anio}`;
-      // También crear key sin ceros a la izquierda para compatibilidad
-      const keySinCeros = `${parsed.jurisdiccion}|${parsed.numero}|${parsed.anio}`;
+      const matchKeys = favoritoMatchKeyVariants(parsed);
       
       // Si el caso está marcado como removido, agregarlo a removedKeys y NO sincronizarlo
       if (c.removido === true) {
@@ -221,8 +199,7 @@ async function syncFavoritos() {
             caratula: c.caratula?.substring(0, 100)
           });
         }
-        removedKeys.add(key);
-        removedKeys.add(keySinCeros); // Agregar ambas variaciones
+        for (const k of matchKeys) removedKeys.add(k);
         continue; // No agregar a favoritosToUpsert ni a casesKeys
       }
       
@@ -236,9 +213,7 @@ async function syncFavoritos() {
         });
       }
       
-      // Solo agregar a casesKeys si NO está removido (agregar ambas variaciones)
-      casesKeys.add(key);
-      casesKeys.add(keySinCeros);
+      for (const k of matchKeys) casesKeys.add(k);
 
       // Manejar fecha
       let fechaUltimaCarga = null;
@@ -294,16 +269,12 @@ async function syncFavoritos() {
     for (let i = 0; i < favoritosToUpsert.length; i += batchSize) {
       const batch = favoritosToUpsert.slice(i, i + batchSize);
       
-      // Eliminar duplicados dentro del lote
-      const seen = new Set();
-      const uniqueBatch = batch.filter(item => {
-        const key = `${item.jurisdiccion}|${item.numero}|${item.anio}`;
-        if (seen.has(key)) {
-          return false;
-        }
-        seen.add(key);
-        return true;
-      });
+      const byKey = new Map();
+      for (const item of batch) {
+        const key = favoritoMatchKeyFromRow(item.jurisdiccion, item.numero, item.anio);
+        byKey.set(key, item);
+      }
+      const uniqueBatch = [...byKey.values()];
 
       if (uniqueBatch.length === 0) {
         continue;
@@ -358,40 +329,26 @@ async function syncFavoritos() {
     if (currentFavoritos) {
       let debugCount = 0;
       for (const fav of currentFavoritos) {
-        // Normalizar número para comparar (agregar ceros a la izquierda si es necesario)
-        const numeroNormalizado = String(fav.numero).padStart(6, '0');
-        const key = `${fav.jurisdiccion}|${numeroNormalizado}|${fav.anio}`;
-        const keyOriginal = `${fav.jurisdiccion}|${fav.numero}|${fav.anio}`;
-        
-        // También verificar variaciones del número (sin ceros a la izquierda)
-        const numeroSinCeros = String(fav.numero).replace(/^0+/, '');
-        const keySinCeros = `${fav.jurisdiccion}|${numeroSinCeros}|${fav.anio}`;
-        
-        // Verificar si hay una versión activa (no removida) de este expediente
-        const hasActiveVersion = 
-          casesKeys.has(key) || 
-          casesKeys.has(keyOriginal) || 
-          casesKeys.has(keySinCeros);
-        
-        // Verificar si está marcado como removido
-        const isMarkedRemoved = 
-          removedKeys.has(key) || 
-          removedKeys.has(keyOriginal) || 
-          removedKeys.has(keySinCeros);
-        
-        // Eliminar solo si:
-        // 1. Está marcado como removido Y NO hay versión activa, O
-        // 2. No existe en cases (no está en casesKeys)
-        // Si hay una versión activa, NO eliminar aunque haya una versión removida
-        const shouldDelete = 
+        const favKey = favoritoMatchKeyFromRow(fav.jurisdiccion, fav.numero, fav.anio);
+        const legacyKeys =
+          !String(fav.numero).includes("/")
+            ? [`${fav.jurisdiccion}|${String(fav.numero).padStart(6, "0")}|${fav.anio}`]
+            : [];
+
+        const hasActiveVersion =
+          casesKeys.has(favKey) || legacyKeys.some((k) => casesKeys.has(k));
+
+        const isMarkedRemoved =
+          removedKeys.has(favKey) || legacyKeys.some((k) => removedKeys.has(k));
+
+        const shouldDelete =
           (isMarkedRemoved && !hasActiveVersion) ||
-          (!hasActiveVersion && !casesKeys.has(key) && !casesKeys.has(keyOriginal) && !casesKeys.has(keySinCeros));
-        
+          (!hasActiveVersion && !casesKeys.has(favKey));
+
         if (shouldDelete) {
           favoritosToDelete.push(fav.id);
-          // Debug: mostrar algunos ejemplos de lo que se va a eliminar
           if (debugCount < 5) {
-            console.log(`   🗑️  Eliminar: ${fav.jurisdiccion} ${fav.numero}/${fav.anio} (removido: ${isRemoved}, no en cases: ${notInCases})`);
+            console.log(`   🗑️  Eliminar: ${fav.jurisdiccion} ${fav.numero}/${fav.anio}`);
             debugCount++;
           }
         }
