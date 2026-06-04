@@ -29,6 +29,14 @@ const RULES: RouteRule[] = [
     config: { placeholder: "Buscar oficio, expediente o carátula…" },
   },
   {
+    test: (p) =>
+      p.startsWith("/app/bandeja") ||
+      p === "/app/enviar" ||
+      p === "/app/recibidos" ||
+      p === "/app/notificaciones",
+    config: { placeholder: "Buscar mensaje, expediente, carátula o remitente…" },
+  },
+  {
     test: (p) => p.startsWith("/app/mediaciones"),
     config: { placeholder: "Buscar mediación, requirente…" },
   },

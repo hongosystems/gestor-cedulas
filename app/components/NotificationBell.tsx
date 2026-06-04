@@ -65,7 +65,7 @@ export default function NotificationBell({ variant = "inline" }: NotificationBel
     e.preventDefault();
     e.stopPropagation();
     // Redirigir al inbox para TODOS los usuarios usando window.location para asegurar que funcione
-    window.location.href = "/app/notificaciones";
+    window.location.href = "/app/bandeja?tab=no-leidas";
   };
 
   // No mostrar la campanita si no hay sesión (página de login, etc.)

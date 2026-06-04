@@ -101,6 +101,38 @@ function extractObservaciones(movimientos: unknown): string | null {
   return null;
 }
 
+const PAGE_SIZE = 1000;
+
+type PjnCaseRow = {
+  key: string | null;
+  expediente: string | null;
+  caratula: string | null;
+  dependencia: string | null;
+  ult_act: string | null;
+  situacion: string | null;
+  movimientos: unknown;
+  removido: boolean | null;
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function fetchAllCases(pjnSupabase: any): Promise<PjnCaseRow[]> {
+  const rows: PjnCaseRow[] = [];
+  let offset = 0;
+  while (true) {
+    const { data, error } = await pjnSupabase
+      .from("cases")
+      .select("key, expediente, caratula, dependencia, ult_act, situacion, movimientos, removido")
+      .order("key", { ascending: true })
+      .range(offset, offset + PAGE_SIZE - 1);
+    if (error) throw error;
+    const batch = data || [];
+    rows.push(...batch);
+    if (batch.length < PAGE_SIZE) break;
+    offset += PAGE_SIZE;
+  }
+  return rows;
+}
+
 /**
  * Función principal de sincronización (compartida entre GET y POST)
  */
@@ -147,15 +179,14 @@ async function performSync(req: NextRequest) {
 
     // 1. Leer todos los casos de pjn-scraper (incluyendo columna removido)
     console.log("[sync-favoritos] Leyendo casos de pjn-scraper...");
-    const { data: casesData, error: casesErr } = await pjnSupabase
-      .from("cases")
-      .select("key, expediente, caratula, dependencia, ult_act, situacion, movimientos, removido")
-      .order("ult_act", { ascending: false });
-
-    if (casesErr) {
+    let casesData: PjnCaseRow[];
+    try {
+      casesData = await fetchAllCases(pjnSupabase);
+    } catch (casesErr) {
+      const message = casesErr instanceof Error ? casesErr.message : String(casesErr);
       console.error("[sync-favoritos] Error al leer cases:", casesErr);
       return NextResponse.json(
-        { error: "Error al leer casos de pjn-scraper", details: casesErr.message },
+        { error: "Error al leer casos de pjn-scraper", details: message },
         { status: 500 }
       );
     }

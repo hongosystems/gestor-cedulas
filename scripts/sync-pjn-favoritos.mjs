@@ -50,6 +50,26 @@ if (!pjnSupabaseUrl || !pjnSupabaseAnonKey) {
 const mainSupabase = createClient(mainSupabaseUrl, mainSupabaseServiceKey);
 const pjnSupabase = createClient(pjnSupabaseUrl, pjnSupabaseAnonKey);
 
+const PAGE_SIZE = 1000;
+
+async function fetchAllCases(client) {
+  const rows = [];
+  let offset = 0;
+  while (true) {
+    const { data, error } = await client
+      .from("cases")
+      .select("key, expediente, caratula, dependencia, ult_act, situacion, movimientos, removido")
+      .order("key", { ascending: true })
+      .range(offset, offset + PAGE_SIZE - 1);
+    if (error) throw error;
+    const batch = data || [];
+    rows.push(...batch);
+    if (batch.length < PAGE_SIZE) break;
+    offset += PAGE_SIZE;
+  }
+  return rows;
+}
+
 // Normalizar juzgado
 function normalizeJuzgado(raw) {
   if (!raw) return null;
@@ -146,12 +166,10 @@ async function syncFavoritos() {
   try {
     // 1. Leer todos los casos de pjn-scraper (incluyendo columna removido)
     console.log('📋 Leyendo casos de pjn-scraper...');
-    const { data: casesData, error: casesErr } = await pjnSupabase
-      .from("cases")
-      .select("key, expediente, caratula, dependencia, ult_act, situacion, movimientos, removido")
-      .order("ult_act", { ascending: false });
-
-    if (casesErr) {
+    let casesData;
+    try {
+      casesData = await fetchAllCases(pjnSupabase);
+    } catch (casesErr) {
       console.error('❌ Error al leer cases:', casesErr);
       process.exit(1);
     }

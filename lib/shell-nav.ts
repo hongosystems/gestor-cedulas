@@ -116,6 +116,7 @@ export function getShellNavItems(roles: UserRoleFlags): ShellNavItem[] {
     (p.startsWith("/app/") &&
       !p.startsWith("/app/mediaciones") &&
       !p.startsWith("/app/expedientes") &&
+      !p.startsWith("/app/bandeja") &&
       !p.startsWith("/app/enviar") &&
       !p.startsWith("/app/recibidos") &&
       !p.startsWith("/app/nueva") &&
@@ -164,27 +165,19 @@ export function getShellNavItems(roles: UserRoleFlags): ShellNavItem[] {
       visible: () => canWorkflowCedulas,
     },
     {
-      id: "enviar",
-      label: "Enviar Cédula/Oficio",
-      href: "/app/enviar",
+      id: "bandeja",
+      label: "Bandeja",
+      href: "/app/bandeja",
       group: "operaciones",
-      match: (p) => p === "/app/enviar" || p.startsWith("/app/enviar/"),
-      visible: () => canWorkflowCedulas,
-    },
-    {
-      id: "recibidos",
-      label: "Recibidos / Enviados",
-      href: "/app/recibidos",
-      group: "operaciones",
-      match: (p) => p === "/app/recibidos" || p.startsWith("/app/recibidos/"),
-      visible: () => canWorkflowCedulas,
-    },
-    {
-      id: "notificaciones",
-      label: "Notificaciones",
-      href: "/app/notificaciones",
-      group: "operaciones",
-      match: (p) => p === "/app/notificaciones" || p.startsWith("/app/notificaciones/"),
+      match: (p) =>
+        p === "/app/bandeja" ||
+        p.startsWith("/app/bandeja/") ||
+        p === "/app/enviar" ||
+        p.startsWith("/app/enviar/") ||
+        p === "/app/recibidos" ||
+        p.startsWith("/app/recibidos/") ||
+        p === "/app/notificaciones" ||
+        p.startsWith("/app/notificaciones/"),
       visible: () => true,
     },
     {
