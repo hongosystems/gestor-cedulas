@@ -1,0 +1,158 @@
+"use client";
+
+import { useMemo, useRef, useState } from "react";
+import { displayName, type Profile } from "@/lib/bandeja-utils";
+
+const MAX_VISIBLE_CHIPS = 3;
+
+type RecipientMultiSelectProps = {
+  users: Profile[];
+  value: string[];
+  onChange: (ids: string[]) => void;
+  disabled?: boolean;
+  excludeUserId?: string;
+};
+
+export function formatRecipientsSummary(
+  ids: string[],
+  users: Profile[],
+  maxVisible = MAX_VISIBLE_CHIPS
+): string {
+  if (ids.length === 0) return "—";
+  const names = ids
+    .map((id) => users.find((u) => u.id === id))
+    .filter(Boolean)
+    .map((u) => displayName(u!));
+  if (names.length <= maxVisible) return names.join(", ");
+  const shown = names.slice(0, maxVisible).join(", ");
+  return `${shown} +${names.length - maxVisible} más`;
+}
+
+export default function RecipientMultiSelect({
+  users,
+  value,
+  onChange,
+  disabled = false,
+  excludeUserId,
+}: RecipientMultiSelectProps) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  const available = useMemo(() => {
+    const selected = new Set(value);
+    return users.filter((u) => {
+      if (excludeUserId && u.id === excludeUserId) return false;
+      if (selected.has(u.id)) return false;
+      if (!query.trim()) return true;
+      const q = query.trim().toLowerCase();
+      const name = displayName(u).toLowerCase();
+      const email = (u.email || "").toLowerCase();
+      return name.includes(q) || email.includes(q);
+    });
+  }, [users, value, query, excludeUserId]);
+
+  const selectedProfiles = useMemo(
+    () => value.map((id) => users.find((u) => u.id === id)).filter(Boolean) as Profile[],
+    [value, users]
+  );
+
+  const visibleChips = selectedProfiles.slice(0, MAX_VISIBLE_CHIPS);
+  const hiddenCount = Math.max(0, selectedProfiles.length - MAX_VISIBLE_CHIPS);
+
+  function addRecipient(id: string) {
+    if (value.includes(id)) return;
+    onChange([...value, id]);
+    setQuery("");
+    setOpen(false);
+  }
+
+  function removeRecipient(id: string) {
+    onChange(value.filter((x) => x !== id));
+  }
+
+  return (
+    <div
+      className="bandeja-recipients"
+      ref={wrapRef}
+      onBlur={(e) => {
+        if (!wrapRef.current?.contains(e.relatedTarget as Node)) {
+          setOpen(false);
+        }
+      }}
+    >
+      <div className="bandeja-recipients-chips" aria-label="Destinatarios seleccionados">
+        {selectedProfiles.length === 0 && (
+          <span className="bandeja-recipients-empty">Sin destinatarios</span>
+        )}
+        {visibleChips.map((u) => (
+          <span key={u.id} className="bandeja-recipient-chip">
+            <span className="bandeja-recipient-chip-label">{displayName(u)}</span>
+            <button
+              type="button"
+              className="bandeja-recipient-chip-remove"
+              aria-label={`Quitar ${displayName(u)}`}
+              disabled={disabled}
+              onClick={() => removeRecipient(u.id)}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        {hiddenCount > 0 && (
+          <span className="bandeja-recipient-chip bandeja-recipient-chip--more" title={formatRecipientsSummary(value, users, 99)}>
+            +{hiddenCount} más
+          </span>
+        )}
+      </div>
+
+      <div className="bandeja-recipients-input-wrap">
+        <input
+          className="input bandeja-recipients-search"
+          type="text"
+          value={query}
+          disabled={disabled}
+          placeholder={value.length ? "Agregar otro destinatario…" : "Buscar por nombre o email…"}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              setOpen(false);
+              setQuery("");
+            }
+            if (e.key === "Backspace" && !query && value.length > 0) {
+              onChange(value.slice(0, -1));
+            }
+          }}
+          aria-autocomplete="list"
+          aria-expanded={open && available.length > 0}
+        />
+        {open && query.trim().length > 0 && available.length > 0 && (
+          <ul className="bandeja-recipients-dropdown" role="listbox">
+            {available.slice(0, 12).map((u) => (
+              <li key={u.id} role="option">
+                <button
+                  type="button"
+                  className="bandeja-recipients-option"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => addRecipient(u.id)}
+                >
+                  <span className="bandeja-recipients-option-name">{displayName(u)}</span>
+                  {u.email && <span className="bandeja-recipients-option-email">{u.email}</span>}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {open && query.trim().length > 0 && available.length === 0 && (
+          <div className="bandeja-recipients-dropdown bandeja-recipients-dropdown--empty">
+            Sin usuarios para “{query.trim()}”
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

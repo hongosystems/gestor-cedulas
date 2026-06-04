@@ -4,6 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { displayName, docTypeLabel, type DocType, type Profile } from "@/lib/bandeja-utils";
 import ExpedienteAutocomplete, { type ExpedienteOption } from "@/app/components/bandeja/ExpedienteAutocomplete";
+import RecipientMultiSelect, {
+  formatRecipientsSummary,
+} from "@/app/components/bandeja/RecipientMultiSelect";
 
 type SendTransferFormProps = {
   embedded?: boolean;
@@ -26,7 +29,8 @@ export default function SendTransferForm({
   const [msg, setMsg] = useState("");
   const [users, setUsers] = useState<Profile[]>([]);
   const [senderName, setSenderName] = useState("Vos");
-  const [recipient, setRecipient] = useState("");
+  const [currentUserId, setCurrentUserId] = useState("");
+  const [recipients, setRecipients] = useState<string[]>([]);
   const [docType, setDocType] = useState<DocType>("CEDULA");
   const [title, setTitle] = useState("");
   const [expediente, setExpediente] = useState<ExpedienteOption | null>(null);
@@ -56,14 +60,18 @@ export default function SendTransferForm({
       }
 
       setUsers((profiles ?? []) as Profile[]);
+      setCurrentUserId(uid);
       setSenderName(displayName(me as Profile));
       setLoading(false);
     })();
   }, []);
 
-  const recipientProfile = useMemo(
-    () => users.find((u) => u.id === recipient) ?? null,
-    [users, recipient]
+  const recipientProfiles = useMemo(
+    () =>
+      recipients
+        .map((id) => users.find((u) => u.id === id))
+        .filter(Boolean) as Profile[],
+    [users, recipients]
   );
 
   const pickFile = useCallback((f: File | null) => {
@@ -74,7 +82,7 @@ export default function SendTransferForm({
   async function onSend() {
     setMsg("");
 
-    if (!recipient) return setMsg("Elegí un usuario destinatario.");
+    if (recipients.length === 0) return setMsg("Elegí al menos un destinatario.");
     if (!file) return setMsg("Adjuntá un archivo.");
 
     const allowedExts = [".docx", ".pdf", ".png", ".jpg", ".jpeg", ".zip"];
@@ -94,34 +102,83 @@ export default function SendTransferForm({
         return;
       }
 
-      const fd = new FormData();
-      fd.append("recipient_user_id", recipient);
-      fd.append("doc_type", docType);
-      fd.append("title", title.trim());
-      if (expediente?.ref) {
-        fd.append("expediente_ref", expediente.ref);
+      type SendAttempt = { userId: string; ok: boolean; error?: string };
+      const attempts: SendAttempt[] = [];
+
+      for (const recipientId of recipients) {
+        const fd = new FormData();
+        fd.append("recipient_user_id", recipientId);
+        fd.append("doc_type", docType);
+        fd.append("title", title.trim());
+        if (expediente?.ref) {
+          fd.append("expediente_ref", expediente.ref);
+        }
+        fd.append("file", file);
+
+        try {
+          const res = await fetch("/api/transfers/send", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+            body: fd,
+          });
+          const json = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            attempts.push({
+              userId: recipientId,
+              ok: false,
+              error: (json?.error as string) || "No se pudo enviar.",
+            });
+          } else {
+            attempts.push({ userId: recipientId, ok: true });
+          }
+        } catch {
+          attempts.push({
+            userId: recipientId,
+            ok: false,
+            error: "Error de red al enviar.",
+          });
+        }
       }
-      fd.append("file", file);
 
-      const res = await fetch("/api/transfers/send", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: fd,
-      });
+      const okCount = attempts.filter((a) => a.ok).length;
+      const failed = attempts.filter((a) => !a.ok);
 
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setMsg(json?.error || "No se pudo enviar.");
+      if (okCount === 0) {
+        const first = failed[0];
+        setMsg(
+          failed.length === 1
+            ? first?.error || "No se pudo enviar."
+            : `No se pudo enviar a ningún destinatario. ${first?.error || ""}`
+        );
+        if (who) setRecipients(failed.map((f) => f.userId));
         return;
       }
 
-      setMsg("Enviado correctamente.");
-      setTitle("");
-      setMessage("");
-      setExpediente(null);
-      setFile(null);
-      setRecipient("");
-      onSuccess?.();
+      if (failed.length > 0) {
+        const failedNames = failed
+          .map((f) => {
+            const p = users.find((u) => u.id === f.userId);
+            return p ? displayName(p) : "Usuario";
+          })
+          .join(", ");
+        setMsg(
+          `Enviado a ${okCount} de ${recipients.length} destinatarios. No se pudo enviar a: ${failedNames}.`
+        );
+        setRecipients(failed.map((f) => f.userId));
+        onSuccess?.();
+      } else {
+        setMsg(
+          recipients.length === 1
+            ? "Enviado correctamente."
+            : `Enviado correctamente a ${okCount} destinatarios.`
+        );
+        setTitle("");
+        setMessage("");
+        setExpediente(null);
+        setFile(null);
+        setRecipients([]);
+        onSuccess?.();
+      }
     } finally {
       setSending(false);
     }
@@ -154,21 +211,17 @@ export default function SendTransferForm({
               <span className="bandeja-composer-value">{senderName}</span>
             </div>
 
-            <div className="bandeja-composer-row">
-              <span className="bandeja-composer-label">Para</span>
-              <select
-                className="input"
-                value={recipient}
-                onChange={(e) => setRecipient(e.target.value)}
+            <div className="bandeja-composer-row is-stack">
+              <span className="bandeja-composer-label" style={{ paddingTop: 4 }}>
+                Para
+              </span>
+              <RecipientMultiSelect
+                users={users}
+                value={recipients}
+                onChange={setRecipients}
                 disabled={sending}
-              >
-                <option value="">Seleccionar destinatario…</option>
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {displayName(u)}
-                  </option>
-                ))}
-              </select>
+                excludeUserId={currentUserId}
+              />
             </div>
 
             <div className="bandeja-composer-row">
@@ -286,8 +339,15 @@ export default function SendTransferForm({
             <h3>Resumen del envío</h3>
             <dl className="bandeja-summary-list">
               <div>
-                <dt>Destinatario</dt>
-                <dd>{recipientProfile ? displayName(recipientProfile) : "—"}</dd>
+                <dt>Destinatarios</dt>
+                <dd>
+                  {recipientProfiles.length > 0
+                    ? formatRecipientsSummary(recipients, users)
+                    : "—"}
+                  {recipientProfiles.length > 1 && (
+                    <span className="bandeja-summary-sub">{recipientProfiles.length} en total</span>
+                  )}
+                </dd>
               </div>
               <div>
                 <dt>Tipo</dt>
@@ -324,7 +384,7 @@ export default function SendTransferForm({
             <ul>
               <li>El expediente es opcional; buscá por número o carátula.</li>
               <li>La descarga siempre trae la última versión del archivo.</li>
-              <li>El destinatario recibirá una notificación en su bandeja.</li>
+              <li>Cada destinatario recibirá su propia notificación y copia del archivo.</li>
             </ul>
           </div>
         </aside>
