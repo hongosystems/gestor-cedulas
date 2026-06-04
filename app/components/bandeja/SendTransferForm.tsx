@@ -150,7 +150,7 @@ export default function SendTransferForm({
             ? first?.error || "No se pudo enviar."
             : `No se pudo enviar a ningún destinatario. ${first?.error || ""}`
         );
-        if (who) setRecipients(failed.map((f) => f.userId));
+        if (failed.length > 0) setRecipients(failed.map((f) => f.userId));
         return;
       }
 
