@@ -54,6 +54,7 @@ export function snippet(text: string, maxLen = 120) {
 export type BandejaTab =
   | "recibidos"
   | "enviados"
+  | "archivados"
   | "todas"
   | "no-leidas"
   | "accion"
@@ -64,6 +65,7 @@ export function parseBandejaTab(raw: string | null | undefined): BandejaTab {
   if (
     v === "recibidos" ||
     v === "enviados" ||
+    v === "archivados" ||
     v === "todas" ||
     v === "no-leidas" ||
     v === "accion" ||

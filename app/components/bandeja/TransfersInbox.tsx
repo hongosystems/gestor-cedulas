@@ -7,18 +7,63 @@ import {
   docTypeLabel,
   fmtDateShort,
   fmtRelativeTime,
-  type DocType,
   type Profile,
 } from "@/lib/bandeja-utils";
+import {
+  normalizeTransferRow,
+  transferHasAttachment,
+  transferMatchesQuery,
+  transferSubject,
+  type TransferSearchRow,
+} from "@/lib/bandeja-search";
 
-type Transfer = {
-  id: string;
-  sender_user_id: string;
-  recipient_user_id: string;
-  doc_type: DocType;
-  title: string | null;
-  created_at: string;
-};
+type Transfer = TransferSearchRow & { created_at: string };
+
+const TRANSFER_SELECT =
+  "id, sender_user_id, recipient_user_id, doc_type, title, message, expediente_ref, expediente_caratula, expediente_juzgado, created_at, file_transfer_versions(storage_path)";
+
+const TRANSFER_SELECT_LEGACY =
+  "id, sender_user_id, recipient_user_id, doc_type, title, created_at, file_transfer_versions(storage_path)";
+
+function mapTransferRows(data: Record<string, unknown>[] | null): Transfer[] {
+  return (data ?? []).map((row) => ({
+    ...normalizeTransferRow(row),
+    created_at: String(row.created_at ?? ""),
+  }));
+}
+
+async function fetchTransfersForUser(userId: string) {
+  const full = await supabase
+    .from("file_transfers")
+    .select(TRANSFER_SELECT)
+    .or(`recipient_user_id.eq.${userId},sender_user_id.eq.${userId}`)
+    .order("created_at", { ascending: false });
+  if (!full.error) {
+    return { data: mapTransferRows(full.data as Record<string, unknown>[]), error: null as string | null };
+  }
+
+  const errMsg = full.error.message || "";
+  const missingCols = /message|expediente_caratula|expediente_juzgado|column/i.test(errMsg);
+  if (!missingCols) {
+    return { data: [] as Transfer[], error: errMsg };
+  }
+
+  const legacy = await supabase
+    .from("file_transfers")
+    .select(TRANSFER_SELECT_LEGACY)
+    .or(`recipient_user_id.eq.${userId},sender_user_id.eq.${userId}`)
+    .order("created_at", { ascending: false });
+
+  if (legacy.error) {
+    return { data: [] as Transfer[], error: legacy.error.message };
+  }
+
+  return {
+    data: mapTransferRows(legacy.data as Record<string, unknown>[]),
+    error:
+      "Búsqueda por mensaje requiere la migración add_file_transfers_message.sql en Supabase.",
+  };
+}
 
 type TransfersInboxProps = {
   mode: "recibidos" | "enviados";
@@ -56,19 +101,13 @@ export default function TransfersInbox({ mode, searchQuery = "" }: TransfersInbo
       });
       setProfiles(map);
 
-      const { data, error } = await supabase
-        .from("file_transfers")
-        .select("id, sender_user_id, recipient_user_id, doc_type, title, created_at")
-        .or(`recipient_user_id.eq.${userId},sender_user_id.eq.${userId}`)
-        .order("created_at", { ascending: false });
+      const { data, error } = await fetchTransfersForUser(userId);
 
       if (error) {
-        setMsg(error.message);
-        setLoading(false);
-        return;
+        setMsg(error);
       }
 
-      setItems((data ?? []) as Transfer[]);
+      setItems(data);
       setLoading(false);
     })();
   }, []);
@@ -80,25 +119,13 @@ export default function TransfersInbox({ mode, searchQuery = "" }: TransfersInbo
         : items.filter((t) => t.sender_user_id === uid);
 
     if (!query.trim()) return base;
-    const q = query.trim().toLowerCase();
-    return base.filter((t) => {
-      const title = (t.title || "").toLowerCase();
-      const type = docTypeLabel(t.doc_type).toLowerCase();
-      const peer =
-        mode === "recibidos"
-          ? displayName(profiles[t.sender_user_id]).toLowerCase()
-          : displayName(profiles[t.recipient_user_id]).toLowerCase();
-      return title.includes(q) || type.includes(q) || peer.includes(q);
-    });
+    return base.filter((t) => transferMatchesQuery(t, query, mode, profiles));
   }, [items, mode, uid, query, profiles]);
 
   async function reloadItems() {
-    const { data, error } = await supabase
-      .from("file_transfers")
-      .select("id, sender_user_id, recipient_user_id, doc_type, title, created_at")
-      .or(`recipient_user_id.eq.${uid},sender_user_id.eq.${uid}`)
-      .order("created_at", { ascending: false });
-    if (!error && data) setItems(data as Transfer[]);
+    const { data, error } = await fetchTransfersForUser(uid);
+    if (error) setMsg(error);
+    setItems(data);
   }
 
   async function download(transferId: string) {
@@ -199,6 +226,7 @@ export default function TransfersInbox({ mode, searchQuery = "" }: TransfersInbo
   }
 
   const isReceived = mode === "recibidos";
+  const selectedHasFile = selected ? transferHasAttachment(selected) : false;
 
   return (
     <>
@@ -215,15 +243,18 @@ export default function TransfersInbox({ mode, searchQuery = "" }: TransfersInbo
         <div className="bandeja-list">
           {list.length === 0 ? (
             <div className="bandeja-empty">
-              {mode === "recibidos"
-                ? "No tenés documentos recibidos."
-                : "No enviaste documentos aún."}
+              {query.trim() && items.length > 0
+                ? `Sin resultados para “${query.trim()}”.`
+                : mode === "recibidos"
+                  ? "No tenés documentos recibidos."
+                  : "No enviaste documentos aún."}
             </div>
           ) : (
             list.map((t) => {
               const peerId = isReceived ? t.sender_user_id : t.recipient_user_id;
               const peerLabel = isReceived ? "De" : "Para";
-              const subject = t.title || docTypeLabel(t.doc_type);
+              const subject = transferSubject(t);
+              const hasFile = transferHasAttachment(t);
               return (
                 <button
                   key={t.id}
@@ -236,11 +267,21 @@ export default function TransfersInbox({ mode, searchQuery = "" }: TransfersInbo
                     <div className="bandeja-row-subject">{subject}</div>
                     <div className="bandeja-row-meta">
                       {peerLabel}: {displayName(profiles[peerId])}
+                      {t.expediente_ref ? ` · ${t.expediente_ref}` : ""}
                     </div>
+                    {t.message && (
+                      <div className="bandeja-row-preview">{t.message.replace(/\s+/g, " ").trim()}</div>
+                    )}
                   </div>
-                  <span className="bandeja-row-attach" title="Adjunto">
-                    📎
-                  </span>
+                  {hasFile ? (
+                    <span className="bandeja-row-attach" title="Con adjunto">
+                      📎
+                    </span>
+                  ) : (
+                    <span className="bandeja-row-attach bandeja-row-attach--muted" title="Solo mensaje">
+                      💬
+                    </span>
+                  )}
                   <div className="bandeja-row-aside">
                     <span className="bandeja-row-date">{fmtRelativeTime(t.created_at)}</span>
                   </div>
@@ -260,9 +301,7 @@ export default function TransfersInbox({ mode, searchQuery = "" }: TransfersInbo
               >
                 ← Volver a la lista
               </button>
-              <h3 className="bandeja-detail-title">
-                {selected.title || docTypeLabel(selected.doc_type)}
-              </h3>
+              <h3 className="bandeja-detail-title">{transferSubject(selected)}</h3>
               <div className="bandeja-detail-meta">
                 <div>
                   <strong>Tipo:</strong> {docTypeLabel(selected.doc_type)}
@@ -273,6 +312,14 @@ export default function TransfersInbox({ mode, searchQuery = "" }: TransfersInbo
                     profiles[isReceived ? selected.sender_user_id : selected.recipient_user_id]
                   )}
                 </div>
+                {selected.expediente_ref && (
+                  <div>
+                    <strong>Expediente:</strong> {selected.expediente_ref}
+                    {selected.expediente_caratula && (
+                      <span className="bandeja-detail-exp-meta"> — {selected.expediente_caratula}</span>
+                    )}
+                  </div>
+                )}
                 <div>
                   <strong>Fecha:</strong> {fmtDateShort(selected.created_at)} (
                   {fmtRelativeTime(selected.created_at)})
@@ -281,10 +328,12 @@ export default function TransfersInbox({ mode, searchQuery = "" }: TransfersInbo
             </div>
 
             <div className="bandeja-detail-actions">
-              <button type="button" className="btn primary" onClick={() => download(selected.id)}>
-                Descargar {isReceived ? "" : "última versión"}
-              </button>
-              {isReceived && (
+              {selectedHasFile && (
+                <button type="button" className="btn primary" onClick={() => download(selected.id)}>
+                  Descargar {isReceived ? "" : "última versión"}
+                </button>
+              )}
+              {isReceived && selectedHasFile && (
                 <>
                   <button
                     type="button"
@@ -316,11 +365,23 @@ export default function TransfersInbox({ mode, searchQuery = "" }: TransfersInbo
             </div>
 
             <div className="bandeja-detail-body">
-              <p className="helper" style={{ margin: 0 }}>
-                La descarga siempre trae la <strong>última versión</strong> del archivo.
-                {isReceived &&
-                  " Podés redirigir el documento a otro usuario o subir una nueva versión en .docx."}
-              </p>
+              {selected.message ? (
+                <div className="bandeja-detail-message">{selected.message}</div>
+              ) : (
+                <p className="helper" style={{ margin: 0 }}>
+                  Este envío no incluye mensaje de texto.
+                </p>
+              )}
+              {selectedHasFile ? (
+                <p className="helper" style={{ margin: selected.message ? "12px 0 0" : 0 }}>
+                  La descarga trae la <strong>última versión</strong> del archivo adjunto.
+                  {isReceived && " Podés redirigirlo o subir una nueva versión en .docx."}
+                </p>
+              ) : (
+                <p className="helper" style={{ margin: selected.message ? "12px 0 0" : 0 }}>
+                  Envío solo mensaje, sin archivo adjunto.
+                </p>
+              )}
             </div>
           </div>
         )}

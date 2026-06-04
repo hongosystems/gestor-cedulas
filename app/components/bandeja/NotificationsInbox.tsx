@@ -5,6 +5,10 @@ import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import NotificationBell from "@/app/components/NotificationBell";
 import { usePageSearchBridge } from "@/app/hooks/usePageSearchBridge";
+import {
+  getNotificationSearchText,
+  textMatchesQuery,
+} from "@/lib/bandeja-search";
 
 type Notif = {
   id: string;
@@ -231,7 +235,7 @@ export default function NotificationsInbox({
   const [items, setItems] = useState<Notif[]>([]);
   const [filter, setFilter] = useState<FilterType>(initialFilter);
   const [localSearch, setLocalSearch] = useState("");
-  const query = searchQuery || localSearch;
+  const query = hideFilterBar ? searchQuery : searchQuery || localSearch;
 
   usePageSearchBridge(localSearch, setLocalSearch, !hideFilterBar);
 
@@ -394,14 +398,19 @@ export default function NotificationsInbox({
     else if (filter === "read") rows = rows.filter((t) => t.allRead);
 
     if (!query.trim()) return rows;
-    const q = query.trim().toLowerCase();
+    const q = query.trim();
     return rows.filter((t) => {
-      const title = (t.latest.title || "").toLowerCase();
-      const body = (t.latest.body || "").toLowerCase();
-      const preview = (t.latest.nota_context || "").toLowerCase();
-      return title.includes(q) || body.includes(q) || preview.includes(q);
+      const memberText = t.members
+        .map((m) => getNotificationSearchText(m))
+        .join(" ");
+      const senderIds = t.members
+        .map((m) => String((m.metadata as Record<string, unknown> | undefined)?.sender_id ?? ""))
+        .filter(Boolean);
+      const senderNames = senderIds.map((id) => threadUserNames[id] || "").join(" ");
+      const haystack = `${memberText} ${senderNames}`;
+      return textMatchesQuery(haystack, q);
     });
-  }, [threadsList, filter, query]);
+  }, [threadsList, filter, query, threadUserNames]);
 
   const unreadCount = items.filter((n) => !n.is_read).length;
   const unreadThreadCount = threadsList.filter((t) => t.hasUnread).length;

@@ -34,7 +34,7 @@ const RULES: RouteRule[] = [
       p === "/app/enviar" ||
       p === "/app/recibidos" ||
       p === "/app/notificaciones",
-    config: { placeholder: "Buscar mensaje, expediente, carátula o remitente…" },
+    config: { placeholder: "Buscar mensajes, expedientes o usuarios…" },
   },
   {
     test: (p) => p.startsWith("/app/mediaciones"),

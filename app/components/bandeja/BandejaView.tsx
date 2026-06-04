@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import LayoutCard from "@/app/components/shell/LayoutCard";
-import { usePageSearchBridge } from "@/app/hooks/usePageSearchBridge";
+import {
+  useEffectivePageSearch,
+  usePageSearchBridge,
+} from "@/app/hooks/usePageSearchBridge";
 import { useUserRoles } from "@/app/hooks/useUserRoles";
 import { supabase } from "@/lib/supabase";
 import {
@@ -12,8 +15,9 @@ import {
   parseBandejaTab,
 } from "@/lib/bandeja-utils";
 import NotificationsInbox from "@/app/components/bandeja/NotificationsInbox";
-import SendTransferForm from "@/app/components/bandeja/SendTransferForm";
-import TransfersInbox from "@/app/components/bandeja/TransfersInbox";
+import MailboxComposeForm from "@/app/components/bandeja/MailboxComposeForm";
+import MailboxInbox from "@/app/components/bandeja/MailboxInbox";
+import { fetchUnreadMailboxCount } from "@/lib/mailbox-client";
 import "@/app/components/bandeja/bandeja.css";
 
 type BandejaViewProps = {
@@ -40,6 +44,7 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
   const { roles, loading: rolesLoading, hasSession } = useUserRoles();
   const [search, setSearch] = useState("");
   const [unreadCount, setUnreadCount] = useState(0);
+  const [mailboxUnread, setMailboxUnread] = useState(0);
   const [receivedCount, setReceivedCount] = useState(0);
 
   const workflow = canWorkflowCedulas(roles);
@@ -54,6 +59,7 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
   }, [searchParams, initialTab, workflow]);
 
   usePageSearchBridge(search, setSearch);
+  const effectiveSearch = useEffectivePageSearch(search);
 
   useEffect(() => {
     if (!hasSession && !rolesLoading) {
@@ -70,12 +76,13 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
       const uid = sess.session?.user.id;
       if (!uid) return;
 
-      const [{ count: unread }, receivedRes] = await Promise.all([
+      const [{ count: unread }, mailboxUnreadCount, receivedRes] = await Promise.all([
         supabase
           .from("notifications")
           .select("id", { count: "exact", head: true })
           .eq("user_id", uid)
           .eq("is_read", false),
+        fetchUnreadMailboxCount().catch(() => 0),
         workflow
           ? supabase
               .from("file_transfers")
@@ -85,7 +92,8 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
       ]);
 
       if (!mounted) return;
-      setUnreadCount(unread ?? 0);
+      setUnreadCount((unread ?? 0) + mailboxUnreadCount);
+      setMailboxUnread(mailboxUnreadCount);
       setReceivedCount(receivedRes.count ?? 0);
     })();
 
@@ -109,8 +117,9 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
     const items: NavItem[] = [];
     if (workflow) {
       items.push(
-        { id: "recibidos", label: "Recibidos", icon: "📥", badge: receivedCount },
-        { id: "enviados", label: "Enviados", icon: "📤", requiresWorkflow: true }
+        { id: "recibidos", label: "Recibidos", icon: "📥", badge: receivedCount, alert: mailboxUnread > 0 },
+        { id: "enviados", label: "Enviados", icon: "📤", requiresWorkflow: true },
+        { id: "archivados", label: "Archivados", icon: "📦", requiresWorkflow: true }
       );
     }
     items.push(
@@ -119,7 +128,7 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
       { id: "accion", label: "Requieren acción", icon: "⚠", badge: unreadCount, alert: unreadCount > 0 }
     );
     return items;
-  }, [workflow, unreadCount, receivedCount]);
+  }, [workflow, unreadCount, receivedCount, mailboxUnread]);
 
   const visibleNavItems = navItems.filter((item) => !item.requiresWorkflow || workflow);
 
@@ -133,7 +142,7 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
         );
       }
       return (
-        <SendTransferForm
+        <MailboxComposeForm
           embedded
           onCancel={() => setTab(workflow ? "recibidos" : "no-leidas")}
           onSuccess={() => setTab("enviados")}
@@ -141,16 +150,21 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
       );
     }
 
-    if (activeTab === "recibidos" || activeTab === "enviados") {
+    if (
+      activeTab === "recibidos" ||
+      activeTab === "enviados" ||
+      activeTab === "archivados"
+    ) {
       if (!workflow) {
         return <div className="bandeja-empty">Esta sección no está disponible para tu perfil.</div>;
       }
-      return (
-        <TransfersInbox
-          mode={activeTab === "recibidos" ? "recibidos" : "enviados"}
-          searchQuery={search}
-        />
-      );
+      const folder =
+        activeTab === "enviados"
+          ? "sent"
+          : activeTab === "archivados"
+            ? "archived"
+            : "inbox";
+      return <MailboxInbox folder={folder} searchQuery={effectiveSearch} />;
     }
 
     return (
@@ -158,7 +172,7 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
         embedded
         hideFilterBar
         initialFilter={tabToNotificationFilter(activeTab)}
-        searchQuery={search}
+        searchQuery={effectiveSearch}
       />
     );
   };

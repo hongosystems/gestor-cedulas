@@ -19,7 +19,8 @@ type NotificationBellProps = {
 
 export default function NotificationBell({ variant = "inline" }: NotificationBellProps) {
   const [items, setItems] = useState<Notif[]>([]);
-  const unread = items.filter((n) => !n.is_read).length;
+  const [mailboxUnread, setMailboxUnread] = useState(0);
+  const unread = items.filter((n) => !n.is_read).length + mailboxUnread;
 
   useEffect(() => {
     let mounted = true;
@@ -41,6 +42,19 @@ export default function NotificationBell({ variant = "inline" }: NotificationBel
       };
 
       await load();
+
+      const loadMailbox = async () => {
+        try {
+          const res = await fetch("/api/mailbox/unread-count", {
+            headers: { Authorization: `Bearer ${sess.session!.access_token}` },
+          });
+          const json = await res.json();
+          if (mounted && res.ok) setMailboxUnread(json.count ?? 0);
+        } catch {
+          /* mailbox tables may not exist yet */
+        }
+      };
+      await loadMailbox();
 
       // Realtime: suscripción a cambios
       channel = supabase

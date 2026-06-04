@@ -83,14 +83,19 @@ export default function SendTransferForm({
     setMsg("");
 
     if (recipients.length === 0) return setMsg("Elegí al menos un destinatario.");
-    if (!file) return setMsg("Adjuntá un archivo.");
 
-    const allowedExts = [".docx", ".pdf", ".png", ".jpg", ".jpeg", ".zip"];
-    const name = file.name.toLowerCase();
-    const ok = allowedExts.some((ext) => name.endsWith(ext));
+    const messageText = message.trim();
+    if (!messageText && !file) {
+      return setMsg("Escribí un mensaje o adjuntá un archivo.");
+    }
 
-    if (!ok) {
-      return setMsg("El archivo debe ser .docx, .pdf, .png, .jpg, .jpeg o .zip.");
+    if (file) {
+      const allowedExts = [".docx", ".pdf", ".png", ".jpg", ".jpeg", ".zip"];
+      const name = file.name.toLowerCase();
+      const ok = allowedExts.some((ext) => name.endsWith(ext));
+      if (!ok) {
+        return setMsg("El archivo debe ser .docx, .pdf, .png, .jpg, .jpeg o .zip.");
+      }
     }
 
     setSending(true);
@@ -110,10 +115,15 @@ export default function SendTransferForm({
         fd.append("recipient_user_id", recipientId);
         fd.append("doc_type", docType);
         fd.append("title", title.trim());
+        if (messageText) {
+          fd.append("message", messageText);
+        }
         if (expediente?.ref) {
           fd.append("expediente_ref", expediente.ref);
         }
-        fd.append("file", file);
+        if (file) {
+          fd.append("file", file);
+        }
 
         try {
           const res = await fetch("/api/transfers/send", {
@@ -193,7 +203,9 @@ export default function SendTransferForm({
       {embedded && (
         <div className="bandeja-compose-intro">
           <h2>Redactar</h2>
-          <p className="helper">Enviá cédulas, oficios y documentos a otro usuario del estudio.</p>
+          <p className="helper">
+            Enviá mensajes, cédulas, oficios y documentos a uno o más usuarios del estudio.
+          </p>
         </div>
       )}
 
@@ -260,25 +272,24 @@ export default function SendTransferForm({
               />
             </div>
 
-            <div className="bandeja-composer-row is-stack">
+            <div className="bandeja-composer-row is-stack bandeja-composer-row--message">
               <span className="bandeja-composer-label" style={{ paddingTop: 4 }}>
                 Mensaje
               </span>
-              <div>
-                <textarea
-                  className="bandeja-message"
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  placeholder="Escribí el mensaje o indicaciones para el destinatario..."
-                  disabled={sending}
-                />
-                <p className="bandeja-message-hint">
-                  Fase 2: el mensaje se persistirá en el envío. Hoy se usa el asunto y la notificación
-                  automática del sistema.
-                </p>
-              </div>
+              <textarea
+                className="bandeja-message"
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                placeholder="Escribí el mensaje o indicaciones para el destinatario..."
+                disabled={sending}
+              />
             </div>
 
+            <div className="bandeja-composer-row is-stack">
+              <span className="bandeja-composer-label" style={{ paddingTop: 4 }}>
+                Adjuntos
+              </span>
+              <div className="bandeja-attachments-block">
             <div
               className={`bandeja-dropzone${dragOver ? " is-dragover" : ""}`}
               onDragOver={(e) => {
@@ -299,7 +310,7 @@ export default function SendTransferForm({
                 disabled={sending}
               />
               <div className="bandeja-dropzone-title">
-                Arrastrá un archivo o hacé click para adjuntar
+                Opcional — arrastrá un archivo o hacé click para adjuntar
               </div>
               <div className="bandeja-dropzone-hint">.docx · .pdf · .png · .jpg · .jpeg · .zip</div>
             </div>
@@ -320,6 +331,11 @@ export default function SendTransferForm({
                 </button>
               </div>
             )}
+              <p className="bandeja-attachments-hint">
+                Podés enviar solo mensaje, solo archivo, o ambos.
+              </p>
+              </div>
+            </div>
 
             <div className="bandeja-composer-actions">
               <button type="button" className="btn primary" disabled={sending} onClick={onSend}>
@@ -373,8 +389,12 @@ export default function SendTransferForm({
                 </dd>
               </div>
               <div>
+                <dt>Mensaje</dt>
+                <dd>{message.trim() ? `${message.trim().slice(0, 120)}${message.trim().length > 120 ? "…" : ""}` : "—"}</dd>
+              </div>
+              <div>
                 <dt>Adjunto</dt>
-                <dd>{file ? `${file.name} (${formatFileSize(file.size)})` : "—"}</dd>
+                <dd>{file ? `${file.name} (${formatFileSize(file.size)})` : "Sin adjunto"}</dd>
               </div>
             </dl>
           </div>
@@ -384,7 +404,8 @@ export default function SendTransferForm({
             <ul>
               <li>El expediente es opcional; buscá por número o carátula.</li>
               <li>La descarga siempre trae la última versión del archivo.</li>
-              <li>Cada destinatario recibirá su propia notificación y copia del archivo.</li>
+              <li>Al menos mensaje o adjunto; expediente opcional.</li>
+              <li>Cada destinatario recibe su propia copia y notificación.</li>
             </ul>
           </div>
         </aside>
