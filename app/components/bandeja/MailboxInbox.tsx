@@ -1,87 +1,167 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { fetchMailboxInbox } from "@/lib/mailbox-client";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { usePageSearchOptional } from "@/app/components/shell/PageSearchContext";
+import {
+  fetchSearchHitsForQuery,
+  filterInboxItems,
+  loadMailboxInboxForFolder,
+} from "@/lib/bandeja-inbox-search";
 import type { MailboxInboxItem } from "@/lib/mailbox-types";
+import type { Profile } from "@/lib/bandeja-utils";
 import MailboxThreadView from "@/app/components/bandeja/MailboxThreadView";
 import { docTypeLabel, fmtRelativeTime } from "@/lib/bandeja-utils";
 
 type MailboxInboxProps = {
   folder: "inbox" | "sent" | "archived" | "unread" | "all" | "action";
   searchQuery?: string;
+  onListChanged?: () => void;
 };
 
-export default function MailboxInbox({ folder, searchQuery = "" }: MailboxInboxProps) {
+export default function MailboxInbox({
+  folder,
+  searchQuery = "",
+  onListChanged,
+}: MailboxInboxProps) {
+  const pageSearch = usePageSearchOptional();
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
-  const [items, setItems] = useState<MailboxInboxItem[]>([]);
+  const [allItems, setAllItems] = useState<MailboxInboxItem[]>([]);
+  const [profiles, setProfiles] = useState<Record<string, Profile>>({});
+  const [searchHits, setSearchHits] = useState<Awaited<ReturnType<typeof fetchSearchHitsForQuery>>>([]);
   const [selected, setSelected] = useState<MailboxInboxItem | null>(null);
 
-  const load = useCallback(async () => {
+  /** Siempre el valor del topbar (aunque el bridge esté desregistrado). */
+  const liveSearch = (pageSearch?.value ?? searchQuery).trim();
+
+  const loadFolder = useCallback(async () => {
     setLoading(true);
     setMsg("");
     try {
-      const data = await fetchMailboxInbox(folder, searchQuery);
-      setItems(data);
+      const { items, profiles: profs } = await loadMailboxInboxForFolder(folder);
+      setAllItems(items);
+      setProfiles(profs);
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Error");
-      setItems([]);
+      setAllItems([]);
     } finally {
       setLoading(false);
     }
-  }, [folder, searchQuery]);
+  }, [folder]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    loadFolder();
+  }, [loadFolder]);
 
-  if (loading) return <p className="helper">Cargando bandeja…</p>;
+  useEffect(() => {
+    if (!liveSearch) {
+      setSearchHits([]);
+      return;
+    }
+    let cancelled = false;
+    const t = window.setTimeout(() => {
+      fetchSearchHitsForQuery(liveSearch)
+        .then((hits) => {
+          if (!cancelled) setSearchHits(hits);
+        })
+        .catch(() => {
+          if (!cancelled) setSearchHits([]);
+        });
+    }, 200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [liveSearch]);
+
+  const items = useMemo(
+    () => filterInboxItems(allItems, liveSearch, profiles, searchHits),
+    [allItems, liveSearch, profiles, searchHits]
+  );
+
+  useEffect(() => {
+    if (!selected) return;
+    const stillVisible = items.some(
+      (i) => i.id === selected.id && i.source === selected.source
+    );
+    if (!stillVisible) setSelected(null);
+  }, [items, selected]);
+
+  if (loading) {
+    return (
+      <>
+        <div className="bandeja-mail-list">
+          <p className="bandeja-loading">Cargando mensajes…</p>
+        </div>
+        <div className="bandeja-mail-thread bandeja-mail-thread--empty" />
+      </>
+    );
+  }
 
   return (
     <>
-      {msg && <div className="error" style={{ marginBottom: 12 }}>{msg}</div>}
-      <div className={`bandeja-split${selected ? " is-detail-open" : " is-list-only"}`}>
-        <div className="bandeja-list">
-          {items.length === 0 ? (
-            <div className="bandeja-empty">
-              {searchQuery.trim()
-                ? `Sin resultados para “${searchQuery.trim()}”.`
-                : "No hay mensajes en esta carpeta."}
-            </div>
-          ) : (
-            items.map((t) => (
-              <button
-                key={`${t.source}-${t.id}`}
-                type="button"
-                className={`bandeja-row${selected?.id === t.id && selected?.source === t.source ? " is-selected" : ""}${t.unread ? " is-unread" : ""}`}
-                onClick={() => setSelected(t)}
-              >
-                <span className="bandeja-row-type">{docTypeLabel(t.docType)}</span>
-                <div className="bandeja-row-main">
-                  <div className="bandeja-row-subject">{t.subject}</div>
-                  <div className="bandeja-row-meta">{t.peerLabel}</div>
-                  {t.preview && <div className="bandeja-row-preview">{t.preview}</div>}
-                </div>
-                {t.hasAttachment ? (
-                  <span className="bandeja-row-attach" title="Adjunto">
-                    📎
-                  </span>
-                ) : (
-                  <span className="bandeja-row-attach bandeja-row-attach--muted">💬</span>
-                )}
-                <div className="bandeja-row-aside">
+      <div
+        className={`bandeja-mail-list${selected ? " is-hidden-mobile" : ""}`}
+        role="list"
+        aria-label="Conversaciones"
+      >
+        {msg ? (
+          <div className="bandeja-mail-list-banner error" role="alert">
+            {msg}
+          </div>
+        ) : null}
+        {items.length === 0 ? (
+          <div className="bandeja-empty">
+            {liveSearch
+              ? `Sin resultados para “${liveSearch}”.`
+              : "No hay mensajes en esta carpeta."}
+          </div>
+        ) : (
+          items.map((t) => (
+            <button
+              key={`${t.source}-${t.id}`}
+              type="button"
+              role="listitem"
+              className={`bandeja-row${selected?.id === t.id && selected?.source === t.source ? " is-selected" : ""}${t.unread ? " is-unread" : ""}`}
+              onClick={() => setSelected(t)}
+            >
+              <span className="bandeja-row-type">{docTypeLabel(t.docType)}</span>
+              <div className="bandeja-row-main">
+                <div className="bandeja-row-top">
+                  <span className="bandeja-row-subject">{t.subject}</span>
                   <span className="bandeja-row-date">{fmtRelativeTime(t.lastMessageAt)}</span>
                 </div>
-              </button>
-            ))
-          )}
-        </div>
-        {selected && (
+                <div className="bandeja-row-meta">{t.peerLabel}</div>
+                {t.preview ? <div className="bandeja-row-preview">{t.preview}</div> : null}
+              </div>
+              <span
+                className={`bandeja-row-status${t.hasAttachment ? " has-attach" : ""}`}
+                aria-hidden
+              >
+                {t.unread ? <span className="bandeja-row-dot" title="No leído" /> : null}
+                {t.hasAttachment ? <span className="bandeja-row-attach">📎</span> : null}
+              </span>
+            </button>
+          ))
+        )}
+      </div>
+
+      <div
+        className={`bandeja-mail-thread${selected ? " is-open" : " bandeja-mail-thread--empty"}`}
+      >
+        {selected ? (
           <MailboxThreadView
             item={selected}
             onClose={() => setSelected(null)}
-            onUpdated={load}
+            onUpdated={() => {
+              loadFolder();
+              onListChanged?.();
+            }}
           />
+        ) : (
+          <div className="bandeja-thread-placeholder">
+            <p>Seleccioná una conversación para leerla</p>
+          </div>
         )}
       </div>
     </>

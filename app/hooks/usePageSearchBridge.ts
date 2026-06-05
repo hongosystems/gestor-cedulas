@@ -21,13 +21,14 @@ export function usePageSearchBridge(
 
   useEffect(() => {
     if (!enabled) {
-      ctxRef.current?.unbindPage();
+      // No desregistrar: otra vista (ej. BandejaView) puede ser dueña del bridge.
       return;
     }
     const c = ctxRef.current;
     if (!c) return;
 
     c.bindPage((v) => onChangeRef.current(v));
+    onChangeRef.current(c.value);
 
     return () => {
       c.unbindPage();

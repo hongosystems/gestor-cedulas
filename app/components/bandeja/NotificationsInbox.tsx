@@ -5,6 +5,7 @@ import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import NotificationBell from "@/app/components/NotificationBell";
 import { usePageSearchBridge } from "@/app/hooks/usePageSearchBridge";
+import { usePageSearchOptional } from "@/app/components/shell/PageSearchContext";
 import {
   getNotificationSearchText,
   textMatchesQuery,
@@ -235,7 +236,10 @@ export default function NotificationsInbox({
   const [items, setItems] = useState<Notif[]>([]);
   const [filter, setFilter] = useState<FilterType>(initialFilter);
   const [localSearch, setLocalSearch] = useState("");
-  const query = hideFilterBar ? searchQuery : searchQuery || localSearch;
+  const pageSearch = usePageSearchOptional();
+  const query = hideFilterBar
+    ? (pageSearch?.value ?? searchQuery)
+    : searchQuery || localSearch;
 
   usePageSearchBridge(localSearch, setLocalSearch, !hideFilterBar);
 

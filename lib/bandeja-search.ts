@@ -13,14 +13,16 @@ export type TransferSearchRow = {
   file_transfer_versions?: { storage_path: string }[] | null;
 };
 
-/** Colapsa espacios/saltos de línea para búsqueda consistente */
+/** Colapsa espacios/saltos de línea; minúsculas sin acentos (lopez = López). */
 export function normalizeSearchText(...parts: (string | null | undefined)[]): string {
   return parts
     .map((p) => (p == null ? "" : String(p).trim()))
     .filter((p) => p.length > 0)
     .join(" ")
     .replace(/\s+/g, " ")
-    .toLowerCase();
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 }
 
 export function textMatchesQuery(haystack: string, needle: string): boolean {

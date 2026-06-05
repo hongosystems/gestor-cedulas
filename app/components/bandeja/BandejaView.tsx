@@ -2,11 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import LayoutCard from "@/app/components/shell/LayoutCard";
-import {
-  useEffectivePageSearch,
-  usePageSearchBridge,
-} from "@/app/hooks/usePageSearchBridge";
+import { usePageSearchBridge } from "@/app/hooks/usePageSearchBridge";
+import { usePageSearchOptional } from "@/app/components/shell/PageSearchContext";
 import { useUserRoles } from "@/app/hooks/useUserRoles";
 import { supabase } from "@/lib/supabase";
 import {
@@ -14,11 +11,13 @@ import {
   canWorkflowCedulas,
   parseBandejaTab,
 } from "@/lib/bandeja-utils";
+import { bandejaTabToFolder, isMailboxTab } from "@/lib/bandeja-mail-folders";
+import { fetchMailboxFolderCounts } from "@/lib/bandeja-inbox-search";
 import NotificationsInbox from "@/app/components/bandeja/NotificationsInbox";
 import MailboxComposeForm from "@/app/components/bandeja/MailboxComposeForm";
 import MailboxInbox from "@/app/components/bandeja/MailboxInbox";
-import { fetchUnreadMailboxCount } from "@/lib/mailbox-client";
 import "@/app/components/bandeja/bandeja.css";
+import "@/app/components/bandeja/bandeja-layout.css";
 
 type BandejaViewProps = {
   initialTab?: BandejaTab;
@@ -43,9 +42,15 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
   const searchParams = useSearchParams();
   const { roles, loading: rolesLoading, hasSession } = useUserRoles();
   const [search, setSearch] = useState("");
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [mailboxUnread, setMailboxUnread] = useState(0);
-  const [receivedCount, setReceivedCount] = useState(0);
+  const [folderCounts, setFolderCounts] = useState({
+    received: 0,
+    sent: 0,
+    all: 0,
+    unread: 0,
+    archived: 0,
+    action: 0,
+  });
+  const [notificationUnread, setNotificationUnread] = useState(0);
 
   const workflow = canWorkflowCedulas(roles);
 
@@ -58,8 +63,23 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
     return workflow ? ("recibidos" as BandejaTab) : ("no-leidas" as BandejaTab);
   }, [searchParams, initialTab, workflow]);
 
+  const pageSearch = usePageSearchOptional();
   usePageSearchBridge(search, setSearch);
-  const effectiveSearch = useEffectivePageSearch(search);
+  const effectiveSearch = pageSearch?.value ?? search;
+
+  const mailboxFolder = workflow ? bandejaTabToFolder(activeTab) : null;
+  const isMailView = Boolean(workflow && mailboxFolder);
+  const isComposeView = activeTab === "nuevo";
+
+  const refreshCounts = useCallback(async () => {
+    if (!workflow || !hasSession) return;
+    try {
+      const counts = await fetchMailboxFolderCounts();
+      setFolderCounts(counts);
+    } catch {
+      /* mantener contadores previos */
+    }
+  }, [workflow, hasSession]);
 
   useEffect(() => {
     if (!hasSession && !rolesLoading) {
@@ -76,31 +96,24 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
       const uid = sess.session?.user.id;
       if (!uid) return;
 
-      const [{ count: unread }, mailboxUnreadCount, receivedRes] = await Promise.all([
-        supabase
-          .from("notifications")
-          .select("id", { count: "exact", head: true })
-          .eq("user_id", uid)
-          .eq("is_read", false),
-        fetchUnreadMailboxCount().catch(() => 0),
-        workflow
-          ? supabase
-              .from("file_transfers")
-              .select("id", { count: "exact", head: true })
-              .eq("recipient_user_id", uid)
-          : Promise.resolve({ count: 0, error: null }),
-      ]);
+      const { count: notifUnread } = await supabase
+        .from("notifications")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", uid)
+        .eq("is_read", false);
 
       if (!mounted) return;
-      setUnreadCount((unread ?? 0) + mailboxUnreadCount);
-      setMailboxUnread(mailboxUnreadCount);
-      setReceivedCount(receivedRes.count ?? 0);
+      setNotificationUnread(notifUnread ?? 0);
+
+      if (workflow) {
+        await refreshCounts();
+      }
     })();
 
     return () => {
       mounted = false;
     };
-  }, [hasSession, workflow]);
+  }, [hasSession, workflow, refreshCounts]);
 
   const setTab = useCallback(
     (tab: BandejaTab) => {
@@ -117,18 +130,53 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
     const items: NavItem[] = [];
     if (workflow) {
       items.push(
-        { id: "recibidos", label: "Recibidos", icon: "📥", badge: receivedCount, alert: mailboxUnread > 0 },
-        { id: "enviados", label: "Enviados", icon: "📤", requiresWorkflow: true },
-        { id: "archivados", label: "Archivados", icon: "📦", requiresWorkflow: true }
+        {
+          id: "recibidos",
+          label: "Recibidos",
+          icon: "📥",
+          badge: folderCounts.received,
+          alert: folderCounts.unread > 0,
+        },
+        {
+          id: "enviados",
+          label: "Enviados",
+          icon: "📤",
+          badge: folderCounts.sent,
+          requiresWorkflow: true,
+        },
+        {
+          id: "archivados",
+          label: "Archivados",
+          icon: "📦",
+          badge: folderCounts.archived,
+          requiresWorkflow: true,
+        }
       );
     }
     items.push(
-      { id: "no-leidas", label: "No leídas", icon: "🔴", badge: unreadCount, alert: unreadCount > 0 },
-      { id: "todas", label: "Todas", icon: "📁" },
-      { id: "accion", label: "Requieren acción", icon: "⚠", badge: unreadCount, alert: unreadCount > 0 }
+      {
+        id: "no-leidas",
+        label: "No leídas",
+        icon: "🔴",
+        badge: workflow ? folderCounts.unread : notificationUnread,
+        alert: workflow ? folderCounts.unread > 0 : notificationUnread > 0,
+      },
+      {
+        id: "todas",
+        label: "Todas",
+        icon: "📁",
+        badge: workflow ? folderCounts.all : undefined,
+      },
+      {
+        id: "accion",
+        label: "Requieren acción",
+        icon: "⚠",
+        badge: workflow ? folderCounts.action : notificationUnread,
+        alert: workflow ? folderCounts.action > 0 : notificationUnread > 0,
+      }
     );
     return items;
-  }, [workflow, unreadCount, receivedCount, mailboxUnread]);
+  }, [workflow, folderCounts, notificationUnread]);
 
   const visibleNavItems = navItems.filter((item) => !item.requiresWorkflow || workflow);
 
@@ -145,26 +193,28 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
         <MailboxComposeForm
           embedded
           onCancel={() => setTab(workflow ? "recibidos" : "no-leidas")}
-          onSuccess={() => setTab("enviados")}
+          onSuccess={() => {
+            refreshCounts();
+            setTab("enviados");
+          }}
         />
       );
     }
 
-    if (
-      activeTab === "recibidos" ||
-      activeTab === "enviados" ||
-      activeTab === "archivados"
-    ) {
-      if (!workflow) {
-        return <div className="bandeja-empty">Esta sección no está disponible para tu perfil.</div>;
-      }
-      const folder =
-        activeTab === "enviados"
-          ? "sent"
-          : activeTab === "archivados"
-            ? "archived"
-            : "inbox";
-      return <MailboxInbox folder={folder} searchQuery={effectiveSearch} />;
+    if (isMailView && mailboxFolder) {
+      return (
+        <MailboxInbox
+          folder={mailboxFolder}
+          searchQuery={effectiveSearch}
+          onListChanged={refreshCounts}
+        />
+      );
+    }
+
+    if (workflow && isMailboxTab(activeTab)) {
+      return (
+        <div className="bandeja-empty">No se pudo cargar esta carpeta de bandeja.</div>
+      );
     }
 
     return (
@@ -179,65 +229,57 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
 
   if (rolesLoading) {
     return (
-      <LayoutCard>
-        <p className="helper">Cargando bandeja…</p>
-      </LayoutCard>
+      <div className="bandeja-app">
+        <p className="bandeja-loading">Cargando bandeja…</p>
+      </div>
     );
   }
 
   return (
-    <LayoutCard className="bandeja-layout-card">
-      <div className="bandeja-shell">
-        <div className="bandeja-root">
-          <header className="bandeja-header">
-            <div className="bandeja-header-text">
-              <h1>Bandeja</h1>
-              <p className="bandeja-header-subtitle">
-                Mensajes, documentos, cédulas y oficios
-              </p>
-            </div>
-          </header>
+    <div className="bandeja-app">
+      <div
+        className={`bandeja-workspace${isMailView ? " is-mail" : ""}${isComposeView ? " is-compose" : ""}`}
+      >
+        <aside className="bandeja-sidebar" aria-label="Carpetas de bandeja">
+          {workflow && (
+            <button type="button" className="bandeja-compose-cta" onClick={() => setTab("nuevo")}>
+              <span className="bandeja-compose-cta-icon" aria-hidden>
+                ✏️
+              </span>
+              Redactar
+            </button>
+          )}
 
-          <div className="bandeja-body">
-            <nav className="bandeja-sidebar" aria-label="Filtros de bandeja">
-              {workflow && (
-                <button
-                  type="button"
-                  className="bandeja-compose-cta"
-                  onClick={() => setTab("nuevo")}
-                >
-                  ✏️ Redactar
-                </button>
-              )}
+          <nav className="bandeja-sidebar-nav">
+            {visibleNavItems.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`bandeja-nav-item${activeTab === item.id ? " is-active" : ""}`}
+                onClick={() => setTab(item.id)}
+              >
+                <span className="bandeja-nav-label">
+                  <span className="bandeja-nav-icon" aria-hidden>
+                    {item.icon}
+                  </span>
+                  {item.label}
+                </span>
+                {item.badge != null && item.badge > 0 ? (
+                  <span className={`bandeja-nav-badge${item.alert ? " is-alert" : ""}`}>
+                    {item.badge > 99 ? "99+" : item.badge}
+                  </span>
+                ) : null}
+              </button>
+            ))}
+          </nav>
+        </aside>
 
-              <div className="bandeja-nav-scroll">
-                {visibleNavItems.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className={`bandeja-nav-item${activeTab === item.id ? " is-active" : ""}`}
-                    onClick={() => setTab(item.id)}
-                  >
-                    <span className="bandeja-nav-label">
-                      <span className="bandeja-nav-icon" aria-hidden>
-                        {item.icon}
-                      </span>
-                      {item.label}
-                    </span>
-                    {item.badge != null && item.badge > 0 ? (
-                      <span className={`bandeja-nav-badge${item.alert ? " is-alert" : ""}`}>
-                        {item.badge}
-                      </span>
-                    ) : null}
-                  </button>
-                ))}
-              </div>
-            </nav>
-
-            <div className="bandeja-content">{renderPanel()}</div>
-          </div>
-        </div>
+        {isMailView || isComposeView ? (
+          renderPanel()
+        ) : (
+          <section className="bandeja-panel">{renderPanel()}</section>
+        )}
       </div>
-    </LayoutCard>
+    </div>
   );
 }

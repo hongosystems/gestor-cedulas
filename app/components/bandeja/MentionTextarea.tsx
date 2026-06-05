@@ -11,6 +11,7 @@ type MentionTextareaProps = {
   placeholder?: string;
   disabled?: boolean;
   rows?: number;
+  id?: string;
 };
 
 export default function MentionTextarea({
@@ -21,6 +22,7 @@ export default function MentionTextarea({
   placeholder,
   disabled,
   rows = 6,
+  id,
 }: MentionTextareaProps) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -73,6 +75,7 @@ export default function MentionTextarea({
     <div className="mention-textarea-wrap">
       <textarea
         ref={ref}
+        id={id}
         className={className}
         value={value}
         onChange={handleChange}

@@ -40,7 +40,12 @@ export type MailboxInboxItem = {
   hasAttachment: boolean;
   docType: string | null;
   expedienteRef: string | null;
+  expedienteCaratula?: string | null;
+  expedienteJuzgado?: string | null;
+  attachmentNames?: string[];
   peerLabel: string;
+  /** Para búsqueda por email del remitente/destinatario */
+  peerUserId?: string;
   documentStatus?: string | null;
 };
 

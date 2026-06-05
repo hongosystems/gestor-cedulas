@@ -405,17 +405,22 @@ export async function listMailboxInbox(
         .from("mailbox_threads")
         .select("*")
         .in("id", threadIds);
-      const profileMap = await getProfileMap(
-        svc,
-        [...new Set((msgs || []).flatMap((m) => [m.sender_id]))]
-      );
+      const msgIds = (msgs || []).map((m) => m.id).filter(Boolean);
+      const { data: allRecips } = msgIds.length
+        ? await svc.from("mailbox_recipients").select("user_id").in("message_id", msgIds)
+        : { data: [] as { user_id: string }[] };
+      const profileMap = await getProfileMap(svc, [
+        ...new Set([
+          ...(msgs || []).map((m) => m.sender_id),
+          ...(allRecips || []).map((r) => r.user_id),
+        ]),
+      ]);
       for (const t of threads || []) {
         const lastMsg = (msgs || []).find((m) => m.thread_id === t.id);
         const { data: atts } = await svc
           .from("mailbox_attachments")
-          .select("id")
-          .eq("message_id", lastMsg?.id || "")
-          .limit(1);
+          .select("id, file_name")
+          .eq("message_id", lastMsg?.id || "");
         const { data: recips } = await svc
           .from("mailbox_recipients")
           .select("user_id")
@@ -432,7 +437,11 @@ export async function listMailboxInbox(
           hasAttachment: Boolean(atts?.length),
           docType: t.doc_type,
           expedienteRef: t.expediente_ref,
+          expedienteCaratula: t.expediente_caratula,
+          expedienteJuzgado: t.expediente_juzgado,
+          attachmentNames: (atts || []).map((a) => a.file_name).filter(Boolean),
           peerLabel: displayName(profileMap.get(peerId)),
+          peerUserId: peerId,
           documentStatus: t.document_status,
         });
       }
@@ -474,9 +483,8 @@ export async function listMailboxInbox(
       const profileMap = await getProfileMap(svc, [senderId]);
       const { data: atts } = await svc
         .from("mailbox_attachments")
-        .select("id")
-        .eq("message_id", row.message_id)
-        .limit(1);
+        .select("id, file_name")
+        .eq("message_id", row.message_id);
 
       items.push({
         id: thread.id,
@@ -489,7 +497,11 @@ export async function listMailboxInbox(
         hasAttachment: Boolean(atts?.length),
         docType: thread.doc_type,
         expedienteRef: thread.expediente_ref,
+        expedienteCaratula: thread.expediente_caratula,
+        expedienteJuzgado: thread.expediente_juzgado,
+        attachmentNames: (atts || []).map((a) => a.file_name).filter(Boolean),
         peerLabel: displayName(profileMap.get(senderId)),
+        peerUserId: senderId,
         documentStatus: thread.document_status,
       });
       if (items.length >= limit) break;
@@ -523,7 +535,7 @@ async function listLegacyInbox(
   let query = svc
     .from("file_transfers")
     .select(
-      "id, sender_user_id, recipient_user_id, doc_type, title, message, expediente_ref, created_at, file_transfer_versions(storage_path)"
+      "id, sender_user_id, recipient_user_id, doc_type, title, message, expediente_ref, expediente_caratula, expediente_juzgado, created_at, file_transfer_versions(storage_path)"
     )
     .order("created_at", { ascending: false })
     .limit(50);
@@ -557,7 +569,13 @@ async function listLegacyInbox(
       hasAttachment: Boolean(versions?.length),
       docType: t.doc_type,
       expedienteRef: t.expediente_ref,
+      expedienteCaratula: t.expediente_caratula,
+      expedienteJuzgado: t.expediente_juzgado,
+      attachmentNames: (versions || [])
+        .map((v) => v.storage_path?.split("/").pop())
+        .filter(Boolean) as string[],
       peerLabel: displayName(profileMap.get(peerId)),
+      peerUserId: peerId,
     };
   });
 }

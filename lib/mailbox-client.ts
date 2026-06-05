@@ -26,6 +26,26 @@ export async function fetchMailboxThread(id: string, source?: string) {
   return json as import("@/lib/mailbox-types").MailboxThreadDetail;
 }
 
+export type MailboxSearchHit = {
+  type: string;
+  id: string;
+  threadId?: string;
+  subject?: string;
+  preview?: string;
+  fileName?: string;
+};
+
+export async function fetchMailboxSearch(q: string): Promise<MailboxSearchHit[]> {
+  const trimmed = q.trim();
+  if (!trimmed) return [];
+  const h = await authHeaders();
+  const params = new URLSearchParams({ q: trimmed });
+  const res = await fetch(`/api/mailbox/search?${params}`, { headers: h });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || "Error en búsqueda");
+  return (json.results || []) as MailboxSearchHit[];
+}
+
 export async function fetchUnreadMailboxCount() {
   const h = await authHeaders();
   const res = await fetch("/api/mailbox/unread-count", { headers: h });
