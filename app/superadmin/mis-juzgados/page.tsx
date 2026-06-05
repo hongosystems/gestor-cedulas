@@ -557,8 +557,11 @@ function NotasTextarea({
             statusText: errorObj.statusText,
             error: JSON.stringify(errorObj, Object.getOwnPropertyNames(errorObj))
           });
-        } else {
-          console.log(`[Notas] ✅ Notas guardadas exitosamente con cliente principal:`, data);
+        } else if (!data?.length) {
+          console.warn(`[Notas] UPDATE pjn_favoritos sin filas (id=${pjnId})`);
+          error = {
+            message: "No se actualizó ningún favorito PJN (ID inválido o sin permisos)",
+          } as NonNullable<typeof error>;
         }
         
         // Si falla porque la tabla no está en la BD principal, intentar con pjn-scraper
@@ -579,7 +582,8 @@ function NotasTextarea({
             errorMsg.includes("column") || 
             errorDetails.includes("column") ||
             errorMsg.includes("permission denied") ||
-            errorMsg.includes("new row violates row-level security");
+            errorMsg.includes("new row violates row-level security") ||
+            errorMsg.includes("No se actualizó");
           
           if (isTableOrColumnError) {
             const pjnUrl = process.env.NEXT_PUBLIC_PJN_SCRAPER_SUPABASE_URL;
@@ -595,17 +599,19 @@ function NotasTextarea({
                 .eq("id", pjnId)
                 .select();
               
-              if (pjnError) {
+              if (pjnError || !pjnData?.length) {
                 const pjnErrorObj = pjnError as any;
                 console.error(`[Notas] Error del cliente pjn-scraper:`, {
-                  message: pjnErrorObj.message,
-                  code: pjnErrorObj.code,
-                  details: pjnErrorObj.details,
-                  hint: pjnErrorObj.hint,
-                  status: pjnErrorObj.status,
-                  error: JSON.stringify(pjnErrorObj, Object.getOwnPropertyNames(pjnErrorObj))
+                  message: pjnErrorObj?.message,
+                  code: pjnErrorObj?.code,
+                  details: pjnErrorObj?.details,
+                  hint: pjnErrorObj?.hint,
+                  status: pjnErrorObj?.status,
+                  error: pjnError ? JSON.stringify(pjnErrorObj, Object.getOwnPropertyNames(pjnErrorObj)) : "sin filas",
                 });
-                const pjnErrorMsg = pjnErrorObj.message || String(pjnError) || "Error desconocido";
+                const pjnErrorMsg =
+                  pjnErrorObj?.message ||
+                  (pjnError ? String(pjnError) : "No se actualizó ningún favorito PJN");
                 setMsg(`Error al guardar notas: ${pjnErrorMsg}. Verifica que la columna notas exista en pjn_favoritos y que tengas permisos de escritura.`);
                 return;
               }
@@ -640,17 +646,27 @@ function NotasTextarea({
             setMsg(`Error al guardar notas: ${userMessage}`);
             return;
           }
+        } else {
+          console.log(`[Notas] ✅ Notas guardadas exitosamente con cliente principal:`, data);
         }
       } else {
         // Para expedientes locales
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from("expedientes")
           .update({ notas: valueToSave })
-          .eq("id", itemId);
+          .eq("id", itemId)
+          .select("id, notas");
         
         if (error) {
           console.error(`Error al guardar notas para expediente ${itemId}:`, error);
           setMsg(`Error al guardar notas: ${error.message}`);
+          return;
+        }
+        if (!data?.length) {
+          setMsg(
+            "Error al guardar notas: no se pudo actualizar el expediente (permisos insuficientes o registro inexistente)."
+          );
+          return;
         }
       }
       setNotasEditables(prev => ({ ...prev, [itemId]: valueToSave || "" }));
@@ -1432,20 +1448,40 @@ export default function MisJuzgadosPage() {
       try {
         console.log(`[Mis Juzgados] Intentando cargar favoritos de pjn_favoritos...`);
         
-        // Cargar solo columnas base (evita fallo si removido/movimientos/notas no existen en el proyecto)
-        let { data: favoritosData, error: favoritosErr } = await supabase
-          .from("pjn_favoritos")
-          .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones")
-          .order("updated_at", { ascending: false });
+        const pjnFavoritosSelectWithNotas =
+          "id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones, notas";
+        const pjnFavoritosSelectBase =
+          "id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones";
+
+        let favoritosData: any[] | null = null;
+        let favoritosErr: { message?: string } | null = null;
+        {
+          const loaded = await supabase
+            .from("pjn_favoritos")
+            .select(pjnFavoritosSelectWithNotas)
+            .order("updated_at", { ascending: false });
+          favoritosData = loaded.data;
+          favoritosErr = loaded.error;
+        }
+
+        if (favoritosErr?.message?.includes("notas")) {
+          console.warn(`[Mis Juzgados] Columna notas no disponible en pjn_favoritos, cargando sin notas`);
+          const retry = await supabase
+            .from("pjn_favoritos")
+            .select(pjnFavoritosSelectBase)
+            .order("updated_at", { ascending: false });
+          favoritosData = retry.data;
+          favoritosErr = retry.error;
+        }
 
         if (!favoritosErr && favoritosData) {
-          favoritosData = (favoritosData as PjnFavorito[]).map((f) => ({
+          favoritosData = favoritosData.map((f: any) => ({
             ...f,
             removido: false,
             estado: null,
-            notas: null,
             movimientos: null,
-          })) as typeof favoritosData;
+            notas: f.notas ?? null,
+          }));
         }
 
         // Fallback legacy: si falla la carga base, reintentar sin columnas opcionales
@@ -1455,92 +1491,53 @@ export default function MisJuzgadosPage() {
           // Intentar primero cargar sin las columnas problemáticas (incluyendo movimientos)
           const { data: favoritosData2, error: favoritosErr2 } = await supabase
             .from("pjn_favoritos")
-            .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones")
+            .select(`${pjnFavoritosSelectBase}, notas`)
             .order("updated_at", { ascending: false });
           
-          if (favoritosErr2) {
-            // Si también falla sin movimientos, intentar sin ninguna columna opcional
+          if (favoritosErr2?.message?.includes("notas")) {
+            const retry = await supabase
+              .from("pjn_favoritos")
+              .select(pjnFavoritosSelectBase)
+              .order("updated_at", { ascending: false });
+            if (!retry.error && retry.data) {
+              favoritosData = retry.data.map((f: any) => ({
+                ...f,
+                removido: false,
+                estado: null,
+                notas: null,
+                movimientos: null,
+              }));
+              favoritosErr = null;
+            } else {
+              favoritosErr = retry.error || favoritosErr2;
+            }
+          } else if (!favoritosErr2 && favoritosData2) {
+            favoritosData = favoritosData2.map((f: any) => ({
+              ...f,
+              removido: false,
+              estado: null,
+              movimientos: null,
+              notas: f.notas ?? null,
+            }));
+            favoritosErr = null;
+          } else {
             const { data: favoritosData3, error: favoritosErr3 } = await supabase
               .from("pjn_favoritos")
-              .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones")
+              .select(pjnFavoritosSelectBase)
               .order("updated_at", { ascending: false });
-            
+
             if (!favoritosErr3 && favoritosData3) {
               favoritosData = favoritosData3.map((f: any) => ({
                 ...f,
                 removido: false,
                 estado: null,
                 notas: null,
-                movimientos: null
+                movimientos: null,
               }));
               favoritosErr = null;
             } else {
               favoritosErr = favoritosErr3 || favoritosErr2;
             }
-          } else {
-            // Intentar cargar notas por separado solo si la columna notas existe
-            // Primero verificar si podemos leer notas de un favorito de prueba
-            let notasDisponibles = false;
-            if (favoritosData2 && favoritosData2.length > 0) {
-              try {
-                const { data: testNota, error: testErr } = await supabase
-                  .from("pjn_favoritos")
-                  .select("notas")
-                  .eq("id", favoritosData2[0].id)
-                  .single();
-                
-                if (!testErr && testNota !== null) {
-                  notasDisponibles = true;
-                }
-              } catch (e) {
-                // Si falla, asumir que la columna no existe
-                notasDisponibles = false;
-              }
-            }
-            
-            // Si las notas están disponibles, cargarlas para todos los favoritos
-            if (notasDisponibles) {
-              const favoritosConNotas = await Promise.all(
-                (favoritosData2 || []).map(async (f: any) => {
-                  try {
-                    const { data: notaData, error: notaErr } = await supabase
-                      .from("pjn_favoritos")
-                      .select("notas")
-                      .eq("id", f.id)
-                      .single();
-                    
-                    return {
-                      ...f,
-                      removido: false,
-                      estado: null,
-                      notas: (!notaErr && notaData) ? (notaData.notas || null) : null,
-                      movimientos: null // La columna movimientos no existe, establecer null
-                    };
-                  } catch (e) {
-                    return {
-                      ...f,
-                      removido: false,
-                      estado: null,
-                      notas: null,
-                      movimientos: null
-                    };
-                  }
-                })
-              );
-              
-              favoritosData = favoritosConNotas;
-            } else {
-              // Si las notas no están disponibles, establecer null para todos
-              favoritosData = favoritosData2?.map((f: any) => ({
-                ...f,
-                removido: false,
-                estado: null,
-                notas: null,
-                movimientos: null // La columna movimientos no existe, establecer null
-              })) || [];
-            }
-            
-            favoritosErr = null;
           }
         }
         
@@ -1575,21 +1572,33 @@ export default function MisJuzgadosPage() {
               // Intentar primero con movimientos
               let { data: favoritosData2, error: favoritosErr2 } = await pjnScraperSupabase
                 .from("pjn_favoritos")
-                .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones, movimientos")
+                .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones, notas, movimientos")
                 .order("updated_at", { ascending: false });
               
-              // Si falla por movimientos, intentar sin esa columna
-              if (favoritosErr2 && favoritosErr2.message?.includes("movimientos")) {
-                console.log(`[Mis Juzgados] Columna movimientos no encontrada en pjn-scraper, cargando sin ella...`);
+              // Si falla por movimientos o notas, intentar sin esas columnas
+              if (favoritosErr2 && (favoritosErr2.message?.includes("movimientos") || favoritosErr2.message?.includes("notas"))) {
+                console.log(`[Mis Juzgados] Columna opcional no encontrada en pjn-scraper, reintentando...`);
                 const { data: favoritosData3, error: favoritosErr3 } = await pjnScraperSupabase
                   .from("pjn_favoritos")
-                  .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones")
+                  .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones, notas")
                   .order("updated_at", { ascending: false });
                 
-                if (!favoritosErr3 && favoritosData3) {
+                if (favoritosErr3?.message?.includes("notas")) {
+                  const retry = await pjnScraperSupabase
+                    .from("pjn_favoritos")
+                    .select("id, jurisdiccion, numero, anio, caratula, juzgado, fecha_ultima_carga, observaciones")
+                    .order("updated_at", { ascending: false });
+                  if (!retry.error && retry.data) {
+                    favoritosData2 = retry.data.map((f: any) => ({ ...f, movimientos: null, notas: null }));
+                    favoritosErr2 = null;
+                  } else {
+                    favoritosErr2 = retry.error || favoritosErr3;
+                  }
+                } else if (!favoritosErr3 && favoritosData3) {
                   favoritosData2 = favoritosData3.map((f: any) => ({
                     ...f,
-                    movimientos: null
+                    movimientos: null,
+                    notas: f.notas ?? null,
                   }));
                   favoritosErr2 = null;
                 } else {
@@ -1601,7 +1610,10 @@ export default function MisJuzgadosPage() {
                 console.error(`[Mis Juzgados] ❌ Error también con cliente pjn-scraper:`, favoritosErr2);
                 setMsg(msg ? `${msg} Error al cargar favoritos PJN: ${favoritosErr2.message}` : `Error al cargar favoritos PJN: ${favoritosErr2.message}`);
               } else if (favoritosData2) {
-                pjnFavoritos = favoritosData2 as PjnFavorito[];
+                pjnFavoritos = favoritosData2.map((f: any) => ({
+                  ...f,
+                  notas: f.notas ?? null,
+                })) as PjnFavorito[];
                 console.log(`[Mis Juzgados] ✅ Favoritos cargados desde pjn-scraper DB: ${pjnFavoritos.length}`);
               }
             } else {
