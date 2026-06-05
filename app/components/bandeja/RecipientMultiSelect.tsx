@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { displayName, type Profile } from "@/lib/bandeja-utils";
 
@@ -45,16 +45,18 @@ function RecipientsDropdown({
   users,
   value,
   onPick,
+  listId,
 }: {
   available: Profile[];
   query: string;
   users: Profile[];
   value: string[];
   onPick: (id: string) => void;
+  listId: string;
 }) {
   if (available.length > 0) {
     return (
-      <ul className="bandeja-recipients-dropdown" role="listbox">
+      <ul className="bandeja-recipients-dropdown" role="listbox" id={listId}>
         {available.slice(0, 12).map((u) => (
           <li key={u.id} role="option">
             <button
@@ -101,13 +103,16 @@ export default function RecipientMultiSelect({
   disabled = false,
   excludeUserId,
   variant = "default",
-  usePortal = false,
+  usePortal: usePortalProp,
 }: RecipientMultiSelectProps) {
+  const usePortal = usePortalProp ?? variant === "field";
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [portalRect, setPortalRect] = useState<DropdownRect | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const inputWrapRef = useRef<HTMLDivElement>(null);
+  const portalRef = useRef<HTMLDivElement>(null);
+  const listId = useId();
 
   const available = useMemo(() => {
     const selected = new Set(value);
@@ -176,20 +181,33 @@ export default function RecipientMultiSelect({
       users={users}
       value={value}
       onPick={addRecipient}
+      listId={listId}
     />
   ) : null;
+
+  useEffect(() => {
+    if (!open || !usePortal) return;
+    function onDoc(e: MouseEvent) {
+      const t = e.target as Node;
+      if (wrapRef.current?.contains(t) || portalRef.current?.contains(t)) return;
+      setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open, usePortal]);
 
   const portalDropdown =
     usePortal && showDropdown && portalRect && typeof document !== "undefined"
       ? createPortal(
           <div
-            className="bandeja-recipients-portal"
+            ref={portalRef}
+            className="bandeja-compose-dropdown-portal"
             style={{
               position: "fixed",
               top: portalRect.top,
               left: portalRect.left,
               width: portalRect.width,
-              zIndex: 10000,
+              zIndex: 10050,
             }}
           >
             {dropdownContent}
@@ -202,19 +220,12 @@ export default function RecipientMultiSelect({
     <div
       className={`bandeja-recipients${variant === "field" ? " bandeja-recipients--field" : ""}${usePortal ? " bandeja-recipients--portal" : ""}`}
       ref={wrapRef}
-      onBlur={(e) => {
-        if (!wrapRef.current?.contains(e.relatedTarget as Node)) {
-          const portalEl = document.querySelector(".bandeja-recipients-portal");
-          if (portalEl?.contains(e.relatedTarget as Node)) return;
-          setOpen(false);
-        }
-      }}
     >
       <div className="bandeja-recipients-field-inner">
-        <div className="bandeja-recipients-chips" aria-label="Destinatarios seleccionados">
-          {selectedProfiles.length === 0 && variant !== "field" && (
-            <span className="bandeja-recipients-empty">Sin destinatarios</span>
-          )}
+        <div
+          className={`bandeja-recipients-chips${variant === "field" ? " bandeja-recipients-chips--field" : ""}`}
+          aria-label="Destinatarios seleccionados"
+        >
           {visibleChips.map((u) => (
             <span key={u.id} className="bandeja-recipient-chip">
               <span className="bandeja-recipient-chip-label">{displayName(u)}</span>
@@ -245,7 +256,11 @@ export default function RecipientMultiSelect({
               value={query}
               disabled={disabled}
               placeholder={
-                value.length ? "Agregar otro destinatario…" : "Buscar por nombre o email…"
+                value.length
+                  ? "Agregar otro destinatario…"
+                  : variant === "field"
+                    ? "Buscar destinatario por nombre o email…"
+                    : "Buscar por nombre o email…"
               }
               onChange={(e) => {
                 setQuery(e.target.value);
@@ -266,7 +281,8 @@ export default function RecipientMultiSelect({
                 }
               }}
               aria-autocomplete="list"
-              aria-expanded={showDropdown}
+              aria-expanded={!!showDropdown}
+              aria-controls={showDropdown ? listId : undefined}
             />
             {showDropdown && !usePortal && dropdownContent}
           </div>

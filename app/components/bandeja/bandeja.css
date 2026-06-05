@@ -521,6 +521,11 @@
   overflow: visible;
 }
 
+.bandeja-compose-view .bandeja-exp-autocomplete:focus-within,
+.bandeja-compose-view .bandeja-composer-row:has(.bandeja-exp-autocomplete:focus-within) {
+  z-index: auto;
+}
+
 .bandeja-exp-input-wrap {
   position: relative;
   display: flex;

@@ -58,10 +58,17 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
     const action = searchParams.get("action");
     if (action === "nuevo") return "nuevo" as BandejaTab;
     const tabParam = searchParams.get("tab");
-    if (tabParam) return parseBandejaTab(tabParam);
-    if (initialTab) return initialTab;
-    return workflow ? ("recibidos" as BandejaTab) : ("no-leidas" as BandejaTab);
+    let tab = tabParam ? parseBandejaTab(tabParam) : initialTab ?? (workflow ? "recibidos" : "no-leidas");
+    if (tab === "archivados") tab = "recibidos";
+    return tab as BandejaTab;
   }, [searchParams, initialTab, workflow]);
+
+  useEffect(() => {
+    const tabParam = searchParams.get("tab");
+    if (tabParam === "archivados" && workflow) {
+      router.replace("/app/bandeja?tab=recibidos");
+    }
+  }, [searchParams, workflow, router]);
 
   const pageSearch = usePageSearchOptional();
   usePageSearchBridge(search, setSearch);
@@ -143,13 +150,6 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
           icon: "📤",
           badge: folderCounts.sent,
           requiresWorkflow: true,
-        },
-        {
-          id: "archivados",
-          label: "Archivados",
-          icon: "📦",
-          badge: folderCounts.archived,
-          requiresWorkflow: true,
         }
       );
     }
@@ -190,14 +190,16 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
         );
       }
       return (
-        <MailboxComposeForm
-          embedded
-          onCancel={() => setTab(workflow ? "recibidos" : "no-leidas")}
-          onSuccess={() => {
-            refreshCounts();
-            setTab("enviados");
-          }}
-        />
+        <section className="bandeja-compose-view" aria-label="Redactar mensaje">
+          <MailboxComposeForm
+            embedded
+            onCancel={() => setTab(workflow ? "recibidos" : "no-leidas")}
+            onSuccess={() => {
+              refreshCounts();
+              setTab("enviados");
+            }}
+          />
+        </section>
       );
     }
 
@@ -242,7 +244,11 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
       >
         <aside className="bandeja-sidebar" aria-label="Carpetas de bandeja">
           {workflow && (
-            <button type="button" className="bandeja-compose-cta" onClick={() => setTab("nuevo")}>
+            <button
+              type="button"
+              className={`bandeja-compose-cta${activeTab === "nuevo" ? " is-active" : ""}`}
+              onClick={() => setTab("nuevo")}
+            >
               <span className="bandeja-compose-cta-icon" aria-hidden>
                 ✏️
               </span>
@@ -274,7 +280,9 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
           </nav>
         </aside>
 
-        {isMailView || isComposeView ? (
+        {isComposeView ? (
+          renderPanel()
+        ) : isMailView ? (
           renderPanel()
         ) : (
           <section className="bandeja-panel">{renderPanel()}</section>

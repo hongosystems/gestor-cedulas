@@ -12,7 +12,6 @@ export type MailboxFolder =
 const MAILBOX_TABS: BandejaTab[] = [
   "recibidos",
   "enviados",
-  "archivados",
   "todas",
   "no-leidas",
   "accion",

@@ -134,10 +134,9 @@ export type MailboxFolderCounts = {
 };
 
 export async function fetchMailboxFolderCounts(): Promise<MailboxFolderCounts> {
-  const [inbox, sent, archived, unread] = await Promise.all([
+  const [inbox, sent, unread] = await Promise.all([
     fetchMailboxInbox("inbox", ""),
     fetchMailboxInbox("sent", ""),
-    fetchMailboxInbox("archived", ""),
     fetchMailboxInbox("unread", ""),
   ]);
   const all = dedupeInboxItems([...inbox, ...sent]);
@@ -146,7 +145,7 @@ export async function fetchMailboxFolderCounts(): Promise<MailboxFolderCounts> {
     sent: sent.length,
     all: all.length,
     unread: unread.length,
-    archived: archived.length,
+    archived: 0,
     action: filterActionItems(inbox).length,
   };
 }
