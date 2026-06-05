@@ -6,7 +6,6 @@ import { supabase } from "@/lib/supabase";
 import { pjnScraperSupabase } from "@/lib/pjn-scraper-supabase";
 import jsPDF from "jspdf";
 import SuperadminDashboardPanels from "@/app/components/dashboard/SuperadminDashboardPanels";
-import MailboxMetricsPanel from "@/app/components/bandeja/MailboxMetricsPanel";
 import type { BarChartItem } from "@/app/components/ui/CssBarChart";
 import type { OperationalMetrics } from "@/app/components/dashboard/SuperadminDashboardPanels";
 
@@ -3019,8 +3018,6 @@ export default function SuperAdminPage() {
           antiguedadBuckets={antiguedadBuckets}
           alertas={dashboardAlertas}
         />
-
-        <MailboxMetricsPanel />
 
         {/* Métricas Generales (detalle existente) */}
         <section style={{ marginBottom: 32 }}>
