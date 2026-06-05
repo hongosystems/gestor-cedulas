@@ -1,4 +1,4 @@
-import { fetchMailboxInbox, fetchMailboxSearch, type MailboxSearchHit } from "@/lib/mailbox-client";
+import { fetchMailboxInbox, fetchMailboxSearch, fetchUnreadMailboxCount, type MailboxSearchHit } from "@/lib/mailbox-client";
 import type { MailboxInboxItem } from "@/lib/mailbox-types";
 import {
   dedupeInboxItems,
@@ -134,19 +134,20 @@ export type MailboxFolderCounts = {
 };
 
 export async function fetchMailboxFolderCounts(): Promise<MailboxFolderCounts> {
-  const [inbox, sent, unread] = await Promise.all([
+  const [inbox, sent, unreadCount] = await Promise.all([
     fetchMailboxInbox("inbox", ""),
     fetchMailboxInbox("sent", ""),
-    fetchMailboxInbox("unread", ""),
+    fetchUnreadMailboxCount(),
   ]);
+  const received = dedupeInboxItems(inbox);
   const all = dedupeInboxItems([...inbox, ...sent]);
   return {
-    received: inbox.length,
+    received: received.length,
     sent: sent.length,
     all: all.length,
-    unread: unread.length,
+    unread: unreadCount,
     archived: 0,
-    action: filterActionItems(inbox).length,
+    action: filterActionItems(received).length,
   };
 }
 

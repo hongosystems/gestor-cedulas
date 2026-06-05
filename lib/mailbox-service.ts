@@ -457,7 +457,7 @@ export async function listMailboxInbox(
     if (opts.folder === "inbox") q = q.eq("folder", "inbox").is("archived_at", null);
     if (opts.folder === "archived") q = q.not("archived_at", "is", null);
     if (opts.folder === "unread" || opts.folder === "action") {
-      q = q.is("read_at", null).is("archived_at", null);
+      q = q.eq("folder", "inbox").is("read_at", null).is("archived_at", null);
     }
 
     const { data: rows } = await q;
@@ -508,7 +508,8 @@ export async function listMailboxInbox(
     }
   }
 
-  const legacy = await listLegacyInbox(userId, opts.folder, opts.q);
+  const migratedLegacyIds = await getMigratedLegacyTransferIds(svc);
+  const legacy = await listLegacyInbox(userId, opts.folder, opts.q, migratedLegacyIds);
   const merged = [...items, ...legacy]
     .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime())
     .slice(0, limit);
@@ -526,11 +527,29 @@ export async function listMailboxInbox(
   return merged;
 }
 
+async function getMigratedLegacyTransferIds(
+  svc: ReturnType<typeof supabaseService>
+): Promise<Set<string>> {
+  const { data } = await svc
+    .from("mailbox_threads")
+    .select("legacy_transfer_id")
+    .not("legacy_transfer_id", "is", null);
+  return new Set(
+    (data || []).map((row) => row.legacy_transfer_id as string).filter(Boolean)
+  );
+}
+
 async function listLegacyInbox(
   userId: string,
   folder: string,
-  q?: string
+  q?: string,
+  excludeTransferIds: Set<string> = new Set()
 ): Promise<MailboxInboxItem[]> {
+  // Legacy no tiene read_at: solo inbox/sent/all. Evita inflar no-leídas/requieren-acción.
+  if (folder === "unread" || folder === "action" || folder === "archived") {
+    return [];
+  }
+
   const svc = supabaseService();
   let query = svc
     .from("file_transfers")
@@ -554,7 +573,9 @@ async function listLegacyInbox(
     [...new Set((data || []).flatMap((t) => [t.sender_user_id, t.recipient_user_id]))]
   );
 
-  return (data || []).map((t) => {
+  return (data || [])
+    .filter((t) => !excludeTransferIds.has(t.id))
+    .map((t) => {
     const isSent = t.sender_user_id === userId;
     const peerId = isSent ? t.recipient_user_id : t.sender_user_id;
     const versions = t.file_transfer_versions as { storage_path: string }[] | null;
@@ -941,14 +962,14 @@ export async function archiveRecipient(userId: string, recipientId: string, arch
 
 export async function countUnreadMailbox(userId: string) {
   const svc = supabaseService();
-  const { count } = await svc
+  const { data } = await svc
     .from("mailbox_recipients")
-    .select("id", { count: "exact", head: true })
+    .select("thread_id")
     .eq("user_id", userId)
     .is("read_at", null)
     .is("archived_at", null)
     .eq("folder", "inbox");
-  return count ?? 0;
+  return new Set((data || []).map((row) => row.thread_id).filter(Boolean)).size;
 }
 
 export async function searchMailbox(userId: string, q: string, limit = 30) {
