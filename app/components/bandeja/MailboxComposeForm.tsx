@@ -7,6 +7,7 @@ import ExpedienteAutocomplete, { type ExpedienteOption } from "@/app/components/
 import RecipientMultiSelect, {
   formatRecipientsSummary,
 } from "@/app/components/bandeja/RecipientMultiSelect";
+import { fetchBandejaUsers } from "@/lib/bandeja-users";
 import MentionTextarea from "@/app/components/bandeja/MentionTextarea";
 
 type MailboxComposeFormProps = {
@@ -52,18 +53,12 @@ export default function MailboxComposeForm({
       }
 
       const uid = sess.session.user.id;
-      const [{ data: profiles, error }, { data: me }] = await Promise.all([
-        supabase.from("profiles").select("id, full_name, email").order("full_name", { ascending: true }),
+      const [profiles, { data: me }] = await Promise.all([
+        fetchBandejaUsers(),
         supabase.from("profiles").select("full_name, email").eq("id", uid).maybeSingle(),
       ]);
 
-      if (error) {
-        setMsg(error.message);
-        setLoading(false);
-        return;
-      }
-
-      setUsers((profiles ?? []) as Profile[]);
+      setUsers(profiles);
       setSenderName(displayName(me as Profile));
       setLoading(false);
     })();

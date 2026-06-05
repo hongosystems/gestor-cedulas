@@ -11,6 +11,8 @@ type RecipientMultiSelectProps = {
   onChange: (ids: string[]) => void;
   disabled?: boolean;
   excludeUserId?: string;
+  /** Campo compacto tipo Gmail (chips + input en una sola caja) */
+  variant?: "default" | "field";
 };
 
 export function formatRecipientsSummary(
@@ -34,6 +36,7 @@ export default function RecipientMultiSelect({
   onChange,
   disabled = false,
   excludeUserId,
+  variant = "default",
 }: RecipientMultiSelectProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -73,7 +76,7 @@ export default function RecipientMultiSelect({
 
   return (
     <div
-      className="bandeja-recipients"
+      className={`bandeja-recipients${variant === "field" ? " bandeja-recipients--field" : ""}`}
       ref={wrapRef}
       onBlur={(e) => {
         if (!wrapRef.current?.contains(e.relatedTarget as Node)) {
@@ -81,77 +84,102 @@ export default function RecipientMultiSelect({
         }
       }}
     >
-      <div className="bandeja-recipients-chips" aria-label="Destinatarios seleccionados">
-        {selectedProfiles.length === 0 && (
-          <span className="bandeja-recipients-empty">Sin destinatarios</span>
-        )}
-        {visibleChips.map((u) => (
-          <span key={u.id} className="bandeja-recipient-chip">
-            <span className="bandeja-recipient-chip-label">{displayName(u)}</span>
-            <button
-              type="button"
-              className="bandeja-recipient-chip-remove"
-              aria-label={`Quitar ${displayName(u)}`}
-              disabled={disabled}
-              onClick={() => removeRecipient(u.id)}
+      <div className="bandeja-recipients-field-inner">
+        <div className="bandeja-recipients-chips" aria-label="Destinatarios seleccionados">
+          {selectedProfiles.length === 0 && variant !== "field" && (
+            <span className="bandeja-recipients-empty">Sin destinatarios</span>
+          )}
+          {visibleChips.map((u) => (
+            <span key={u.id} className="bandeja-recipient-chip">
+              <span className="bandeja-recipient-chip-label">{displayName(u)}</span>
+              <button
+                type="button"
+                className="bandeja-recipient-chip-remove"
+                aria-label={`Quitar ${displayName(u)}`}
+                disabled={disabled}
+                onClick={() => removeRecipient(u.id)}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+          {hiddenCount > 0 && (
+            <span
+              className="bandeja-recipient-chip bandeja-recipient-chip--more"
+              title={formatRecipientsSummary(value, users, 99)}
             >
-              ×
-            </button>
-          </span>
-        ))}
-        {hiddenCount > 0 && (
-          <span className="bandeja-recipient-chip bandeja-recipient-chip--more" title={formatRecipientsSummary(value, users, 99)}>
-            +{hiddenCount} más
-          </span>
-        )}
-      </div>
+              +{hiddenCount} más
+            </span>
+          )}
 
-      <div className="bandeja-recipients-input-wrap">
-        <input
-          className="input bandeja-recipients-search"
-          type="text"
-          value={query}
-          disabled={disabled}
-          placeholder={value.length ? "Agregar otro destinatario…" : "Buscar por nombre o email…"}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setOpen(true);
-          }}
-          onFocus={() => setOpen(true)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              setOpen(false);
-              setQuery("");
-            }
-            if (e.key === "Backspace" && !query && value.length > 0) {
-              onChange(value.slice(0, -1));
-            }
-          }}
-          aria-autocomplete="list"
-          aria-expanded={open && available.length > 0}
-        />
-        {open && query.trim().length > 0 && available.length > 0 && (
-          <ul className="bandeja-recipients-dropdown" role="listbox">
-            {available.slice(0, 12).map((u) => (
-              <li key={u.id} role="option">
-                <button
-                  type="button"
-                  className="bandeja-recipients-option"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => addRecipient(u.id)}
-                >
-                  <span className="bandeja-recipients-option-name">{displayName(u)}</span>
-                  {u.email && <span className="bandeja-recipients-option-email">{u.email}</span>}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-        {open && query.trim().length > 0 && available.length === 0 && (
-          <div className="bandeja-recipients-dropdown bandeja-recipients-dropdown--empty">
-            Sin usuarios para “{query.trim()}”
+          <div className="bandeja-recipients-input-wrap">
+            <input
+              className="input bandeja-recipients-search"
+              type="text"
+              value={query}
+              disabled={disabled}
+              placeholder={
+                value.length
+                  ? "Agregar otro destinatario…"
+                  : "Buscar por nombre o email…"
+              }
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setOpen(true);
+              }}
+              onFocus={() => setOpen(true)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  setOpen(false);
+                  setQuery("");
+                }
+                if (e.key === "Backspace" && !query && value.length > 0) {
+                  onChange(value.slice(0, -1));
+                }
+                if (e.key === "Enter" && open && available.length === 1) {
+                  e.preventDefault();
+                  addRecipient(available[0].id);
+                }
+              }}
+              aria-autocomplete="list"
+              aria-expanded={open && available.length > 0}
+            />
+            {open && available.length > 0 && (
+              <ul className="bandeja-recipients-dropdown" role="listbox">
+                {available.slice(0, 12).map((u) => (
+                  <li key={u.id} role="option">
+                    <button
+                      type="button"
+                      className="bandeja-recipients-option"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => addRecipient(u.id)}
+                    >
+                      <span className="bandeja-recipients-option-name">{displayName(u)}</span>
+                      {u.email && (
+                        <span className="bandeja-recipients-option-email">{u.email}</span>
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {open && query.trim().length > 0 && available.length === 0 && (
+              <div className="bandeja-recipients-dropdown bandeja-recipients-dropdown--empty">
+                Sin usuarios para “{query.trim()}”
+              </div>
+            )}
+            {open && query.trim().length === 0 && available.length === 0 && users.length > 0 && (
+              <div className="bandeja-recipients-dropdown bandeja-recipients-dropdown--empty">
+                Todos los usuarios visibles ya están seleccionados
+              </div>
+            )}
+            {open && users.length === 0 && (
+              <div className="bandeja-recipients-dropdown bandeja-recipients-dropdown--empty">
+                Cargando usuarios…
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

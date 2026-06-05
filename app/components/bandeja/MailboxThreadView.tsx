@@ -7,6 +7,7 @@ import type { MailboxInboxItem } from "@/lib/mailbox-types";
 import { fmtDateShort, fmtRelativeTime } from "@/lib/bandeja-utils";
 import RecipientMultiSelect from "@/app/components/bandeja/RecipientMultiSelect";
 import MentionTextarea from "@/app/components/bandeja/MentionTextarea";
+import { fetchBandejaUsers } from "@/lib/bandeja-users";
 
 type MailboxThreadViewProps = {
   item: MailboxInboxItem;
@@ -45,11 +46,7 @@ export default function MailboxThreadView({ item, onClose, onUpdated }: MailboxT
   }, [loadThread]);
 
   useEffect(() => {
-    supabase
-      .from("profiles")
-      .select("id, full_name, email")
-      .order("full_name")
-      .then(({ data }) => setUsers((data ?? []) as Profile[]));
+    fetchBandejaUsers().then(setUsers).catch(() => setUsers([]));
   }, []);
 
   const lastMsg = detail?.messages[detail.messages.length - 1];
@@ -200,7 +197,7 @@ export default function MailboxThreadView({ item, onClose, onUpdated }: MailboxT
       {loading ? (
         <p className="helper bandeja-detail-loading">Cargando hilo…</p>
       ) : (
-        <div className="bandeja-detail-thread-body">
+        <>
           <div className="bandeja-thread-messages">
             {detail?.messages.map((m) => {
               const bodyText = (m.body || "").trim();
@@ -234,51 +231,69 @@ export default function MailboxThreadView({ item, onClose, onUpdated }: MailboxT
             })}
           </div>
 
-          {forwardOpen && (
-            <div className="bandeja-forward-panel">
-              <label className="label">Reenviar a (nuevo hilo; esta conversación se conserva)</label>
-              <RecipientMultiSelect
-                users={users}
-                value={forwardTo}
-                onChange={setForwardTo}
-                disabled={sending}
-              />
-              <textarea
-                className="bandeja-message bandeja-message--compact"
-                value={forwardBody}
-                onChange={(e) => setForwardBody(e.target.value)}
-                placeholder="Comentario al reenviar (opcional)"
-                rows={2}
-              />
-              <button
-                type="button"
-                className="btn primary"
-                disabled={sending}
-                onClick={sendForward}
-              >
-                {sending ? "Enviando…" : "Enviar reenvío"}
-              </button>
-            </div>
-          )}
-
-          <div className="bandeja-reply-box">
-            <label className="label">Responder en este hilo</label>
-            <MentionTextarea
-              className="bandeja-message bandeja-message--compact"
-              value={reply}
-              onChange={setReply}
-              users={users}
-              placeholder="Escribí tu respuesta… @ para mencionar"
-              disabled={sending}
-              rows={4}
-            />
-            <div className="bandeja-reply-actions">
-              <button type="button" className="btn primary" disabled={sending} onClick={sendReply}>
-                {sending ? "Enviando…" : "Enviar respuesta"}
-              </button>
-            </div>
+          <div className="bandeja-thread-footer">
+            {forwardOpen ? (
+              <div className="bandeja-forward-panel">
+                <label className="label">Reenviar a (nuevo hilo; esta conversación se conserva)</label>
+                <RecipientMultiSelect
+                  users={users}
+                  value={forwardTo}
+                  onChange={setForwardTo}
+                  disabled={sending}
+                  variant="field"
+                />
+                <textarea
+                  className="bandeja-message bandeja-message--compact"
+                  value={forwardBody}
+                  onChange={(e) => setForwardBody(e.target.value)}
+                  placeholder="Comentario al reenviar (opcional)"
+                  rows={2}
+                />
+                <div className="bandeja-thread-footer-actions">
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={sending}
+                    onClick={() => setForwardOpen(false)}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    className="btn primary"
+                    disabled={sending}
+                    onClick={sendForward}
+                  >
+                    {sending ? "Enviando…" : "Enviar reenvío"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="bandeja-reply-box">
+                <label className="label">Responder en este hilo</label>
+                <MentionTextarea
+                  className="bandeja-message bandeja-message--compact"
+                  value={reply}
+                  onChange={setReply}
+                  users={users}
+                  placeholder="Escribí tu respuesta… @ para mencionar"
+                  disabled={sending}
+                  rows={3}
+                />
+                <div className="bandeja-thread-footer-actions">
+                  <button
+                    type="button"
+                    className="btn primary"
+                    disabled={sending}
+                    onClick={sendReply}
+                  >
+                    {sending ? "Enviando…" : "Enviar respuesta"}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
-        </div>
+        </>
       )}
 
       {msg && (
