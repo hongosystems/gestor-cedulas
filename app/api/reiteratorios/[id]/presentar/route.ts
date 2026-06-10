@@ -7,6 +7,7 @@ import {
   pjnLocalBaseUrl,
   type PjnCargarPayload,
 } from "@/lib/pjn-payload";
+import { REITERATORIO_PRESENTADO_PREFIX } from "@/lib/reiteratorios";
 
 export const runtime = "nodejs";
 
@@ -259,7 +260,7 @@ export async function POST(
     );
   }
 
-  const observaciones = `Reiteratorio presentado: ${new Date().toISOString()}`;
+  const observaciones = `${REITERATORIO_PRESENTADO_PREFIX} ${new Date().toISOString()}`;
   const { error: updateErr } = await svc
     .from("cedulas")
     .update({ observaciones_pjn: observaciones })

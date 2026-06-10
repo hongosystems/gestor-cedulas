@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { usePageSearchBridge } from "@/app/hooks/usePageSearchBridge";
+import { isReiteratorioPresentado, REITERATORIO_PRESENTADO_PREFIX } from "@/lib/reiteratorios";
 
 type ReiteratorioRow = {
   id: string;
@@ -12,6 +13,8 @@ type ReiteratorioRow = {
   caratula: string | null;
   juzgado: string | null;
   pjn_cargado_at: string;
+  observaciones_pjn: string | null;
+  estado_ocr: string | null;
 };
 
 function diasDesde(iso: string): number {
@@ -51,8 +54,31 @@ export default function ReiteratoriosPage() {
   const [msgOk, setMsgOk] = useState(false);
   const [enProcesoId, setEnProcesoId] = useState<string | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const [excluyendoId, setExcluyendoId] = useState<string | null>(null);
+  const [reintentandoOcrId, setReintentandoOcrId] = useState<string | null>(null);
   const [buscarTexto, setBuscarTexto] = useState("");
   usePageSearchBridge(buscarTexto, setBuscarTexto);
+
+  const cargarFilas = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("cedulas")
+      .select(
+        "id, ocr_exp_nro, ocr_caratula, ocr_destinatario, caratula, juzgado, pjn_cargado_at, observaciones_pjn, estado_ocr, reiteratorio_excluido_at"
+      )
+      .eq("tipo_documento", "OFICIO")
+      .in("estado_ocr", ["listo", "procesando", "error"])
+      .not("pjn_cargado_at", "is", null)
+      .is("reiteratorio_excluido_at", null)
+      .order("pjn_cargado_at", { ascending: true });
+
+    if (error) {
+      setMsg(error.message);
+      setMsgOk(false);
+      return;
+    }
+
+    setRows((data ?? []) as ReiteratorioRow[]);
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -78,25 +104,10 @@ export default function ReiteratoriosPage() {
         return;
       }
 
-      const { data, error } = await supabase
-        .from("cedulas")
-        .select(
-          "id, ocr_exp_nro, ocr_caratula, ocr_destinatario, caratula, juzgado, pjn_cargado_at"
-        )
-        .eq("tipo_documento", "OFICIO")
-        .eq("estado_ocr", "listo")
-        .not("pjn_cargado_at", "is", null)
-        .order("pjn_cargado_at", { ascending: true });
-
-      if (error) {
-        setMsg(error.message);
-        setMsgOk(false);
-      } else {
-        setRows((data ?? []) as ReiteratorioRow[]);
-      }
+      await cargarFilas();
       setLoading(false);
     })();
-  }, []);
+  }, [cargarFilas]);
 
   const filas = useMemo(() => {
     let list = rows
@@ -111,7 +122,12 @@ export default function ReiteratoriosPage() {
         return hay.includes(q);
       });
     }
-    return list.sort((a, b) => b.dias - a.dias);
+    return list.sort((a, b) => {
+      const aPresentado = isReiteratorioPresentado(a.observaciones_pjn);
+      const bPresentado = isReiteratorioPresentado(b.observaciones_pjn);
+      if (aPresentado !== bPresentado) return aPresentado ? 1 : -1;
+      return b.dias - a.dias;
+    });
   }, [rows, buscarTexto]);
 
   async function presentar(id: string) {
@@ -140,7 +156,12 @@ export default function ReiteratoriosPage() {
         return;
       }
 
-      setRows((prev) => prev.filter((r) => r.id !== id));
+      const observaciones = `${REITERATORIO_PRESENTADO_PREFIX} ${new Date().toISOString()}`;
+      setRows((prev) =>
+        prev.map((r) =>
+          r.id === id ? { ...r, observaciones_pjn: observaciones } : r
+        )
+      );
       setMsg("Reiteratorio presentado correctamente.");
       setMsgOk(true);
     } catch (e: unknown) {
@@ -196,6 +217,99 @@ export default function ReiteratoriosPage() {
     }
   }
 
+  async function excluir(id: string, expediente: string) {
+    const label = expediente.trim() || id;
+    if (
+      !window.confirm(
+        `¿Quitar del listado el oficio ${label}? No se elimina el registro, solo deja de aparecer acá.`
+      )
+    ) {
+      return;
+    }
+
+    setMsg("");
+    setMsgOk(false);
+    setExcluyendoId(id);
+    try {
+      const token = await getFreshAccessToken();
+      if (!token) {
+        setMsg("Sesión expirada");
+        return;
+      }
+
+      const res = await fetch(`/api/reiteratorios/${id}/excluir`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+      };
+
+      if (!res.ok || data.ok !== true) {
+        setMsg(data.error || "No se pudo quitar del listado");
+        setMsgOk(false);
+        return;
+      }
+
+      setRows((prev) => prev.filter((r) => r.id !== id));
+      setMsg("Oficio quitado del listado.");
+      setMsgOk(true);
+    } catch (e: unknown) {
+      const m = e instanceof Error ? e.message : "Error inesperado";
+      setMsg(m);
+      setMsgOk(false);
+    } finally {
+      setExcluyendoId(null);
+    }
+  }
+
+  async function reintentarOcr(id: string) {
+    setMsg("");
+    setMsgOk(false);
+    setReintentandoOcrId(id);
+    try {
+      const token = await getFreshAccessToken();
+      if (!token) {
+        setMsg("Sesión expirada");
+        return;
+      }
+
+      const res = await fetch(`/api/reiteratorios/${id}/reintentar-ocr`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+      };
+
+      if (!res.ok || data.ok !== true) {
+        setMsg(data.error || "No se pudo reintentar el OCR");
+        setMsgOk(false);
+        return;
+      }
+
+      setRows((prev) =>
+        prev.map((r) =>
+          r.id === id ? { ...r, estado_ocr: "procesando", ocr_destinatario: null } : r
+        )
+      );
+      setMsg("OCR en proceso. La fila se actualizará cuando termine.");
+      setMsgOk(true);
+
+      window.setTimeout(() => {
+        void cargarFilas();
+      }, 8000);
+    } catch (e: unknown) {
+      const m = e instanceof Error ? e.message : "Error inesperado";
+      setMsg(m);
+      setMsgOk(false);
+    } finally {
+      setReintentandoOcrId(null);
+    }
+  }
+
   if (loading) {
     return (
       <main className="container">
@@ -239,7 +353,7 @@ export default function ReiteratoriosPage() {
         <div className="page">
           {msg && <div className={msgOk ? "success" : "error"}>{msg}</div>}
 
-          <div className="tableWrap data-table-shell" style={{ marginTop: 14, ["--table-min-width" as string]: "1100px" }}>
+          <div className="tableWrap data-table-shell" style={{ marginTop: 14, ["--table-min-width" as string]: "1180px" }}>
             <table className="table">
               <thead>
                 <tr>
@@ -249,7 +363,7 @@ export default function ReiteratoriosPage() {
                   <th style={{ minWidth: 220 }}>Juzgado</th>
                   <th style={{ width: 160 }}>Días sin respuesta</th>
                   <th style={{ width: 140 }}>Alerta</th>
-                  <th style={{ width: 330 }}>Acción</th>
+                  <th style={{ width: 380 }}>Acción</th>
                 </tr>
               </thead>
               <tbody>
@@ -270,10 +384,19 @@ export default function ReiteratoriosPage() {
                     const alertaLabel = r.dias >= 21 ? "3 semanas" : "2 semanas";
                     const faltan = datosFaltantes(r);
                     const puedeGenerarPdf = faltan.length === 0;
+                    const presentado = isReiteratorioPresentado(r.observaciones_pjn);
+                    const ocrEnProceso = r.estado_ocr === "procesando";
+                    const filaOcupada =
+                      enProcesoId === r.id ||
+                      previewId === r.id ||
+                      excluyendoId === r.id ||
+                      reintentandoOcrId === r.id;
+                    const expedienteLabel = r.ocr_exp_nro?.trim() || "—";
+
                     return (
                       <tr key={r.id}>
                         <td style={{ fontVariantNumeric: "tabular-nums" }}>
-                          {r.ocr_exp_nro?.trim() || <span className="muted">—</span>}
+                          {expedienteLabel !== "—" ? expedienteLabel : <span className="muted">—</span>}
                         </td>
                         <td className="col-caratula">
                           {r.ocr_caratula?.trim() || (
@@ -281,7 +404,9 @@ export default function ReiteratoriosPage() {
                           )}
                         </td>
                         <td>
-                          {r.ocr_destinatario?.trim() || (
+                          {ocrEnProceso ? (
+                            <span className="muted">Procesando OCR…</span>
+                          ) : r.ocr_destinatario?.trim() || (
                             <span className="muted">—</span>
                           )}
                         </td>
@@ -302,31 +427,87 @@ export default function ReiteratoriosPage() {
                         </td>
                         <td>
                           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                              {presentado && (
+                                <span className="badge badge--verde">
+                                  <span className="badgeDot" />
+                                  PRESENTADO
+                                </span>
+                              )}
+
+                              {ocrEnProceso ? (
+                                <span className="muted" style={{ fontSize: 12 }}>
+                                  Reintentando OCR…
+                                </span>
+                              ) : (
+                                <>
+                                  {!presentado && puedeGenerarPdf && (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="btn"
+                                        disabled={filaOcupada}
+                                        onClick={() => void verPdf(r.id)}
+                                        style={{ fontSize: 13 }}
+                                      >
+                                        {previewId === r.id ? "Generando…" : "Ver PDF"}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="btn primary"
+                                        disabled={filaOcupada}
+                                        onClick={() => void presentar(r.id)}
+                                        style={{ fontSize: 13 }}
+                                      >
+                                        {enProcesoId === r.id
+                                          ? "Presentando…"
+                                          : "Presentar Reiteratorio"}
+                                      </button>
+                                    </>
+                                  )}
+
+                                  {!presentado && !puedeGenerarPdf && (
+                                    <button
+                                      type="button"
+                                      className="btn"
+                                      disabled={filaOcupada}
+                                      onClick={() => void reintentarOcr(r.id)}
+                                      style={{ fontSize: 13 }}
+                                    >
+                                      {reintentandoOcrId === r.id
+                                        ? "Reintentando…"
+                                        : "Reintentar OCR"}
+                                    </button>
+                                  )}
+
+                                  {presentado && puedeGenerarPdf && (
+                                    <button
+                                      type="button"
+                                      className="btn"
+                                      disabled={filaOcupada}
+                                      onClick={() => void verPdf(r.id)}
+                                      style={{ fontSize: 13 }}
+                                    >
+                                      {previewId === r.id ? "Generando…" : "Ver PDF"}
+                                    </button>
+                                  )}
+                                </>
+                              )}
+
                               <button
                                 type="button"
                                 className="btn"
-                                disabled={!puedeGenerarPdf || previewId === r.id || enProcesoId === r.id}
-                                onClick={() => void verPdf(r.id)}
-                                style={{ fontSize: 13 }}
-                                title={!puedeGenerarPdf ? "Faltan datos del OCR para generar el PDF" : undefined}
+                                disabled={filaOcupada}
+                                onClick={() => void excluir(r.id, expedienteLabel)}
+                                style={{ fontSize: 13, padding: "6px 10px" }}
+                                title="Quitar del listado"
+                                aria-label="Quitar del listado"
                               >
-                                {previewId === r.id ? "Generando…" : "Ver PDF"}
-                              </button>
-                              <button
-                                type="button"
-                                className="btn primary"
-                                disabled={!puedeGenerarPdf || enProcesoId === r.id || previewId === r.id}
-                                onClick={() => void presentar(r.id)}
-                                style={{ fontSize: 13 }}
-                                title={!puedeGenerarPdf ? "Faltan datos del OCR para presentar el reiteratorio" : undefined}
-                              >
-                                {enProcesoId === r.id
-                                  ? "Presentando…"
-                                  : "Presentar Reiteratorio"}
+                                {excluyendoId === r.id ? "…" : "🗑️"}
                               </button>
                             </div>
-                            {!puedeGenerarPdf && (
+
+                            {!presentado && !ocrEnProceso && !puedeGenerarPdf && (
                               <span className="muted" style={{ fontSize: 11 }}>
                                 Faltan datos OCR: {faltan.join(", ")}
                               </span>
