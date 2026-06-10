@@ -11,6 +11,7 @@ import ResponsableAvatars from "@/app/components/ResponsableAvatars";
 import { useColumnFilters, uniqueOptionsFromField } from "@/app/hooks/useColumnFilters";
 import { usePageSearchBridge } from "@/app/hooks/usePageSearchBridge";
 import { loadMentionUsersOnce } from "@/lib/users-list-cache";
+import { tienePruebaPericia } from "@/lib/prueba-pericia-detect";
 import {
   dedupeExpedientesByMatchKey,
   isExpedientePjnMergeEnabled,
@@ -172,136 +173,6 @@ function ddmmaaaaToISO(ddmm: string | null): string | null {
   }
   
   return null;
-}
-
-// Función para detectar si un expediente tiene Prueba/Pericia en sus movimientos
-function tienePruebaPericia(movimientos: any): boolean {
-  if (!movimientos) return false;
-  
-  try {
-    // Si movimientos es un string JSON, parsearlo
-    let movs = movimientos;
-    if (typeof movimientos === 'string') {
-      try {
-        movs = JSON.parse(movimientos);
-      } catch {
-        return false;
-      }
-    }
-    
-    // Si es un array de objetos
-    if (Array.isArray(movs) && movs.length > 0) {
-      for (const mov of movs) {
-        if (typeof mov === 'object' && mov !== null) {
-          // Buscar en el campo "Detalle" o en "cols"
-          let detalleText = '';
-          
-          if (mov.Detalle) {
-            detalleText = String(mov.Detalle).toUpperCase();
-          } else if (mov.cols && Array.isArray(mov.cols)) {
-            // Primero: buscar "Detalle:" en cualquier columna
-            for (const col of mov.cols) {
-              const colStr = String(col).trim();
-              // Buscar "Detalle:" al inicio o en cualquier parte (mejorado para capturar todo después de "Detalle:")
-              const matchDetalle = colStr.match(/Detalle:\s*(.+)/i);
-              if (matchDetalle) {
-                detalleText = matchDetalle[1].toUpperCase();
-                break;
-              }
-            }
-            // Si no se encontró "Detalle:", buscar los patrones directamente en todos los cols
-            if (!detalleText) {
-              const allColsText = mov.cols.map((col: any) => String(col)).join(' ').toUpperCase();
-              detalleText = allColsText;
-            }
-          }
-          
-          // Si no hay texto para analizar, continuar con el siguiente movimiento
-          if (!detalleText || detalleText.trim().length === 0) {
-            continue;
-          }
-          
-          // Patrones canónicos para Prueba/Pericia (incluyendo EXPERTA/EXPERTO)
-          const patrones = [
-            // Patrones con PERITO/PERICIA
-            /SE\s+ORDENA.*PERICI/i,
-            /ORDENA.*PERICI/i,
-            /SOLICITA.*PROVEE.*PRUEBA\s+PERICI/i,
-            /PRUEBA\s+PERICIAL/i,
-            /PERITO.*ACEPTA\s+(?:EL\s+)?CARGO/i,
-            /PERITO.*PRESENTA\s+INFORME/i,
-            /PERITO.*FIJA\s+(?:NUEVA\s+)?FECHA/i,
-            /PERITO.*INFORMA/i,
-            /PERITO.*CITA/i,
-            /LLAMA.*PERICI/i,
-            /DISPONE.*PERICI/i,
-            /TRASLADO.*PERICI/i,
-            /PERICI.*M[EÉ]DIC/i,
-            /PERICI.*PSICOL/i,
-            /PERICI.*CONTAB/i,
-            /PERICI.*INGENIER/i,
-            /PERICI.*LEGIST/i,
-            /ACREDITA.*PERITO/i,
-            /ANTICIPO.*PERITO/i,
-            /GASTOS.*PERITO/i,
-            /HAGASE\s+SABER.*PERITO/i,
-            /TENGASE\s+PRESENTE.*PERITO/i,
-            /INTIMACION.*PERITO/i,
-            /INTIMA.*PERITO/i,
-            /SE\s+INTIME.*PERITO/i,
-            /PERITO.*ACOMPAÑA/i,
-            /PERITO.*ADJUNTA/i,
-            /NOTIFIQUESE.*PERITO/i,
-            /NOTIFICA.*PERITO/i,
-            // Nuevos patrones para EXPERTA/EXPERTO (género femenino y variantes)
-            /HAGASE\s+SABER.*EXPERTA/i,
-            /HAGASE\s+SABER.*EXPERTO/i,
-            /TENGASE\s+PRESENTE.*EXPERTA/i,
-            /TENGASE\s+PRESENTE.*EXPERTO/i,
-            /INTIMACION.*EXPERTA/i,
-            /INTIMACION.*EXPERTO/i,
-            /INTIMA.*EXPERTA/i,
-            /INTIMA.*EXPERTO/i,
-            /SE\s+INTIME.*EXPERTA/i,
-            /SE\s+INTIME.*EXPERTO/i,
-            /NOTIFIQUESE.*EXPERTA/i,
-            /NOTIFIQUESE.*EXPERTO/i,
-            /NOTIFICA.*EXPERTA/i,
-            /NOTIFICA.*EXPERTO/i,
-            /EXPERTA.*ACEPTA\s+(?:EL\s+)?CARGO/i,
-            /EXPERTO.*ACEPTA\s+(?:EL\s+)?CARGO/i,
-            /EXPERTA.*PRESENTA\s+INFORME/i,
-            /EXPERTO.*PRESENTA\s+INFORME/i,
-            /EXPERTA.*FIJA\s+(?:NUEVA\s+)?FECHA/i,
-            /EXPERTO.*FIJA\s+(?:NUEVA\s+)?FECHA/i,
-            /EXPERTA.*INFORMA/i,
-            /EXPERTO.*INFORMA/i,
-            /EXPERTA.*CITA/i,
-            /EXPERTO.*CITA/i,
-            /EXPERTA.*ACOMPAÑA/i,
-            /EXPERTO.*ACOMPAÑA/i,
-            /EXPERTA.*ADJUNTA/i,
-            /EXPERTO.*ADJUNTA/i,
-            // Patrones adicionales para casos específicos encontrados
-            /AGR[EÉ]GUENSE.*ESTUDIOS.*M[EÉ]DICOS.*EXPERTA/i,
-            /AGR[EÉ]GUENSE.*ESTUDIOS.*M[EÉ]DICOS.*EXPERTO/i,
-            /PRESENTACION\s+DEL\s+INFORME\s+PERICIAL/i,
-            /INFORME\s+PERICIAL/i
-          ];
-          
-          for (const patron of patrones) {
-            if (patron.test(detalleText)) {
-              return true;
-            }
-          }
-        }
-      }
-    }
-  } catch (err) {
-    console.warn(`[Prueba/Pericia] Error al analizar movimientos:`, err);
-  }
-  
-  return false;
 }
 
 type Semaforo = "VERDE" | "AMARILLO" | "ROJO";
