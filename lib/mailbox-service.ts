@@ -1,4 +1,11 @@
 import { supabaseService } from "@/lib/supabase-server";
+import {
+  assertValidMailboxFile,
+  contentTypeForMailboxExt,
+  extFromMailboxFileName,
+  mailboxAttachmentStoragePath,
+  MAILBOX_ALLOWED_EXT,
+} from "@/lib/mailbox-attachments";
 import type {
   ComposeMailboxInput,
   MailboxDocType,
@@ -8,7 +15,19 @@ import type {
   MailboxThreadDetail,
 } from "@/lib/mailbox-types";
 
-const ALLOWED_EXT = [".docx", ".pdf", ".png", ".jpg", ".jpeg", ".zip"];
+export type MailboxFileMeta = {
+  fileName: string;
+  sizeBytes: number;
+};
+
+export type MailboxPendingAttachment = {
+  attachmentId: string;
+  storage_path: string;
+  file_name: string;
+  content_type: string;
+  size_bytes: number;
+  version: number;
+};
 
 export function parseMentionUserIds(body: string, profiles: { id: string; email: string | null; full_name: string | null }[]): string[] {
   const found = new Set<string>();
@@ -37,14 +56,6 @@ function dedupeRecipients(list: MailboxRecipientInput[]): MailboxRecipientInput[
     out.push(r);
   }
   return out;
-}
-
-function contentTypeForExt(ext: string) {
-  if (ext === ".docx") return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-  if (ext === ".pdf") return "application/pdf";
-  if (ext === ".png") return "image/png";
-  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
-  return "application/zip";
 }
 
 async function resolveExpediente(
@@ -181,15 +192,24 @@ async function resolveReplyRecipients(
   return to;
 }
 
-export async function composeMailboxMessage(
+type ComposeContext = {
+  body: string;
+  recipients: MailboxRecipientInput[];
+  exp: {
+    expedienteRef: string | null;
+    caratula: string | null;
+    juzgado: string | null;
+  };
+};
+
+async function prepareComposeContext(
+  svc: ReturnType<typeof supabaseService>,
   senderId: string,
   input: ComposeMailboxInput,
-  file?: File | null
-) {
-  const svc = supabaseService();
+  opts?: { allowEmptyBodyWithFile?: boolean }
+): Promise<ComposeContext> {
   const body = (input.body || "").trim();
-  const hasFile = file instanceof File && file.size > 0;
-  if (!body && !hasFile) {
+  if (!body && !opts?.allowEmptyBodyWithFile) {
     throw new Error("Debés incluir un mensaje o un archivo adjunto");
   }
 
@@ -229,6 +249,16 @@ export async function composeMailboxMessage(
     input.expedienteJuzgado
   );
 
+  return { body, recipients, exp };
+}
+
+async function createMailboxMessageRecords(
+  svc: ReturnType<typeof supabaseService>,
+  senderId: string,
+  input: ComposeMailboxInput,
+  ctx: ComposeContext
+): Promise<{ threadId: string; messageId: string }> {
+  const { body, recipients, exp } = ctx;
   let threadId = input.threadId;
 
   if (!threadId) {
@@ -291,55 +321,254 @@ export async function composeMailboxMessage(
     });
   }
 
-  let hasAttachment = false;
-  if (hasFile && file) {
-    const name = file.name.toLowerCase();
-    const ext = ALLOWED_EXT.find((e) => name.endsWith(e));
-    if (!ext) throw new Error("Tipo de archivo no permitido");
+  return { threadId: threadId!, messageId };
+}
 
-    const attachmentId = crypto.randomUUID();
-    const version = 1;
-    const storage_path = `mailbox/${messageId}/${attachmentId}/v${version}${ext}`;
-    const buf = Buffer.from(await file.arrayBuffer());
-
-    const { error: upErr } = await svc.storage.from("mailbox").upload(storage_path, buf, {
-      contentType: contentTypeForExt(ext),
-      upsert: true,
-    });
-    if (upErr) throw new Error(`No se pudo subir el adjunto: ${upErr.message}`);
-
-    const { error: aErr } = await svc.from("mailbox_attachments").insert({
-      id: attachmentId,
-      message_id: messageId,
-      storage_path,
-      file_name: file.name,
-      content_type: contentTypeForExt(ext),
-      size_bytes: file.size,
-      version,
-      uploaded_by: senderId,
-    });
-    if (aErr) throw new Error(aErr.message);
-    hasAttachment = true;
-  }
-
+async function notifyMailboxMessage(
+  svc: ReturnType<typeof supabaseService>,
+  senderId: string,
+  input: ComposeMailboxInput,
+  ctx: ComposeContext,
+  threadId: string,
+  messageId: string,
+  hasAttachment: boolean,
+  subjectOverride?: string | null
+) {
   const { data: senderProfile } = await svc
     .from("profiles")
     .select("full_name, email")
     .eq("id", senderId)
     .single();
 
+  let subject = subjectOverride ?? (input.subject || "").trim();
+  let docType = input.docType;
+  let expedienteRef = input.expedienteRef ?? ctx.exp.expedienteRef;
+
+  if (!subject && threadId) {
+    const { data: thread } = await svc
+      .from("mailbox_threads")
+      .select("subject, doc_type, expediente_ref")
+      .eq("id", threadId)
+      .maybeSingle();
+    subject = (thread?.subject || "").trim();
+    if (!docType && thread?.doc_type) docType = thread.doc_type as MailboxDocType;
+    if (!expedienteRef && thread?.expediente_ref) expedienteRef = thread.expediente_ref;
+  }
+
   await notifyRecipients(svc, {
-    recipientIds: recipients.map((r) => r.userId),
+    recipientIds: ctx.recipients.map((r) => r.userId),
     senderId,
     senderName: displayName(senderProfile),
-    threadId: threadId!,
+    threadId,
     messageId,
-    subject: (input.subject || "").trim() || "Sin asunto",
-    bodyPreview: body || "Archivo adjunto",
+    subject: subject || "Sin asunto",
+    bodyPreview: ctx.body || "Archivo adjunto",
     hasAttachment,
-    expedienteRef: exp.expedienteRef,
-    docType: input.docType,
+    expedienteRef,
+    docType,
   });
+}
+
+async function uploadMailboxAttachmentFromBuffer(
+  svc: ReturnType<typeof supabaseService>,
+  messageId: string,
+  senderId: string,
+  file: File
+) {
+  const name = file.name.toLowerCase();
+  const ext = MAILBOX_ALLOWED_EXT.find((e) => name.endsWith(e));
+  if (!ext) throw new Error("Tipo de archivo no permitido");
+
+  const attachmentId = crypto.randomUUID();
+  const version = 1;
+  const storage_path = mailboxAttachmentStoragePath(messageId, attachmentId, version, ext);
+  const buf = Buffer.from(await file.arrayBuffer());
+
+  const { error: upErr } = await svc.storage.from("mailbox").upload(storage_path, buf, {
+    contentType: contentTypeForMailboxExt(ext),
+    upsert: true,
+  });
+  if (upErr) throw new Error(`No se pudo subir el adjunto: ${upErr.message}`);
+
+  const { error: aErr } = await svc.from("mailbox_attachments").insert({
+    id: attachmentId,
+    message_id: messageId,
+    storage_path,
+    file_name: file.name,
+    content_type: contentTypeForMailboxExt(ext),
+    size_bytes: file.size,
+    version,
+    uploaded_by: senderId,
+  });
+  if (aErr) throw new Error(aErr.message);
+}
+
+async function verifyMailboxStorageObject(
+  svc: ReturnType<typeof supabaseService>,
+  storage_path: string
+) {
+  const parts = storage_path.split("/");
+  if (parts.length < 2) return false;
+  const fileName = parts[parts.length - 1];
+  const folder = parts.slice(0, -1).join("/");
+  const { data, error } = await svc.storage.from("mailbox").list(folder);
+  if (error || !data) return false;
+  return data.some((f) => f.name === fileName);
+}
+
+export async function initMailboxComposeWithAttachment(
+  senderId: string,
+  input: ComposeMailboxInput,
+  fileMeta: MailboxFileMeta
+) {
+  const ext = assertValidMailboxFile(fileMeta.fileName, fileMeta.sizeBytes);
+  const svc = supabaseService();
+  const ctx = await prepareComposeContext(svc, senderId, input, {
+    allowEmptyBodyWithFile: true,
+  });
+  const { threadId, messageId } = await createMailboxMessageRecords(svc, senderId, input, ctx);
+
+  const attachmentId = crypto.randomUUID();
+  const version = 1;
+  const storage_path = mailboxAttachmentStoragePath(messageId, attachmentId, version, ext);
+
+  return {
+    threadId,
+    messageId,
+    upload: {
+      attachment_id: attachmentId,
+      storage_path,
+      content_type: contentTypeForMailboxExt(ext),
+      version,
+    },
+  };
+}
+
+export async function commitMailboxAttachment(
+  senderId: string,
+  threadId: string,
+  messageId: string,
+  attachment: MailboxPendingAttachment,
+  input?: ComposeMailboxInput
+) {
+  const svc = supabaseService();
+  const ext = extFromMailboxFileName(attachment.file_name);
+  if (!ext) throw new Error("Tipo de archivo no permitido");
+
+  const expectedPath = mailboxAttachmentStoragePath(
+    messageId,
+    attachment.attachmentId,
+    attachment.version,
+    ext
+  );
+  if (attachment.storage_path !== expectedPath) {
+    throw new Error("Ruta de adjunto inválida");
+  }
+
+  const { data: message, error: mErr } = await svc
+    .from("mailbox_messages")
+    .select("id, sender_id, body, thread_id")
+    .eq("id", messageId)
+    .eq("thread_id", threadId)
+    .single();
+
+  if (mErr || !message) throw new Error("Mensaje no encontrado");
+  if (message.sender_id !== senderId) throw new Error("Forbidden");
+
+  const { data: existing } = await svc
+    .from("mailbox_attachments")
+    .select("id")
+    .eq("message_id", messageId)
+    .limit(1);
+
+  if (existing && existing.length > 0) {
+    throw new Error("Este mensaje ya tiene un adjunto registrado");
+  }
+
+  const exists = await verifyMailboxStorageObject(svc, attachment.storage_path);
+  if (!exists) {
+    throw new Error("No se encontró el archivo en storage. Volvé a intentar subirlo.");
+  }
+
+  const { error: aErr } = await svc.from("mailbox_attachments").insert({
+    id: attachment.attachmentId,
+    message_id: messageId,
+    storage_path: attachment.storage_path,
+    file_name: attachment.file_name,
+    content_type: attachment.content_type,
+    size_bytes: attachment.size_bytes,
+    version: attachment.version,
+    uploaded_by: senderId,
+  });
+  if (aErr) throw new Error(aErr.message);
+
+  const { data: recips } = await svc
+    .from("mailbox_recipients")
+    .select("user_id, recipient_type")
+    .eq("message_id", messageId);
+
+  const { data: thread } = await svc
+    .from("mailbox_threads")
+    .select("subject, doc_type, expediente_ref, expediente_caratula, expediente_juzgado")
+    .eq("id", threadId)
+    .single();
+
+  const ctx: ComposeContext = {
+    body: (message.body || "").trim(),
+    recipients: (recips || []).map((r) => ({
+      userId: r.user_id,
+      type: r.recipient_type as MailboxRecipientType,
+    })),
+    exp: {
+      expedienteRef: thread?.expediente_ref ?? null,
+      caratula: thread?.expediente_caratula ?? null,
+      juzgado: thread?.expediente_juzgado ?? null,
+    },
+  };
+
+  const notifyInput: ComposeMailboxInput = input ?? {
+    body: ctx.body,
+    to: [],
+    subject: thread?.subject ?? undefined,
+    docType: (thread?.doc_type as MailboxDocType) ?? undefined,
+    expedienteRef: thread?.expediente_ref,
+    threadId,
+  };
+
+  await notifyMailboxMessage(
+    svc,
+    senderId,
+    notifyInput,
+    ctx,
+    threadId,
+    messageId,
+    true,
+    thread?.subject
+  );
+
+  return { threadId, messageId, hasAttachment: true };
+}
+
+export async function composeMailboxMessage(
+  senderId: string,
+  input: ComposeMailboxInput,
+  file?: File | null
+) {
+  const svc = supabaseService();
+  const hasFile = file instanceof File && file.size > 0;
+  const ctx = await prepareComposeContext(svc, senderId, input, {
+    allowEmptyBodyWithFile: hasFile,
+  });
+
+  const { threadId, messageId } = await createMailboxMessageRecords(svc, senderId, input, ctx);
+
+  let hasAttachment = false;
+  if (hasFile && file) {
+    await uploadMailboxAttachmentFromBuffer(svc, messageId, senderId, file);
+    hasAttachment = true;
+  }
+
+  await notifyMailboxMessage(svc, senderId, input, ctx, threadId, messageId, hasAttachment);
 
   return { threadId, messageId, hasAttachment };
 }

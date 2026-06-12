@@ -8,6 +8,10 @@ import ExpedienteAutocomplete, { type ExpedienteOption } from "@/app/components/
 import RecipientMultiSelect from "@/app/components/bandeja/RecipientMultiSelect";
 import { fetchBandejaUsers } from "@/lib/bandeja-users";
 import MentionTextarea from "@/app/components/bandeja/MentionTextarea";
+import {
+  MAX_MAILBOX_ATTACHMENT_BYTES,
+  sendMailboxMessage,
+} from "@/lib/mailbox-send-client";
 
 type MailboxComposeFormProps = {
   embedded?: boolean;
@@ -70,6 +74,19 @@ export default function MailboxComposeForm({
 
   const pickFile = useCallback((f: File | null) => {
     if (!f) return;
+    if (f.size > MAX_MAILBOX_ATTACHMENT_BYTES) {
+      setMsg(
+        `El archivo supera el límite de ${MAX_MAILBOX_ATTACHMENT_BYTES / (1024 * 1024)} MB.`
+      );
+      return;
+    }
+    const allowedExts = [".docx", ".pdf", ".png", ".jpg", ".jpeg", ".zip"];
+    const name = f.name.toLowerCase();
+    const ok = allowedExts.some((ext) => name.endsWith(ext));
+    if (!ok) {
+      setMsg("El archivo debe ser .docx, .pdf, .png, .jpg, .jpeg o .zip.");
+      return;
+    }
     setFile(f);
   }, []);
 
@@ -90,6 +107,11 @@ export default function MailboxComposeForm({
       if (!ok) {
         return setMsg("El archivo debe ser .docx, .pdf, .png, .jpg, .jpeg o .zip.");
       }
+      if (file.size > MAX_MAILBOX_ATTACHMENT_BYTES) {
+        return setMsg(
+          `El archivo supera el límite de ${MAX_MAILBOX_ATTACHMENT_BYTES / (1024 * 1024)} MB.`
+        );
+      }
     }
 
     setSending(true);
@@ -101,24 +123,23 @@ export default function MailboxComposeForm({
         return;
       }
 
-      const fd = new FormData();
-      fd.append("subject", title.trim());
-      fd.append("doc_type", docType);
-      fd.append("body", messageText);
-      fd.append("to", JSON.stringify(to));
-      fd.append("cc", JSON.stringify(cc));
-      fd.append("bcc", JSON.stringify(bcc));
-      if (expediente?.ref) fd.append("expediente_ref", expediente.ref);
-      if (file) fd.append("file", file);
+      const result = await sendMailboxMessage(
+        "/api/mailbox/threads",
+        token,
+        {
+          subject: title.trim(),
+          doc_type: docType,
+          body: messageText,
+          to,
+          cc,
+          bcc,
+          expediente_ref: expediente?.ref ?? null,
+        },
+        file
+      );
 
-      const res = await fetch("/api/mailbox/threads", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: fd,
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setMsg((json?.error as string) || "No se pudo enviar.");
+      if (!result.ok) {
+        setMsg(result.error);
         return;
       }
 
@@ -338,7 +359,10 @@ export default function MailboxComposeForm({
               <div className="bandeja-dropzone-title">
                 Arrastrá un archivo o hacé click para adjuntar
               </div>
-              <div className="bandeja-dropzone-hint">.docx · .pdf · .png · .jpg · .jpeg · .zip</div>
+              <div className="bandeja-dropzone-hint">
+                .docx · .pdf · .png · .jpg · .jpeg · .zip · máx.{" "}
+                {MAX_MAILBOX_ATTACHMENT_BYTES / (1024 * 1024)} MB
+              </div>
             </div>
 
             {file && (

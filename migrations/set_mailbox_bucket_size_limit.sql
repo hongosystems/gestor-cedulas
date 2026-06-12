@@ -1,0 +1,10 @@
+-- Bucket "mailbox": límite de tamaño para upload directo desde el browser
+--
+-- IMPORTANTE: Configurar manualmente en Supabase Dashboard > Storage > mailbox > Settings:
+--   File size limit: 50 MB (52428800 bytes)
+--
+-- El upload va directo del browser a Storage (no pasa por Vercel).
+-- La app valida MAX_MAILBOX_ATTACHMENT_BYTES = 50 MB en lib/mailbox-attachments.ts
+--
+-- Políticas RLS: ver migrations/create_mailbox_storage_bucket.sql
+-- El bucket debe ser Private.

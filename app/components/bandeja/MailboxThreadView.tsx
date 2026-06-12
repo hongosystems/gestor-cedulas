@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { fetchMailboxThread } from "@/lib/mailbox-client";
+import { MAX_MAILBOX_ATTACHMENT_BYTES, sendMailboxMessage } from "@/lib/mailbox-send-client";
 import type { MailboxInboxItem } from "@/lib/mailbox-types";
 import { fmtDateShort, fmtRelativeTime } from "@/lib/bandeja-utils";
 import RecipientMultiSelect from "@/app/components/bandeja/RecipientMultiSelect";
@@ -134,29 +135,33 @@ export default function MailboxThreadView({ item, onClose, onUpdated }: MailboxT
     const body = reply.trim();
     const hasFile = replyFile && replyFile.size > 0;
     if (!body && !hasFile) return setMsg("Escribí una respuesta o adjuntá un archivo");
+    if (hasFile && replyFile!.size > MAX_MAILBOX_ATTACHMENT_BYTES) {
+      return setMsg(
+        `El archivo supera el límite de ${MAX_MAILBOX_ATTACHMENT_BYTES / (1024 * 1024)} MB.`
+      );
+    }
     setSending(true);
     setMsg("");
     try {
       const { data: sess } = await supabase.auth.getSession();
       const token = sess.session?.access_token;
       if (!token) return;
-      const fd = new FormData();
-      fd.append("body", body);
-      if (hasFile) fd.append("file", replyFile);
-      if (lastMsg) fd.append("reply_to_message_id", lastMsg.id);
       const replyThreadId = detail?.thread.id || item.threadId;
-      const res = await fetch(`/api/mailbox/threads/${replyThreadId}/reply`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: fd,
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "No se pudo enviar");
+      const result = await sendMailboxMessage(
+        `/api/mailbox/threads/${replyThreadId}/reply`,
+        token,
+        {
+          body,
+          reply_to_message_id: lastMsg?.id,
+        },
+        replyFile
+      );
+      if (!result.ok) throw new Error(result.error);
       setReply("");
       setReplyFile(null);
       if (replyFileInputRef.current) replyFileInputRef.current.value = "";
       onUpdated();
-      const threadKey = (json.threadId as string) || item.threadId;
+      const threadKey = result.threadId || item.threadId;
       const d = await fetchMailboxThread(threadKey, item.source);
       setDetail(d);
     } catch (e) {
