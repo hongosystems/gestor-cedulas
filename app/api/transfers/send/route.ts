@@ -244,7 +244,7 @@ export async function POST(req: Request) {
       user_id: recipient_user_id,
       title: notificationTitle,
       body: notificationBody,
-      link: expediente_ref ? `/superadmin/mis-juzgados` : `/app/bandeja?tab=recibidos`,
+      link: expediente_ref ? `/superadmin/mis-juzgados` : `/app/documentos?tab=recibidos`,
       metadata: {
         transfer_id: transferId,
         sender_id: user.id,

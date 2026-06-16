@@ -2400,7 +2400,7 @@ export default function PruebaPericiaPage() {
               )}
               {(userRoles.isSuperadmin || userRoles.isAdminExpedientes || userRoles.isAdminCedulas || userRoles.isAbogado) && (
                 <Link
-                  href="/app/enviar"
+                  href="/app/documentos?tab=enviar"
                   onClick={() => setMenuOpen(false)}
                   style={{
                     display: "block",
@@ -2426,7 +2426,7 @@ export default function PruebaPericiaPage() {
               )}
               {(userRoles.isSuperadmin || userRoles.isAdminExpedientes || userRoles.isAdminCedulas || userRoles.isAbogado) && (
                 <Link
-                  href="/app/recibidos"
+                  href="/app/documentos?tab=recibidos"
                   onClick={() => setMenuOpen(false)}
                   style={{
                     display: "block",

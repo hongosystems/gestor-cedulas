@@ -33,7 +33,7 @@ type NavItem = {
 };
 
 function tabToNotificationFilter(tab: BandejaTab): "all" | "unread" | "read" {
-  if (tab === "no-leidas" || tab === "accion") return "unread";
+  if (tab === "no-leidas") return "unread";
   return "all";
 }
 
@@ -43,12 +43,10 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
   const { roles, loading: rolesLoading, hasSession } = useUserRoles();
   const [search, setSearch] = useState("");
   const [folderCounts, setFolderCounts] = useState({
-    received: 0,
     sent: 0,
     all: 0,
     unread: 0,
     archived: 0,
-    action: 0,
   });
   const [notificationUnread, setNotificationUnread] = useState(0);
 
@@ -67,6 +65,9 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
     const tabParam = searchParams.get("tab");
     if (tabParam === "archivados" && workflow) {
       router.replace("/app/bandeja?tab=recibidos");
+    }
+    if (tabParam === "accion") {
+      router.replace("/app/bandeja?tab=no-leidas");
     }
   }, [searchParams, workflow, router]);
 
@@ -141,14 +142,13 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
           id: "recibidos",
           label: "Recibidos",
           icon: "📥",
-          badge: folderCounts.received,
+          badge: folderCounts.unread > 0 ? folderCounts.unread : undefined,
           alert: folderCounts.unread > 0,
         },
         {
           id: "enviados",
           label: "Enviados",
           icon: "📤",
-          badge: folderCounts.sent,
           requiresWorkflow: true,
         }
       );
@@ -166,13 +166,6 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
         label: "Todas",
         icon: "📁",
         badge: workflow ? folderCounts.all : undefined,
-      },
-      {
-        id: "accion",
-        label: "Requieren acción",
-        icon: "⚠",
-        badge: workflow ? folderCounts.action : notificationUnread,
-        alert: workflow ? folderCounts.action > 0 : notificationUnread > 0,
       }
     );
     return items;

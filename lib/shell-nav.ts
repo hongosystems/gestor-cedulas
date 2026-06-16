@@ -117,8 +117,10 @@ export function getShellNavItems(roles: UserRoleFlags): ShellNavItem[] {
       !p.startsWith("/app/mediaciones") &&
       !p.startsWith("/app/expedientes") &&
       !p.startsWith("/app/bandeja") &&
+      !p.startsWith("/app/documentos") &&
       !p.startsWith("/app/enviar") &&
       !p.startsWith("/app/recibidos") &&
+      !p.startsWith("/app/enviados") &&
       !p.startsWith("/app/nueva") &&
       !p.startsWith("/app/notificaciones"));
 
@@ -149,6 +151,14 @@ export function getShellNavItems(roles: UserRoleFlags): ShellNavItem[] {
       visible: () => canDiligenciamiento,
     },
     {
+      id: "nueva-cedula",
+      label: "Nueva Cédula/Oficio",
+      href: "/app/nueva",
+      group: "modulos",
+      match: (p) => p === "/app/nueva",
+      visible: () => canWorkflowCedulas,
+    },
+    {
       id: "cedulas",
       label: "Cédulas / Oficios",
       href: "/app",
@@ -157,12 +167,20 @@ export function getShellNavItems(roles: UserRoleFlags): ShellNavItem[] {
       visible: () => canCedulas,
     },
     {
-      id: "nueva-cedula",
-      label: "Nueva Cédula/Oficio",
-      href: "/app/nueva",
+      id: "documentos-estudio",
+      label: "Envío de documentos",
+      href: "/app/documentos",
       group: "operaciones",
-      match: (p) => p === "/app/nueva",
-      visible: () => canWorkflowCedulas,
+      match: (p) =>
+        p === "/app/documentos" ||
+        p.startsWith("/app/documentos/") ||
+        p === "/app/enviar" ||
+        p.startsWith("/app/enviar/") ||
+        p === "/app/recibidos" ||
+        p.startsWith("/app/recibidos/") ||
+        p === "/app/enviados" ||
+        p.startsWith("/app/enviados/"),
+      visible: () => true,
     },
     {
       id: "bandeja",
@@ -172,10 +190,6 @@ export function getShellNavItems(roles: UserRoleFlags): ShellNavItem[] {
       match: (p) =>
         p === "/app/bandeja" ||
         p.startsWith("/app/bandeja/") ||
-        p === "/app/enviar" ||
-        p.startsWith("/app/enviar/") ||
-        p === "/app/recibidos" ||
-        p.startsWith("/app/recibidos/") ||
         p === "/app/notificaciones" ||
         p.startsWith("/app/notificaciones/"),
       visible: () => true,

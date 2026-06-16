@@ -594,7 +594,7 @@ export default function AbogadoHomePage() {
                   ➕ Carga Expedientes
                 </Link>
                 <Link
-                  href="/app/enviar"
+                  href="/app/documentos?tab=enviar"
                   onClick={() => setMenuOpen(false)}
                   style={{
                     display: "block",
@@ -618,7 +618,7 @@ export default function AbogadoHomePage() {
                   📤 Enviar Cédula/Oficio
                 </Link>
                 <Link
-                  href="/app/recibidos"
+                  href="/app/documentos?tab=recibidos"
                   onClick={() => setMenuOpen(false)}
                   style={{
                     display: "block",

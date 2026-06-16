@@ -2,7 +2,6 @@ import { fetchMailboxInbox, fetchMailboxSearch, fetchUnreadMailboxCount, type Ma
 import type { MailboxInboxItem } from "@/lib/mailbox-types";
 import {
   dedupeInboxItems,
-  filterActionItems,
   type MailboxFolder,
 } from "@/lib/bandeja-mail-folders";
 import { normalizeSearchText, textMatchesQuery } from "@/lib/bandeja-search";
@@ -102,7 +101,6 @@ async function loadProfiles() {
  * - all: inbox + sent deduplicado
  * - unread: no leídos
  * - archived: archivados
- * - action: no leídos o document_status pendiente
  */
 export async function loadMailboxInboxForFolder(folder: MailboxFolder) {
   const profiles = await loadProfiles();
@@ -115,22 +113,15 @@ export async function loadMailboxInboxForFolder(folder: MailboxFolder) {
     return { items: dedupeInboxItems([...inbox, ...sent]), profiles };
   }
 
-  if (folder === "action") {
-    const inbox = await fetchMailboxInbox("inbox", "");
-    return { items: filterActionItems(inbox), profiles };
-  }
-
-  const items = await fetchMailboxInbox(folder, "");
+  const items = await fetchMailboxInbox(folder === "action" ? "unread" : folder, "");
   return { items, profiles };
 }
 
 export type MailboxFolderCounts = {
-  received: number;
   sent: number;
   all: number;
   unread: number;
   archived: number;
-  action: number;
 };
 
 export async function fetchMailboxFolderCounts(): Promise<MailboxFolderCounts> {
@@ -139,15 +130,12 @@ export async function fetchMailboxFolderCounts(): Promise<MailboxFolderCounts> {
     fetchMailboxInbox("sent", ""),
     fetchUnreadMailboxCount(),
   ]);
-  const received = dedupeInboxItems(inbox);
   const all = dedupeInboxItems([...inbox, ...sent]);
   return {
-    received: received.length,
     sent: sent.length,
     all: all.length,
     unread: unreadCount,
     archived: 0,
-    action: filterActionItems(received).length,
   };
 }
 

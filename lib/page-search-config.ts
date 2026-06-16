@@ -31,8 +31,10 @@ const RULES: RouteRule[] = [
   {
     test: (p) =>
       p.startsWith("/app/bandeja") ||
+      p.startsWith("/app/documentos") ||
       p === "/app/enviar" ||
       p === "/app/recibidos" ||
+      p === "/app/enviados" ||
       p === "/app/notificaciones",
     config: { placeholder: "Buscar mensajes, expedientes, usuarios o adjuntos…" },
   },

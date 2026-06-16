@@ -14,7 +14,6 @@ const MAILBOX_TABS: BandejaTab[] = [
   "enviados",
   "todas",
   "no-leidas",
-  "accion",
 ];
 
 export function isMailboxTab(tab: BandejaTab): boolean {
@@ -33,8 +32,6 @@ export function bandejaTabToFolder(tab: BandejaTab): MailboxFolder | null {
       return "all";
     case "no-leidas":
       return "unread";
-    case "accion":
-      return "action";
     default:
       return null;
   }

@@ -68,11 +68,11 @@ export function parseBandejaTab(raw: string | null | undefined): BandejaTab {
     v === "archivados" ||
     v === "todas" ||
     v === "no-leidas" ||
-    v === "accion" ||
     v === "nuevo"
   ) {
     return v;
   }
+  if (v === "accion") return "no-leidas";
   if (v === "notificaciones") return "todas";
   return "todas";
 }

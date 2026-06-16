@@ -620,48 +620,75 @@ export async function listMailboxInbox(
   const items: MailboxInboxItem[] = [];
 
   if (opts.folder === "sent") {
-    const { data: msgs } = await svc
-      .from("mailbox_messages")
-      .select("id, thread_id, body, created_at, sender_id")
-      .eq("sender_id", userId)
-      .eq("is_draft", false)
-      .order("created_at", { ascending: false })
-      .limit(limit * 2);
+    const latestByThread = new Map<
+      string,
+      { id: string; thread_id: string; body: string; created_at: string; sender_id: string }
+    >();
+    const pageSize = 200;
+    let offset = 0;
+    const maxScan = 5000;
 
-    const threadIds = [...new Set((msgs || []).map((m) => m.thread_id))].slice(0, limit);
+    while (latestByThread.size < limit && offset < maxScan) {
+      const { data: msgs, error } = await svc
+        .from("mailbox_messages")
+        .select("id, thread_id, body, created_at, sender_id")
+        .eq("sender_id", userId)
+        .eq("is_draft", false)
+        .order("created_at", { ascending: false })
+        .range(offset, offset + pageSize - 1);
+
+      if (error) throw new Error(error.message);
+      if (!msgs?.length) break;
+
+      for (const m of msgs) {
+        if (!latestByThread.has(m.thread_id)) {
+          latestByThread.set(m.thread_id, m);
+          if (latestByThread.size >= limit) break;
+        }
+      }
+
+      if (msgs.length < pageSize) break;
+      offset += pageSize;
+    }
+
+    const sortedMsgs = [...latestByThread.values()].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+
+    const threadIds = sortedMsgs.map((m) => m.thread_id);
     if (threadIds.length) {
       const { data: threads } = await svc
         .from("mailbox_threads")
         .select("*")
         .in("id", threadIds);
-      const msgIds = (msgs || []).map((m) => m.id).filter(Boolean);
+      const threadMap = new Map((threads || []).map((t) => [t.id, t]));
+      const msgIds = sortedMsgs.map((m) => m.id);
       const { data: allRecips } = msgIds.length
-        ? await svc.from("mailbox_recipients").select("user_id").in("message_id", msgIds)
-        : { data: [] as { user_id: string }[] };
+        ? await svc.from("mailbox_recipients").select("user_id, message_id").in("message_id", msgIds)
+        : { data: [] as { user_id: string; message_id: string }[] };
       const profileMap = await getProfileMap(svc, [
         ...new Set([
-          ...(msgs || []).map((m) => m.sender_id),
+          ...sortedMsgs.map((m) => m.sender_id),
           ...(allRecips || []).map((r) => r.user_id),
         ]),
       ]);
-      for (const t of threads || []) {
-        const lastMsg = (msgs || []).find((m) => m.thread_id === t.id);
+
+      for (const lastMsg of sortedMsgs) {
+        const t = threadMap.get(lastMsg.thread_id);
+        if (!t) continue;
         const { data: atts } = await svc
           .from("mailbox_attachments")
           .select("id, file_name")
-          .eq("message_id", lastMsg?.id || "");
-        const { data: recips } = await svc
-          .from("mailbox_recipients")
-          .select("user_id")
-          .eq("message_id", lastMsg?.id || "");
-        const peerId = recips?.find((r) => r.user_id !== userId)?.user_id || userId;
+          .eq("message_id", lastMsg.id);
+        const recips = (allRecips || []).filter((r) => r.message_id === lastMsg.id);
+        const peerId = recips.find((r) => r.user_id !== userId)?.user_id || userId;
         items.push({
           id: t.id,
           source: "mailbox",
           threadId: t.id,
-          subject: t.subject || lastMsg?.body?.slice(0, 60) || "Sin asunto",
-          preview: (lastMsg?.body || "").slice(0, 120),
-          lastMessageAt: t.last_message_at,
+          subject: t.subject || lastMsg.body?.slice(0, 60) || "Sin asunto",
+          preview: (lastMsg.body || "").slice(0, 120),
+          lastMessageAt: lastMsg.created_at,
           unread: false,
           hasAttachment: Boolean(atts?.length),
           docType: t.doc_type,

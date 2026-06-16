@@ -1,12 +1,5 @@
-"use client";
-
-import { Suspense } from "react";
-import BandejaView from "@/app/components/bandeja/BandejaView";
+import { redirect } from "next/navigation";
 
 export default function EnviarPage() {
-  return (
-    <Suspense fallback={<p className="helper">Cargando…</p>}>
-      <BandejaView initialTab="nuevo" />
-    </Suspense>
-  );
+  redirect("/app/documentos?tab=enviar");
 }
