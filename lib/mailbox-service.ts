@@ -1,6 +1,7 @@
 import { supabaseService } from "@/lib/supabase-server";
 import {
   assertValidMailboxFile,
+  assertValidMailboxFileList,
   contentTypeForMailboxExt,
   extFromMailboxFileName,
   mailboxAttachmentStoragePath,
@@ -416,54 +417,57 @@ async function verifyMailboxStorageObject(
   return data.some((f) => f.name === fileName);
 }
 
-export async function initMailboxComposeWithAttachment(
+export async function initMailboxComposeWithAttachments(
   senderId: string,
   input: ComposeMailboxInput,
-  fileMeta: MailboxFileMeta
+  fileMetas: MailboxFileMeta[]
 ) {
-  const ext = assertValidMailboxFile(fileMeta.fileName, fileMeta.sizeBytes);
+  assertValidMailboxFileList(fileMetas);
   const svc = supabaseService();
   const ctx = await prepareComposeContext(svc, senderId, input, {
     allowEmptyBodyWithFile: true,
   });
   const { threadId, messageId } = await createMailboxMessageRecords(svc, senderId, input, ctx);
 
-  const attachmentId = crypto.randomUUID();
-  const version = 1;
-  const storage_path = mailboxAttachmentStoragePath(messageId, attachmentId, version, ext);
-
-  return {
-    threadId,
-    messageId,
-    upload: {
+  const uploads = fileMetas.map((fileMeta) => {
+    const ext = extFromMailboxFileName(fileMeta.fileName)!;
+    const attachmentId = crypto.randomUUID();
+    const version = 1;
+    const storage_path = mailboxAttachmentStoragePath(messageId, attachmentId, version, ext);
+    return {
       attachment_id: attachmentId,
       storage_path,
       content_type: contentTypeForMailboxExt(ext),
       version,
-    },
-  };
+      file_name: fileMeta.fileName,
+      size_bytes: fileMeta.sizeBytes,
+    };
+  });
+
+  return { threadId, messageId, uploads };
 }
 
-export async function commitMailboxAttachment(
+export async function initMailboxComposeWithAttachment(
+  senderId: string,
+  input: ComposeMailboxInput,
+  fileMeta: MailboxFileMeta
+) {
+  const result = await initMailboxComposeWithAttachments(senderId, input, [fileMeta]);
+  return { ...result, upload: result.uploads[0] };
+}
+
+export async function commitMailboxAttachments(
   senderId: string,
   threadId: string,
   messageId: string,
-  attachment: MailboxPendingAttachment,
+  attachments: MailboxPendingAttachment[],
   input?: ComposeMailboxInput
 ) {
-  const svc = supabaseService();
-  const ext = extFromMailboxFileName(attachment.file_name);
-  if (!ext) throw new Error("Tipo de archivo no permitido");
-
-  const expectedPath = mailboxAttachmentStoragePath(
-    messageId,
-    attachment.attachmentId,
-    attachment.version,
-    ext
+  assertValidMailboxFileList(
+    attachments.map((a) => ({ fileName: a.file_name, sizeBytes: a.size_bytes }))
   );
-  if (attachment.storage_path !== expectedPath) {
-    throw new Error("Ruta de adjunto inválida");
-  }
+
+  const svc = supabaseService();
 
   const { data: message, error: mErr } = await svc
     .from("mailbox_messages")
@@ -478,19 +482,33 @@ export async function commitMailboxAttachment(
   const { data: existing } = await svc
     .from("mailbox_attachments")
     .select("id")
-    .eq("message_id", messageId)
-    .limit(1);
+    .eq("message_id", messageId);
 
   if (existing && existing.length > 0) {
-    throw new Error("Este mensaje ya tiene un adjunto registrado");
+    throw new Error("Este mensaje ya tiene adjuntos registrados");
   }
 
-  const exists = await verifyMailboxStorageObject(svc, attachment.storage_path);
-  if (!exists) {
-    throw new Error("No se encontró el archivo en storage. Volvé a intentar subirlo.");
+  for (const attachment of attachments) {
+    const ext = extFromMailboxFileName(attachment.file_name);
+    if (!ext) throw new Error("Tipo de archivo no permitido");
+
+    const expectedPath = mailboxAttachmentStoragePath(
+      messageId,
+      attachment.attachmentId,
+      attachment.version,
+      ext
+    );
+    if (attachment.storage_path !== expectedPath) {
+      throw new Error("Ruta de adjunto inválida");
+    }
+
+    const exists = await verifyMailboxStorageObject(svc, attachment.storage_path);
+    if (!exists) {
+      throw new Error("No se encontró el archivo en storage. Volvé a intentar subirlo.");
+    }
   }
 
-  const { error: aErr } = await svc.from("mailbox_attachments").insert({
+  const rows = attachments.map((attachment) => ({
     id: attachment.attachmentId,
     message_id: messageId,
     storage_path: attachment.storage_path,
@@ -499,7 +517,9 @@ export async function commitMailboxAttachment(
     size_bytes: attachment.size_bytes,
     version: attachment.version,
     uploaded_by: senderId,
-  });
+  }));
+
+  const { error: aErr } = await svc.from("mailbox_attachments").insert(rows);
   if (aErr) throw new Error(aErr.message);
 
   const { data: recips } = await svc
@@ -547,6 +567,16 @@ export async function commitMailboxAttachment(
   );
 
   return { threadId, messageId, hasAttachment: true };
+}
+
+export async function commitMailboxAttachment(
+  senderId: string,
+  threadId: string,
+  messageId: string,
+  attachment: MailboxPendingAttachment,
+  input?: ComposeMailboxInput
+) {
+  return commitMailboxAttachments(senderId, threadId, messageId, [attachment], input);
 }
 
 export async function composeMailboxMessage(

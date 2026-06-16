@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import {
-  commitMailboxAttachment,
+  commitMailboxAttachments,
   composeMailboxMessage,
-  initMailboxComposeWithAttachment,
+  initMailboxComposeWithAttachments,
 } from "@/lib/mailbox-service";
 import { requireMailboxUser, mailboxError } from "@/lib/mailbox-api";
+import {
+  parseMailboxFileMetas,
+  parseMailboxPendingAttachments,
+} from "@/lib/mailbox-compose-api-parsers";
 import type { MailboxDocType } from "@/lib/mailbox-types";
 
 export const runtime = "nodejs";
@@ -46,31 +50,35 @@ export async function POST(req: Request) {
 
     if (phase === "init") {
       const input = parseComposeInput(body);
-      const fileName = String(body.file_name || "");
-      const fileSize = Number(body.file_size || 0);
-      const result = await initMailboxComposeWithAttachment(user!.id, input, {
-        fileName,
-        sizeBytes: fileSize,
-      });
+      const files = parseMailboxFileMetas(body);
+      if (files.length === 0) {
+        return NextResponse.json({ error: "Faltan datos del adjunto" }, { status: 400 });
+      }
+      const result = await initMailboxComposeWithAttachments(user!.id, input, files);
       return NextResponse.json({ ok: true, ...result });
     }
 
     if (phase === "commit") {
       const threadId = String(body.thread_id || "");
       const messageId = String(body.message_id || "");
-      const attachment = body.attachment as Record<string, unknown> | undefined;
-      if (!threadId || !messageId || !attachment) {
+      const attachments = parseMailboxPendingAttachments(body);
+      if (!threadId || !messageId || attachments.length === 0) {
         return NextResponse.json({ error: "Faltan datos del adjunto" }, { status: 400 });
       }
 
-      const result = await commitMailboxAttachment(user!.id, threadId, messageId, {
-        attachmentId: String(attachment.attachment_id || ""),
-        storage_path: String(attachment.storage_path || ""),
-        file_name: String(attachment.file_name || ""),
-        content_type: String(attachment.content_type || ""),
-        size_bytes: Number(attachment.size_bytes || 0),
-        version: Number(attachment.version || 1),
-      });
+      const result = await commitMailboxAttachments(
+        user!.id,
+        threadId,
+        messageId,
+        attachments.map((a) => ({
+          attachmentId: a.attachmentId,
+          storage_path: a.storage_path,
+          file_name: a.file_name,
+          content_type: a.content_type,
+          size_bytes: a.size_bytes,
+          version: a.version,
+        }))
+      );
 
       return NextResponse.json({ ok: true, ...result });
     }

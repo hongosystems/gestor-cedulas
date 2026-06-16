@@ -2,8 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { assertValidMailboxFile } from "@/lib/mailbox-attachments";
 import { fetchMailboxThread } from "@/lib/mailbox-client";
-import { MAX_MAILBOX_ATTACHMENT_BYTES, sendMailboxMessage } from "@/lib/mailbox-send-client";
+import {
+  MAX_MAILBOX_ATTACHMENT_BYTES,
+  MAX_MAILBOX_ATTACHMENTS_PER_MESSAGE,
+  sendMailboxMessage,
+} from "@/lib/mailbox-send-client";
 import type { MailboxInboxItem } from "@/lib/mailbox-types";
 import { fmtDateShort, fmtRelativeTime } from "@/lib/bandeja-utils";
 import RecipientMultiSelect from "@/app/components/bandeja/RecipientMultiSelect";
@@ -31,7 +36,7 @@ export default function MailboxThreadView({ item, onClose, onUpdated }: MailboxT
   const [msg, setMsg] = useState("");
   const [detail, setDetail] = useState<Awaited<ReturnType<typeof fetchMailboxThread>> | null>(null);
   const [reply, setReply] = useState("");
-  const [replyFile, setReplyFile] = useState<File | null>(null);
+  const [replyFiles, setReplyFiles] = useState<File[]>([]);
   const [replyDragOver, setReplyDragOver] = useState(false);
   const [forwardOpen, setForwardOpen] = useState(false);
   const [forwardTo, setForwardTo] = useState<string[]>([]);
@@ -67,9 +72,27 @@ export default function MailboxThreadView({ item, onClose, onUpdated }: MailboxT
   const participants =
     detail?.participants?.map((p) => p.name).join(", ") || item.peerLabel;
 
-  function pickReplyFile(f: File | null) {
-    if (!f) return;
-    setReplyFile(f);
+  function addReplyFiles(incoming: FileList | File[] | null) {
+    if (!incoming || incoming.length === 0) return;
+    const toAdd = Array.from(incoming);
+    setReplyFiles((prev) => {
+      const next = [...prev];
+      for (const f of toAdd) {
+        if (next.length >= MAX_MAILBOX_ATTACHMENTS_PER_MESSAGE) {
+          setMsg(`Podés adjuntar hasta ${MAX_MAILBOX_ATTACHMENTS_PER_MESSAGE} archivos.`);
+          return prev;
+        }
+        try {
+          assertValidMailboxFile(f.name, f.size);
+          next.push(f);
+        } catch (e) {
+          setMsg(e instanceof Error ? e.message : "Archivo inválido.");
+          return prev;
+        }
+      }
+      setMsg("");
+      return next;
+    });
   }
 
   async function downloadAttachment(attachmentId: string) {
@@ -133,13 +156,8 @@ export default function MailboxThreadView({ item, onClose, onUpdated }: MailboxT
 
   async function sendReply() {
     const body = reply.trim();
-    const hasFile = replyFile && replyFile.size > 0;
-    if (!body && !hasFile) return setMsg("Escribí una respuesta o adjuntá un archivo");
-    if (hasFile && replyFile!.size > MAX_MAILBOX_ATTACHMENT_BYTES) {
-      return setMsg(
-        `El archivo supera el límite de ${MAX_MAILBOX_ATTACHMENT_BYTES / (1024 * 1024)} MB.`
-      );
-    }
+    const hasFiles = replyFiles.length > 0;
+    if (!body && !hasFiles) return setMsg("Escribí una respuesta o adjuntá un archivo");
     setSending(true);
     setMsg("");
     try {
@@ -154,11 +172,11 @@ export default function MailboxThreadView({ item, onClose, onUpdated }: MailboxT
           body,
           reply_to_message_id: lastMsg?.id,
         },
-        replyFile
+        replyFiles.length > 0 ? replyFiles : null
       );
       if (!result.ok) throw new Error(result.error);
       setReply("");
-      setReplyFile(null);
+      setReplyFiles([]);
       if (replyFileInputRef.current) replyFileInputRef.current.value = "";
       onUpdated();
       const threadKey = result.threadId || item.threadId;
@@ -337,10 +355,14 @@ export default function MailboxThreadView({ item, onClose, onUpdated }: MailboxT
                   <input
                     ref={replyFileInputRef}
                     type="file"
+                    multiple
                     className="bandeja-thread__file-input"
                     accept=".docx,.pdf,.png,.jpg,.jpeg,.zip"
-                    disabled={sending}
-                    onChange={(e) => pickReplyFile(e.target.files?.[0] ?? null)}
+                    disabled={sending || replyFiles.length >= MAX_MAILBOX_ATTACHMENTS_PER_MESSAGE}
+                    onChange={(e) => {
+                      addReplyFiles(e.target.files);
+                      e.target.value = "";
+                    }}
                   />
                   <div
                     className={`bandeja-thread__dropzone${replyDragOver ? " is-dragover" : ""}`}
@@ -352,7 +374,7 @@ export default function MailboxThreadView({ item, onClose, onUpdated }: MailboxT
                     onDrop={(e) => {
                       e.preventDefault();
                       setReplyDragOver(false);
-                      pickReplyFile(e.dataTransfer.files?.[0] ?? null);
+                      addReplyFiles(e.dataTransfer.files);
                     }}
                     onClick={() => replyFileInputRef.current?.click()}
                     onKeyDown={(e) => {
@@ -365,35 +387,39 @@ export default function MailboxThreadView({ item, onClose, onUpdated }: MailboxT
                     tabIndex={0}
                     aria-label="Adjuntar archivo a la respuesta"
                   >
-                    <span className="bandeja-thread__dropzone-label">Adjuntar archivo</span>
+                    <span className="bandeja-thread__dropzone-label">Adjuntar archivos</span>
                     <span className="bandeja-thread__dropzone-hint">
-                      Arrastrá aquí o hacé click · .pdf .docx .jpg .png .zip
+                      Arrastrá aquí o hacé click · hasta {MAX_MAILBOX_ATTACHMENTS_PER_MESSAGE} · máx.{" "}
+                      {MAX_MAILBOX_ATTACHMENT_BYTES / (1024 * 1024)} MB c/u
                     </span>
                   </div>
-                  {replyFile ? (
-                    <div className="bandeja-thread__file-preview">
-                      <button
-                        type="button"
-                        className="bandeja-thread__file"
-                        onClick={() => replyFileInputRef.current?.click()}
-                      >
-                        <span className="bandeja-thread__file-icon" aria-hidden>
-                          📎
-                        </span>
-                        <span className="bandeja-thread__file-name">{replyFile.name}</span>
-                        <span className="bandeja-thread__file-size">{formatFileSize(replyFile.size)}</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="bandeja-thread__file-remove"
-                        disabled={sending}
-                        onClick={() => {
-                          setReplyFile(null);
-                          if (replyFileInputRef.current) replyFileInputRef.current.value = "";
-                        }}
-                      >
-                        Quitar
-                      </button>
+                  {replyFiles.length > 0 ? (
+                    <div className="bandeja-file-list">
+                      {replyFiles.map((f, index) => (
+                        <div key={`${f.name}-${index}`} className="bandeja-thread__file-preview">
+                          <button
+                            type="button"
+                            className="bandeja-thread__file"
+                            onClick={() => replyFileInputRef.current?.click()}
+                          >
+                            <span className="bandeja-thread__file-icon" aria-hidden>
+                              📎
+                            </span>
+                            <span className="bandeja-thread__file-name">{f.name}</span>
+                            <span className="bandeja-thread__file-size">{formatFileSize(f.size)}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="bandeja-thread__file-remove"
+                            disabled={sending}
+                            onClick={() => {
+                              setReplyFiles((prev) => prev.filter((_, i) => i !== index));
+                            }}
+                          >
+                            Quitar
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   ) : null}
                 </div>

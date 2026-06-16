@@ -8,8 +8,10 @@ import ExpedienteAutocomplete, { type ExpedienteOption } from "@/app/components/
 import RecipientMultiSelect from "@/app/components/bandeja/RecipientMultiSelect";
 import { fetchBandejaUsers } from "@/lib/bandeja-users";
 import MentionTextarea from "@/app/components/bandeja/MentionTextarea";
+import { assertValidMailboxFile } from "@/lib/mailbox-attachments";
 import {
   MAX_MAILBOX_ATTACHMENT_BYTES,
+  MAX_MAILBOX_ATTACHMENTS_PER_MESSAGE,
   sendMailboxMessage,
 } from "@/lib/mailbox-send-client";
 
@@ -41,7 +43,7 @@ export default function MailboxComposeForm({
   const [title, setTitle] = useState("");
   const [expediente, setExpediente] = useState<ExpedienteOption | null>(null);
   const [message, setMessage] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [sending, setSending] = useState(false);
   const [showCc, setShowCc] = useState(false);
@@ -72,22 +74,31 @@ export default function MailboxComposeForm({
     [to, cc, bcc]
   );
 
-  const pickFile = useCallback((f: File | null) => {
-    if (!f) return;
-    if (f.size > MAX_MAILBOX_ATTACHMENT_BYTES) {
-      setMsg(
-        `El archivo supera el límite de ${MAX_MAILBOX_ATTACHMENT_BYTES / (1024 * 1024)} MB.`
-      );
-      return;
-    }
-    const allowedExts = [".docx", ".pdf", ".png", ".jpg", ".jpeg", ".zip"];
-    const name = f.name.toLowerCase();
-    const ok = allowedExts.some((ext) => name.endsWith(ext));
-    if (!ok) {
-      setMsg("El archivo debe ser .docx, .pdf, .png, .jpg, .jpeg o .zip.");
-      return;
-    }
-    setFile(f);
+  const addFiles = useCallback((incoming: FileList | File[] | null) => {
+    if (!incoming || incoming.length === 0) return;
+    const toAdd = Array.from(incoming);
+    setFiles((prev) => {
+      const next = [...prev];
+      for (const f of toAdd) {
+        if (next.length >= MAX_MAILBOX_ATTACHMENTS_PER_MESSAGE) {
+          setMsg(`Podés adjuntar hasta ${MAX_MAILBOX_ATTACHMENTS_PER_MESSAGE} archivos.`);
+          return prev;
+        }
+        try {
+          assertValidMailboxFile(f.name, f.size);
+          next.push(f);
+        } catch (e) {
+          setMsg(e instanceof Error ? e.message : "Archivo inválido.");
+          return prev;
+        }
+      }
+      setMsg("");
+      return next;
+    });
+  }, []);
+
+  const removeFile = useCallback((index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
   async function onSend() {
@@ -96,22 +107,8 @@ export default function MailboxComposeForm({
     if (allRecipientIds.length === 0) return setMsg("Elegí al menos un destinatario.");
 
     const messageText = message.trim();
-    if (!messageText && !file) {
+    if (!messageText && files.length === 0) {
       return setMsg("Escribí un mensaje o adjuntá un archivo.");
-    }
-
-    if (file) {
-      const allowedExts = [".docx", ".pdf", ".png", ".jpg", ".jpeg", ".zip"];
-      const name = file.name.toLowerCase();
-      const ok = allowedExts.some((ext) => name.endsWith(ext));
-      if (!ok) {
-        return setMsg("El archivo debe ser .docx, .pdf, .png, .jpg, .jpeg o .zip.");
-      }
-      if (file.size > MAX_MAILBOX_ATTACHMENT_BYTES) {
-        return setMsg(
-          `El archivo supera el límite de ${MAX_MAILBOX_ATTACHMENT_BYTES / (1024 * 1024)} MB.`
-        );
-      }
     }
 
     setSending(true);
@@ -135,7 +132,7 @@ export default function MailboxComposeForm({
           bcc,
           expediente_ref: expediente?.ref ?? null,
         },
-        file
+        files.length > 0 ? files : null
       );
 
       if (!result.ok) {
@@ -151,7 +148,7 @@ export default function MailboxComposeForm({
       setTitle("");
       setMessage("");
       setExpediente(null);
-      setFile(null);
+      setFiles([]);
       setTo([]);
       setCc([]);
       setBcc([]);
@@ -347,37 +344,46 @@ export default function MailboxComposeForm({
               onDrop={(e) => {
                 e.preventDefault();
                 setDragOver(false);
-                pickFile(e.dataTransfer.files?.[0] ?? null);
+                addFiles(e.dataTransfer.files);
               }}
             >
               <input
                 type="file"
+                multiple
                 accept=".docx,.pdf,.png,.jpg,.jpeg,.zip"
-                onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
-                disabled={sending}
+                onChange={(e) => {
+                  addFiles(e.target.files);
+                  e.target.value = "";
+                }}
+                disabled={sending || files.length >= MAX_MAILBOX_ATTACHMENTS_PER_MESSAGE}
               />
               <div className="bandeja-dropzone-title">
-                Arrastrá un archivo o hacé click para adjuntar
+                Arrastrá archivos o hacé click para adjuntar
               </div>
               <div className="bandeja-dropzone-hint">
                 .docx · .pdf · .png · .jpg · .jpeg · .zip · máx.{" "}
-                {MAX_MAILBOX_ATTACHMENT_BYTES / (1024 * 1024)} MB
+                {MAX_MAILBOX_ATTACHMENT_BYTES / (1024 * 1024)} MB c/u · hasta{" "}
+                {MAX_MAILBOX_ATTACHMENTS_PER_MESSAGE} archivos
               </div>
             </div>
 
-            {file && (
-              <div className="bandeja-file-chip">
-                <span>
-                  📎 {file.name} · {formatFileSize(file.size)}
-                </span>
-                <button
-                  type="button"
-                  className="bandeja-cc-toggle"
-                  onClick={() => setFile(null)}
-                  disabled={sending}
-                >
-                  Quitar
-                </button>
+            {files.length > 0 && (
+              <div className="bandeja-file-list">
+                {files.map((f, index) => (
+                  <div key={`${f.name}-${index}`} className="bandeja-file-chip">
+                    <span>
+                      📎 {f.name} · {formatFileSize(f.size)}
+                    </span>
+                    <button
+                      type="button"
+                      className="bandeja-cc-toggle"
+                      onClick={() => removeFile(index)}
+                      disabled={sending}
+                    >
+                      Quitar
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
           </div>

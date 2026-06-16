@@ -1006,6 +1006,17 @@
   color: rgba(234, 243, 255, 0.5);
 }
 
+.bandeja-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.bandeja-file-list .bandeja-file-chip {
+  margin: 0;
+}
+
 .bandeja-file-chip {
   display: flex;
   align-items: center;

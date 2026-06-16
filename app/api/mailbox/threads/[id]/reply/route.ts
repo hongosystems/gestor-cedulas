@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 import {
-  commitMailboxAttachment,
+  commitMailboxAttachments,
   composeMailboxMessage,
-  initMailboxComposeWithAttachment,
+  initMailboxComposeWithAttachments,
   resolveMailboxThreadId,
 } from "@/lib/mailbox-service";
 import { requireMailboxUser, mailboxError } from "@/lib/mailbox-api";
+import {
+  parseMailboxFileMetas,
+  parseMailboxPendingAttachments,
+} from "@/lib/mailbox-compose-api-parsers";
 
 export const runtime = "nodejs";
 
@@ -49,30 +53,34 @@ export async function POST(
     };
 
     if (phase === "init") {
-      const fileName = String(body.file_name || "");
-      const fileSize = Number(body.file_size || 0);
-      const result = await initMailboxComposeWithAttachment(user!.id, baseInput, {
-        fileName,
-        sizeBytes: fileSize,
-      });
+      const files = parseMailboxFileMetas(body);
+      if (files.length === 0) {
+        return NextResponse.json({ error: "Faltan datos del adjunto" }, { status: 400 });
+      }
+      const result = await initMailboxComposeWithAttachments(user!.id, baseInput, files);
       return NextResponse.json({ ok: true, ...result });
     }
 
     if (phase === "commit") {
       const messageId = String(body.message_id || "");
-      const attachment = body.attachment as Record<string, unknown> | undefined;
-      if (!messageId || !attachment) {
+      const attachments = parseMailboxPendingAttachments(body);
+      if (!messageId || attachments.length === 0) {
         return NextResponse.json({ error: "Faltan datos del adjunto" }, { status: 400 });
       }
 
-      const result = await commitMailboxAttachment(user!.id, threadId, messageId, {
-        attachmentId: String(attachment.attachment_id || ""),
-        storage_path: String(attachment.storage_path || ""),
-        file_name: String(attachment.file_name || ""),
-        content_type: String(attachment.content_type || ""),
-        size_bytes: Number(attachment.size_bytes || 0),
-        version: Number(attachment.version || 1),
-      });
+      const result = await commitMailboxAttachments(
+        user!.id,
+        threadId,
+        messageId,
+        attachments.map((a) => ({
+          attachmentId: a.attachmentId,
+          storage_path: a.storage_path,
+          file_name: a.file_name,
+          content_type: a.content_type,
+          size_bytes: a.size_bytes,
+          version: a.version,
+        }))
+      );
 
       return NextResponse.json({ ok: true, ...result });
     }
