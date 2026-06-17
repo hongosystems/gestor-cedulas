@@ -7,6 +7,10 @@ import {
   pjnLocalBaseUrl,
   type PjnCargarPayload,
 } from "@/lib/pjn-payload";
+import {
+  formatPjnNonJsonError,
+  postCargarPjnAndWait,
+} from "@/lib/pjn-cargar-fetch";
 import { REITERATORIO_PRESENTADO_PREFIX } from "@/lib/reiteratorios";
 
 export const runtime = "nodejs";
@@ -219,42 +223,36 @@ export async function POST(
   };
   logPjnPayload(cedula, pjnPayload);
 
-  let pjnRes: Response;
+  let pjnResult;
   try {
-    pjnRes = await fetch(`${pjnBase}/cargar-pjn`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(internalSecret ? { "X-Internal-Secret": internalSecret } : {}),
-      },
-      body: JSON.stringify(pjnPayload),
-      signal: AbortSignal.timeout(PJN_FETCH_MS),
+    pjnResult = await postCargarPjnAndWait({
+      baseUrl: pjnBase,
+      payload: pjnPayload,
+      cedulaId,
+      internalSecret,
+      totalTimeoutMs: PJN_FETCH_MS,
     });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "No se pudo contactar al VPS PJN";
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 
-  const text = await pjnRes.text();
-  let payload: { ok?: boolean; error?: string } = {};
-  try {
-    payload = JSON.parse(text) as { ok?: boolean; error?: string };
-  } catch {
+  const { ok: pjnOk, status: pjnStatus, payload, text } = pjnResult;
+
+  if (!payload || Object.keys(payload).length === 0) {
     return NextResponse.json(
-      {
-        error: `Respuesta no JSON del VPS (${pjnRes.status}): ${text.slice(0, 500)}`,
-      },
+      { error: formatPjnNonJsonError(pjnStatus, text) },
       { status: 502 }
     );
   }
 
-  if (!pjnRes.ok || payload.ok !== true) {
+  if (!pjnOk || payload.ok !== true) {
     return NextResponse.json(
       {
         error:
           payload.error ||
-          pjnRes.statusText ||
-          `Error VPS PJN (${pjnRes.status})`,
+          pjnStatus.toString() ||
+          `Error VPS PJN (${pjnStatus})`,
       },
       { status: 502 }
     );

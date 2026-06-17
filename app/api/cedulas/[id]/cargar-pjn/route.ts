@@ -7,6 +7,10 @@ import {
   pjnVpsBaseUrl,
 } from "@/lib/pjn-payload";
 import {
+  formatPjnNonJsonError,
+  postCargarPjnAndWait,
+} from "@/lib/pjn-cargar-fetch";
+import {
   DILIGENCIAMIENTO_FORBIDDEN_MSG,
   requireDiligenciamientoAccess,
 } from "@/lib/diligenciamiento-access";
@@ -193,46 +197,33 @@ export async function POST(
 
   const internalSecret = process.env.RAILWAY_INTERNAL_SECRET;
 
-  let railwayRes: Response;
+  let pjnResult;
   try {
-    railwayRes = await fetch(`${base}/cargar-pjn`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(internalSecret ? { "X-Internal-Secret": internalSecret } : {}),
-      },
-      body: JSON.stringify(pjnPayload),
-      signal: AbortSignal.timeout(RAILWAY_FETCH_MS),
+    pjnResult = await postCargarPjnAndWait({
+      baseUrl: base,
+      payload: pjnPayload,
+      cedulaId,
+      internalSecret,
+      totalTimeoutMs: RAILWAY_FETCH_MS,
     });
-  } catch (e: any) {
-    console.error("[cargar-pjn] fetch Railway:", e?.message || e);
-    const msg = e?.message || "No se pudo contactar al servicio de carga PJN";
+  } catch (e: unknown) {
+    console.error("[cargar-pjn] fetch Railway:", e);
+    const msg =
+      e instanceof Error ? e.message : "No se pudo contactar al servicio de carga PJN";
     await persistPjnFallo(svc, cedulaId, msg);
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 
-  const text = await railwayRes.text();
-  let payload: { ok?: boolean; error?: string; pruebaSinEnvio?: boolean } = {};
-  try {
-    payload = JSON.parse(text) as {
-      ok?: boolean;
-      error?: string;
-      pruebaSinEnvio?: boolean;
-    };
-  } catch {
-    if (!railwayRes.ok) {
-      const hint =
-        text.includes("Cannot POST /cargar-pjn") || text.includes("/cargar-pjn")
-          ? ` El host configurado (RAILWAY_CARGAR_PJN_URL o RAILWAY_OCR_URL) no expone POST /cargar-pjn. Si el OCR está en otro servidor, definí RAILWAY_CARGAR_PJN_URL=http://localhost:PUERTO apuntando a railway-service/cargar-pjn (node server.mjs).`
-          : "";
-      const msg = `Respuesta no JSON del servicio PJN (${railwayRes.status}).${hint}`;
-      await persistPjnFallo(svc, cedulaId, msg);
-      return NextResponse.json({ error: msg }, { status: 502 });
-    }
+  const { ok: pjnOk, status: pjnStatus, payload, text } = pjnResult;
+
+  if (!payload || Object.keys(payload).length === 0) {
+    const msg = formatPjnNonJsonError(pjnStatus, text);
+    await persistPjnFallo(svc, cedulaId, msg);
+    return NextResponse.json({ error: msg }, { status: 502 });
   }
 
-  if (!railwayRes.ok || payload.ok !== true) {
-    let errMsg = payload.error || text || railwayRes.statusText || "Error al cargar en PJN";
+  if (!pjnOk || payload.ok !== true) {
+    let errMsg = payload.error || text || "Error al cargar en PJN";
     if (
       typeof errMsg === "string" &&
       (errMsg.includes("Cannot POST /cargar-pjn") || errMsg.includes("<!DOCTYPE html>"))
@@ -244,7 +235,7 @@ export async function POST(
     await persistPjnFallo(svc, cedulaId, errMsg);
     return NextResponse.json(
       { error: errMsg },
-      { status: railwayRes.status === 200 ? 502 : railwayRes.status >= 500 ? railwayRes.status : 502 }
+      { status: pjnStatus === 200 ? 502 : pjnStatus >= 500 ? pjnStatus : 502 }
     );
   }
 
