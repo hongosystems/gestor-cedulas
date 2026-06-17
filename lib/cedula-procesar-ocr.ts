@@ -4,6 +4,10 @@ import {
   logPjnPayload,
   pjnVpsBaseUrl,
 } from "@/lib/pjn-payload";
+import {
+  formatPjnNonJsonError,
+  postCargarPjnAndWait,
+} from "@/lib/pjn-cargar-fetch";
 
 const CARGAR_PJN_FETCH_MS = 300_000;
 const RAILWAY_OCR_FETCH_MS = 600_000;
@@ -70,16 +74,14 @@ async function invocarCargarPjnTrasOcr(
 
   const internalSecret = process.env.RAILWAY_INTERNAL_SECRET;
 
-  let railwayRes: Response;
+  let pjnResult;
   try {
-    railwayRes = await fetch(`${base}/cargar-pjn`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(internalSecret ? { "X-Internal-Secret": internalSecret } : {}),
-      },
-      body: JSON.stringify(pjnPayload),
-      signal: AbortSignal.timeout(CARGAR_PJN_FETCH_MS),
+    pjnResult = await postCargarPjnAndWait({
+      baseUrl: base,
+      payload: pjnPayload,
+      cedulaId,
+      internalSecret,
+      totalTimeoutMs: CARGAR_PJN_FETCH_MS,
     });
   } catch (e: unknown) {
     const errMsg = e instanceof Error ? e.message : String(e);
@@ -87,16 +89,12 @@ async function invocarCargarPjnTrasOcr(
     return;
   }
 
-  const text = await railwayRes.text();
-  let payload: { ok?: boolean; error?: string; pruebaSinEnvio?: boolean } = {};
-  try {
-    payload = JSON.parse(text) as typeof payload;
-  } catch {
+  const { status: pjnStatus, payload, text } = pjnResult;
+
+  if (!payload || Object.keys(payload).length === 0) {
     await svc
       .from("cedulas")
-      .update({
-        observaciones_pjn: `Respuesta no JSON (${railwayRes.status}): ${text.slice(0, 500)}`,
-      })
+      .update({ observaciones_pjn: formatPjnNonJsonError(pjnStatus, text) })
       .eq("id", cedulaId);
     return;
   }
@@ -117,10 +115,7 @@ async function invocarCargarPjnTrasOcr(
   }
 
   const errMsg =
-    payload.error ||
-    text ||
-    railwayRes.statusText ||
-    `Error cargar-pjn (${railwayRes.status})`;
+    payload.error || text || `Error cargar-pjn (${pjnStatus})`;
   await svc.from("cedulas").update({ observaciones_pjn: errMsg }).eq("id", cedulaId);
 }
 
