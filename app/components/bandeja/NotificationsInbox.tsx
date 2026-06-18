@@ -1468,7 +1468,28 @@ export default function NotificationsInbox({
     window.location.href = "/login";
   }
 
+  function ShellWrapper({ children }: { children: React.ReactNode }) {
+    if (embedded) {
+      return <div className="bandeja-notifications-shell">{children}</div>;
+    }
+    return <main className="container">{children}</main>;
+  }
+
+  function BodyWrapper({ children }: { children: React.ReactNode }) {
+    if (embedded) {
+      return <div className="bandeja-notifications-body">{children}</div>;
+    }
+    return <section className="card">{children}</section>;
+  }
+
   if (loading) {
+    if (embedded) {
+      return (
+        <div className="bandeja-notifications-shell">
+          <p className="bandeja-loading">Cargando alertas…</p>
+        </div>
+      );
+    }
     return (
       <main className="container">
         <section className="card">
@@ -1481,7 +1502,7 @@ export default function NotificationsInbox({
   }
 
   return (
-    <main className={`container${embedded ? " bandeja-notifications-embedded" : ""}`}>
+    <ShellWrapper>
       {/* Toast Notification */}
       {toast && (
         <div
@@ -1563,7 +1584,7 @@ export default function NotificationsInbox({
           </button>
         </div>
       )}
-      <section className="card">
+      <BodyWrapper>
         {!embedded && (
         <header className="nav">
           <img className="logoMini" src="/logo.png" alt="Logo" />
@@ -1613,7 +1634,7 @@ export default function NotificationsInbox({
         </header>
         )}
 
-        <div className="page">
+        <div className={embedded ? "bandeja-notifications-body-inner" : "page"}>
           {/* Filtros y acciones */}
           {!hideFilterBar && (
           <div style={{ 
@@ -1710,15 +1731,96 @@ export default function NotificationsInbox({
           </div>
           )}
 
+          {embedded && (unreadCount > 0 || visibleItems.some((n) => n.is_read)) && (
+            <div className="bandeja-notifications-actions">
+              {unreadCount > 0 && (
+                <button
+                  type="button"
+                  onClick={markAllRead}
+                  className="btn"
+                  disabled={processingIds.size > 0}
+                  style={{ fontSize: 13, padding: "8px 16px" }}
+                >
+                  Marcar todas como leídas
+                </button>
+              )}
+              {visibleItems.some((n) => n.is_read) && (
+                <button
+                  type="button"
+                  onClick={deleteAllRead}
+                  className="btn danger"
+                  disabled={processingIds.size > 0}
+                  style={{ fontSize: 13, padding: "8px 16px" }}
+                >
+                  Eliminar leídas
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Vista tipo email: Lista y detalle */}
-          <div style={{ display: "grid", gridTemplateColumns: selectedNotif ? "1fr 2fr" : "1fr", gap: 16 }}>
+          <div
+            className={
+              embedded
+                ? `bandeja-notifications-split${selectedNotif ? "" : " is-list-only"}`
+                : undefined
+            }
+            style={
+              embedded
+                ? undefined
+                : {
+                    display: "grid",
+                    gridTemplateColumns: selectedNotif ? "1fr 2fr" : "1fr",
+                    gap: 16,
+                  }
+            }
+          >
             {/* Lista de notificaciones (inbox) */}
-            <div style={{ display: "grid", gap: 12, maxHeight: "70vh", overflowY: "auto" }}>
+            <div
+              className={embedded ? "bandeja-notifications-list" : undefined}
+              role={embedded ? "list" : undefined}
+              aria-label={embedded ? "Alertas" : undefined}
+              style={
+                embedded
+                  ? undefined
+                  : { display: "grid", gap: 12, maxHeight: "70vh", overflowY: "auto" }
+              }
+            >
               {filteredThreads.map((row) => {
                 const n = row.latest;
-                const selectedRoot =
-                  selectedNotif && getThreadRootId(selectedNotif) === row.rootId;
+                const selectedRoot = Boolean(
+                  selectedNotif && getThreadRootId(selectedNotif) === row.rootId
+                );
                 const dim = row.allRead;
+
+                if (embedded) {
+                  return (
+                    <button
+                      key={row.rootId}
+                      type="button"
+                      role="listitem"
+                      className={`bandeja-row${selectedRoot ? " is-selected" : ""}${row.hasUnread ? " is-unread" : ""}`}
+                      onClick={() => handleNotificationClick(n)}
+                    >
+                      <span className="bandeja-row-type">Alerta</span>
+                      <div className="bandeja-row-main">
+                        <div className="bandeja-row-top">
+                          <span className="bandeja-row-subject">{n.title}</span>
+                          <span className="bandeja-row-date">{fmtTime(row.lastActivity)}</span>
+                        </div>
+                        <div className="bandeja-row-preview">
+                          {snippet(messagePreviewText(n), 140)}
+                        </div>
+                      </div>
+                      <span className="bandeja-row-status" aria-hidden>
+                        {row.hasUnread ? (
+                          <span className="bandeja-row-dot" title="No leído" />
+                        ) : null}
+                      </span>
+                    </button>
+                  );
+                }
+
                 return (
               <div
                 key={row.rootId}
@@ -1833,13 +1935,17 @@ export default function NotificationsInbox({
             })}
 
               {filteredThreads.length === 0 && (
-                <div style={{ 
+                <div className={embedded ? "bandeja-empty" : undefined} style={embedded ? undefined : {
                   padding: 40, 
                   textAlign: "center", 
                   color: "rgba(234,243,255,.6)",
                   fontSize: 14 
                 }}>
-                  {filter === "all" 
+                  {embedded
+                    ? filter === "unread"
+                      ? "No hay alertas sin leer."
+                      : "No hay alertas."
+                    : filter === "all" 
                     ? "No hay conversaciones." 
                     : filter === "unread"
                     ? "No hay conversaciones con mensajes sin leer."
@@ -1850,17 +1956,24 @@ export default function NotificationsInbox({
 
             {/* Vista detalle tipo email */}
             {selectedNotif && (
-              <div style={{
-                border: "1px solid rgba(255,255,255,.2)",
-                borderRadius: 12,
-                padding: 20,
-                background: "rgba(255,255,255,.05)",
-                display: "flex",
-                flexDirection: "column",
-                gap: 16,
-                maxHeight: "70vh",
-                overflowY: "auto"
-              }}>
+              <div
+                className={embedded ? "bandeja-notifications-detail is-open" : undefined}
+                style={
+                  embedded
+                    ? undefined
+                    : {
+                        border: "1px solid rgba(255,255,255,.2)",
+                        borderRadius: 12,
+                        padding: 20,
+                        background: "rgba(255,255,255,.05)",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 16,
+                        maxHeight: "70vh",
+                        overflowY: "auto",
+                      }
+                }
+              >
                 {/* Header del hilo (asunto = mensaje más reciente) */}
                 <div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
@@ -2138,7 +2251,7 @@ export default function NotificationsInbox({
             )}
           </div>
         </div>
-      </section>
-    </main>
+      </BodyWrapper>
+    </ShellWrapper>
   );
 }

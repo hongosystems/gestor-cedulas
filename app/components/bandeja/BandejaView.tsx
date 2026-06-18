@@ -243,6 +243,8 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
     );
   };
 
+  const isNotificationsView = !isMailView && !isComposeView;
+
   if (rolesLoading) {
     return (
       <div className="bandeja-app">
@@ -254,7 +256,7 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
   return (
     <div className="bandeja-app">
       <div
-        className={`bandeja-workspace${isMailView ? " is-mail" : ""}${isComposeView ? " is-compose" : ""}`}
+        className={`bandeja-workspace${isMailView ? " is-mail" : ""}${isComposeView ? " is-compose" : ""}${isNotificationsView ? " is-notifications" : ""}`}
       >
         <aside className="bandeja-sidebar" aria-label="Carpetas de bandeja">
           {workflow && (
@@ -294,9 +296,7 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
           </nav>
         </aside>
 
-        {isComposeView ? (
-          renderPanel()
-        ) : isMailView ? (
+        {isComposeView || isMailView || isNotificationsView ? (
           renderPanel()
         ) : (
           <section className="bandeja-panel">{renderPanel()}</section>

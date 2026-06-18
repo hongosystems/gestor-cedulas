@@ -1144,6 +1144,111 @@ body:has(.bandeja-app) .shell-notification-btn button {
   justify-content: center !important;
 }
 
+/* Vista alertas / notificaciones embebidas (sin ventana dentro de ventana) */
+.bandeja-workspace.is-notifications > .bandeja-notifications-shell {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.bandeja-notifications-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+.bandeja-notifications-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.bandeja-notifications-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--bandeja-border);
+}
+
+.bandeja-notifications-split {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(300px, 420px) minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.bandeja-notifications-split.is-list-only {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.bandeja-notifications-list {
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border-right: 1px solid var(--bandeja-border);
+}
+
+.bandeja-notifications-split.is-list-only .bandeja-notifications-list {
+  border-right: none;
+}
+
+.bandeja-notifications-body-inner {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.bandeja-notifications-list .bandeja-empty {
+  padding: 48px 24px;
+}
+
+.bandeja-notifications-list .bandeja-row {
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  width: 100%;
+  border-bottom: 1px solid var(--bandeja-border);
+}
+
+.bandeja-notifications-list .bandeja-row-type {
+  font-size: 9px;
+}
+
+.bandeja-notifications-detail {
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.bandeja-notifications-detail.bandeja-mail-thread--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--bandeja-text-muted);
+  font-size: 14px;
+}
+
+.bandeja-notifications-detail.bandeja-mail-thread--empty p {
+  margin: 0;
+}
+
 /* Notificaciones embebidas — sin doble scroll interno */
 .bandeja-panel .bandeja-notifications-embedded .page > div[style*="gridTemplateColumns"] > div:first-child {
   max-height: none !important;
@@ -1151,6 +1256,24 @@ body:has(.bandeja-app) .shell-notification-btn button {
 }
 
 /* Responsive */
+@media (max-width: 1100px) {
+  .bandeja-notifications-split:not(.is-list-only) {
+    grid-template-columns: minmax(0, 1fr);
+    position: relative;
+  }
+
+  .bandeja-notifications-split:not(.is-list-only) .bandeja-notifications-list.is-hidden-mobile {
+    display: none;
+  }
+
+  .bandeja-notifications-split:not(.is-list-only) .bandeja-notifications-detail.is-open {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    background: var(--shell-bg, #1a2332);
+  }
+}
+
 @media (max-width: 1100px) {
   .bandeja-workspace.is-mail {
     grid-template-columns: var(--bandeja-sidebar-w) minmax(0, 1fr);
