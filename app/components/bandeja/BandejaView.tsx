@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { usePageSearchBridge } from "@/app/hooks/usePageSearchBridge";
 import { usePageSearchOptional } from "@/app/components/shell/PageSearchContext";
 import { useUserRoles } from "@/app/hooks/useUserRoles";
-import { supabase } from "@/lib/supabase";
 import {
   type BandejaTab,
   canWorkflowCedulas,
@@ -13,6 +12,7 @@ import {
 } from "@/lib/bandeja-utils";
 import { bandejaTabToFolder, isMailboxTab } from "@/lib/bandeja-mail-folders";
 import { fetchMailboxFolderCounts } from "@/lib/bandeja-inbox-search";
+import { fetchUnreadBadgeCounts } from "@/lib/unread-notifications-client";
 import NotificationsInbox from "@/app/components/bandeja/NotificationsInbox";
 import MailboxComposeForm from "@/app/components/bandeja/MailboxComposeForm";
 import MailboxInbox from "@/app/components/bandeja/MailboxInbox";
@@ -33,7 +33,7 @@ type NavItem = {
 };
 
 function tabToNotificationFilter(tab: BandejaTab): "all" | "unread" | "read" {
-  if (tab === "no-leidas") return "unread";
+  if (tab === "no-leidas" || tab === "alertas") return "unread";
   return "all";
 }
 
@@ -49,6 +49,7 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
     archived: 0,
   });
   const [notificationUnread, setNotificationUnread] = useState(0);
+  const [appAlertUnread, setAppAlertUnread] = useState(0);
 
   const workflow = canWorkflowCedulas(roles);
 
@@ -79,15 +80,28 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
   const isMailView = Boolean(workflow && mailboxFolder);
   const isComposeView = activeTab === "nuevo";
 
+  const refreshBadgeCounts = useCallback(async () => {
+    if (!hasSession) return;
+    try {
+      const badge = await fetchUnreadBadgeCounts();
+      setNotificationUnread(badge.workflow ? badge.app : badge.total);
+      setAppAlertUnread(badge.app);
+    } catch {
+      /* mantener contadores previos */
+    }
+  }, [hasSession]);
+
   const refreshCounts = useCallback(async () => {
-    if (!workflow || !hasSession) return;
+    if (!hasSession) return;
+    await refreshBadgeCounts();
+    if (!workflow) return;
     try {
       const counts = await fetchMailboxFolderCounts();
       setFolderCounts(counts);
     } catch {
       /* mantener contadores previos */
     }
-  }, [workflow, hasSession]);
+  }, [workflow, hasSession, refreshBadgeCounts]);
 
   useEffect(() => {
     if (!hasSession && !rolesLoading) {
@@ -97,31 +111,8 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
 
   useEffect(() => {
     if (!hasSession) return;
-    let mounted = true;
-
-    (async () => {
-      const { data: sess } = await supabase.auth.getSession();
-      const uid = sess.session?.user.id;
-      if (!uid) return;
-
-      const { count: notifUnread } = await supabase
-        .from("notifications")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", uid)
-        .eq("is_read", false);
-
-      if (!mounted) return;
-      setNotificationUnread(notifUnread ?? 0);
-
-      if (workflow) {
-        await refreshCounts();
-      }
-    })();
-
-    return () => {
-      mounted = false;
-    };
-  }, [hasSession, workflow, refreshCounts]);
+    refreshCounts();
+  }, [hasSession, refreshCounts]);
 
   const setTab = useCallback(
     (tab: BandejaTab) => {
@@ -150,26 +141,48 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
           label: "Enviados",
           icon: "📤",
           requiresWorkflow: true,
+        },
+        {
+          id: "no-leidas",
+          label: "No leídas",
+          icon: "🔴",
+          badge: folderCounts.unread > 0 ? folderCounts.unread : undefined,
+          alert: folderCounts.unread > 0,
         }
       );
-    }
-    items.push(
-      {
-        id: "no-leidas",
-        label: "No leídas",
-        icon: "🔴",
-        badge: workflow ? folderCounts.unread : notificationUnread,
-        alert: workflow ? folderCounts.unread > 0 : notificationUnread > 0,
-      },
-      {
+      if (appAlertUnread > 0) {
+        items.push({
+          id: "alertas",
+          label: "Alertas",
+          icon: "🔔",
+          badge: appAlertUnread,
+          alert: true,
+        });
+      }
+      items.push({
         id: "todas",
         label: "Todas",
         icon: "📁",
-        badge: workflow ? folderCounts.all : undefined,
-      }
-    );
+        badge: folderCounts.all > 0 ? folderCounts.all : undefined,
+      });
+    } else {
+      items.push(
+        {
+          id: "no-leidas",
+          label: "No leídas",
+          icon: "🔴",
+          badge: notificationUnread > 0 ? notificationUnread : undefined,
+          alert: notificationUnread > 0,
+        },
+        {
+          id: "todas",
+          label: "Todas",
+          icon: "📁",
+        }
+      );
+    }
     return items;
-  }, [workflow, folderCounts, notificationUnread]);
+  }, [workflow, folderCounts, notificationUnread, appAlertUnread]);
 
   const visibleNavItems = navItems.filter((item) => !item.requiresWorkflow || workflow);
 
@@ -212,13 +225,21 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
       );
     }
 
+    if (activeTab === "alertas" || !workflow) {
+      return (
+        <NotificationsInbox
+          embedded
+          hideFilterBar
+          initialFilter={tabToNotificationFilter(activeTab)}
+          searchQuery={effectiveSearch}
+          excludeMailboxLinked={workflow}
+          onCountsChanged={refreshBadgeCounts}
+        />
+      );
+    }
+
     return (
-      <NotificationsInbox
-        embedded
-        hideFilterBar
-        initialFilter={tabToNotificationFilter(activeTab)}
-        searchQuery={effectiveSearch}
-      />
+      <div className="bandeja-empty">No hay contenido para esta carpeta.</div>
     );
   };
 

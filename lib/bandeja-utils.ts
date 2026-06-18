@@ -57,6 +57,7 @@ export type BandejaTab =
   | "archivados"
   | "todas"
   | "no-leidas"
+  | "alertas"
   | "accion"
   | "nuevo";
 
@@ -68,12 +69,13 @@ export function parseBandejaTab(raw: string | null | undefined): BandejaTab {
     v === "archivados" ||
     v === "todas" ||
     v === "no-leidas" ||
+    v === "alertas" ||
     v === "nuevo"
   ) {
     return v;
   }
   if (v === "accion") return "no-leidas";
-  if (v === "notificaciones") return "todas";
+  if (v === "notificaciones") return "alertas";
   return "todas";
 }
 

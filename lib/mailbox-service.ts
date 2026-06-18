@@ -101,43 +101,6 @@ function displayName(p?: { full_name: string | null; email: string | null } | nu
   return (p?.email || "").trim() || "Usuario";
 }
 
-async function notifyRecipients(
-  svc: ReturnType<typeof supabaseService>,
-  opts: {
-    recipientIds: string[];
-    senderId: string;
-    senderName: string;
-    threadId: string;
-    messageId: string;
-    subject: string;
-    bodyPreview: string;
-    hasAttachment: boolean;
-    expedienteRef?: string | null;
-    docType?: string | null;
-  }
-) {
-  const title = opts.subject ? `Bandeja: ${opts.subject}` : "Nuevo mensaje en Bandeja";
-  const body = `${opts.senderName}: ${opts.bodyPreview.slice(0, 200)}${opts.bodyPreview.length > 200 ? "…" : ""}`;
-  const rows = opts.recipientIds
-    .filter((id) => id !== opts.senderId)
-    .map((user_id) => ({
-      user_id,
-      title,
-      body,
-      link: `/app/bandeja?tab=recibidos&thread=${opts.threadId}`,
-      metadata: {
-        mailbox_thread_id: opts.threadId,
-        mailbox_message_id: opts.messageId,
-        sender_id: opts.senderId,
-        message: opts.bodyPreview,
-        has_attachment: opts.hasAttachment,
-        doc_type: opts.docType,
-        expediente_ref: opts.expedienteRef,
-      },
-    }));
-  if (rows.length) await svc.from("notifications").insert(rows);
-}
-
 /** Destinatarios para responder en un hilo existente (incluye envío a sí mismo). */
 async function resolveReplyRecipients(
   svc: ReturnType<typeof supabaseService>,
@@ -325,51 +288,6 @@ async function createMailboxMessageRecords(
   return { threadId: threadId!, messageId };
 }
 
-async function notifyMailboxMessage(
-  svc: ReturnType<typeof supabaseService>,
-  senderId: string,
-  input: ComposeMailboxInput,
-  ctx: ComposeContext,
-  threadId: string,
-  messageId: string,
-  hasAttachment: boolean,
-  subjectOverride?: string | null
-) {
-  const { data: senderProfile } = await svc
-    .from("profiles")
-    .select("full_name, email")
-    .eq("id", senderId)
-    .single();
-
-  let subject = subjectOverride ?? (input.subject || "").trim();
-  let docType = input.docType;
-  let expedienteRef = input.expedienteRef ?? ctx.exp.expedienteRef;
-
-  if (!subject && threadId) {
-    const { data: thread } = await svc
-      .from("mailbox_threads")
-      .select("subject, doc_type, expediente_ref")
-      .eq("id", threadId)
-      .maybeSingle();
-    subject = (thread?.subject || "").trim();
-    if (!docType && thread?.doc_type) docType = thread.doc_type as MailboxDocType;
-    if (!expedienteRef && thread?.expediente_ref) expedienteRef = thread.expediente_ref;
-  }
-
-  await notifyRecipients(svc, {
-    recipientIds: ctx.recipients.map((r) => r.userId),
-    senderId,
-    senderName: displayName(senderProfile),
-    threadId,
-    messageId,
-    subject: subject || "Sin asunto",
-    bodyPreview: ctx.body || "Archivo adjunto",
-    hasAttachment,
-    expedienteRef,
-    docType,
-  });
-}
-
 async function uploadMailboxAttachmentFromBuffer(
   svc: ReturnType<typeof supabaseService>,
   messageId: string,
@@ -461,7 +379,7 @@ export async function commitMailboxAttachments(
   threadId: string,
   messageId: string,
   attachments: MailboxPendingAttachment[],
-  input?: ComposeMailboxInput
+  _input?: ComposeMailboxInput
 ) {
   assertValidMailboxFileList(
     attachments.map((a) => ({ fileName: a.file_name, sizeBytes: a.size_bytes }))
@@ -522,50 +440,6 @@ export async function commitMailboxAttachments(
   const { error: aErr } = await svc.from("mailbox_attachments").insert(rows);
   if (aErr) throw new Error(aErr.message);
 
-  const { data: recips } = await svc
-    .from("mailbox_recipients")
-    .select("user_id, recipient_type")
-    .eq("message_id", messageId);
-
-  const { data: thread } = await svc
-    .from("mailbox_threads")
-    .select("subject, doc_type, expediente_ref, expediente_caratula, expediente_juzgado")
-    .eq("id", threadId)
-    .single();
-
-  const ctx: ComposeContext = {
-    body: (message.body || "").trim(),
-    recipients: (recips || []).map((r) => ({
-      userId: r.user_id,
-      type: r.recipient_type as MailboxRecipientType,
-    })),
-    exp: {
-      expedienteRef: thread?.expediente_ref ?? null,
-      caratula: thread?.expediente_caratula ?? null,
-      juzgado: thread?.expediente_juzgado ?? null,
-    },
-  };
-
-  const notifyInput: ComposeMailboxInput = input ?? {
-    body: ctx.body,
-    to: [],
-    subject: thread?.subject ?? undefined,
-    docType: (thread?.doc_type as MailboxDocType) ?? undefined,
-    expedienteRef: thread?.expediente_ref,
-    threadId,
-  };
-
-  await notifyMailboxMessage(
-    svc,
-    senderId,
-    notifyInput,
-    ctx,
-    threadId,
-    messageId,
-    true,
-    thread?.subject
-  );
-
   return { threadId, messageId, hasAttachment: true };
 }
 
@@ -597,8 +471,6 @@ export async function composeMailboxMessage(
     await uploadMailboxAttachmentFromBuffer(svc, messageId, senderId, file);
     hasAttachment = true;
   }
-
-  await notifyMailboxMessage(svc, senderId, input, ctx, threadId, messageId, hasAttachment);
 
   return { threadId, messageId, hasAttachment };
 }
@@ -1227,6 +1099,13 @@ export async function markThreadRead(userId: string, threadId: string) {
     .eq("thread_id", threadId)
     .eq("user_id", userId)
     .is("read_at", null);
+
+  await svc
+    .from("notifications")
+    .update({ is_read: true })
+    .eq("user_id", userId)
+    .eq("is_read", false)
+    .filter("metadata->>mailbox_thread_id", "eq", threadId);
 }
 
 export async function archiveRecipient(userId: string, recipientId: string, archive: boolean) {

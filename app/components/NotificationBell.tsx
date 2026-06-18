@@ -1,16 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-
-type Notif = {
-  id: string;
-  title: string;
-  body: string;
-  link: string | null;
-  is_read: boolean;
-  created_at: string;
-};
+import { fetchUnreadBadgeCounts } from "@/lib/unread-notifications-client";
+import type { UnreadBadgeCounts } from "@/lib/unread-notifications";
 
 type NotificationBellProps = {
   /** inline = campana en páginas legacy; topbar = shell global */
@@ -18,47 +11,44 @@ type NotificationBellProps = {
 };
 
 export default function NotificationBell({ variant = "inline" }: NotificationBellProps) {
-  const [items, setItems] = useState<Notif[]>([]);
-  const [mailboxUnread, setMailboxUnread] = useState(0);
-  const unread = items.filter((n) => !n.is_read).length + mailboxUnread;
+  const [counts, setCounts] = useState<UnreadBadgeCounts>({
+    total: 0,
+    mailbox: 0,
+    app: 0,
+    workflow: false,
+  });
+
+  const refreshCounts = useCallback(async () => {
+    try {
+      const next = await fetchUnreadBadgeCounts();
+      setCounts(next);
+    } catch {
+      /* sin sesión o API no disponible */
+    }
+  }, []);
 
   useEffect(() => {
     let mounted = true;
     let channel: ReturnType<typeof supabase.channel> | null = null;
+
+    const load = async () => {
+      if (!mounted) return;
+      await refreshCounts();
+    };
+
+    const onFocus = () => {
+      void load();
+    };
 
     (async () => {
       const { data: sess } = await supabase.auth.getSession();
       const uid = sess.session?.user.id;
       if (!uid) return;
 
-      const load = async () => {
-        const { data } = await supabase
-          .from("notifications")
-          .select("id, title, body, link, is_read, created_at")
-          .eq("user_id", uid)
-          .order("created_at", { ascending: false })
-          .limit(10);
-        if (mounted) setItems((data ?? []) as Notif[]);
-      };
-
       await load();
 
-      const loadMailbox = async () => {
-        try {
-          const res = await fetch("/api/mailbox/unread-count", {
-            headers: { Authorization: `Bearer ${sess.session!.access_token}` },
-          });
-          const json = await res.json();
-          if (mounted && res.ok) setMailboxUnread(json.count ?? 0);
-        } catch {
-          /* mailbox tables may not exist yet */
-        }
-      };
-      await loadMailbox();
-
-      // Realtime: suscripción a cambios
       channel = supabase
-        .channel("notif")
+        .channel("notif-badge")
         .on(
           "postgres_changes",
           { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${uid}` },
@@ -67,22 +57,30 @@ export default function NotificationBell({ variant = "inline" }: NotificationBel
         .subscribe();
     })();
 
+    window.addEventListener("focus", onFocus);
+
     return () => {
       mounted = false;
-      if (channel) {
-        supabase.removeChannel(channel);
-      }
+      window.removeEventListener("focus", onFocus);
+      if (channel) supabase.removeChannel(channel);
     };
-  }, []);
+  }, [refreshCounts]);
 
   const handleBellClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    // Redirigir al inbox para TODOS los usuarios usando window.location para asegurar que funcione
-    window.location.href = "/app/bandeja?tab=no-leidas";
+
+    let href = "/app/bandeja?tab=recibidos";
+    if (counts.workflow) {
+      if (counts.mailbox > 0) href = "/app/bandeja?tab=no-leidas";
+      else if (counts.app > 0) href = "/app/bandeja?tab=alertas";
+    } else if (counts.total > 0) {
+      href = "/app/bandeja?tab=no-leidas";
+    }
+
+    window.location.href = href;
   };
 
-  // No mostrar la campanita si no hay sesión (página de login, etc.)
   const [hasSession, setHasSession] = useState(false);
 
   useEffect(() => {
@@ -95,6 +93,8 @@ export default function NotificationBell({ variant = "inline" }: NotificationBel
   if (!hasSession) {
     return null;
   }
+
+  const unread = counts.total;
 
   return (
     <div style={{ position: "relative" }} data-notification-bell={variant}>

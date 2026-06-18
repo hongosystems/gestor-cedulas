@@ -10,6 +10,7 @@ import {
   getNotificationSearchText,
   textMatchesQuery,
 } from "@/lib/bandeja-search";
+import { isMailboxLinkedNotification } from "@/lib/notification-utils";
 
 type Notif = {
   id: string;
@@ -47,6 +48,9 @@ export type NotificationsInboxProps = {
   initialFilter?: FilterType;
   hideFilterBar?: boolean;
   searchQuery?: string;
+  /** Oculta notifications duplicadas de bandeja (usuarios con workflow). */
+  excludeMailboxLinked?: boolean;
+  onCountsChanged?: () => void;
 };
 
 function getThreadRootId(n: Pick<Notif, "id" | "thread_id">) {
@@ -231,6 +235,8 @@ export default function NotificationsInbox({
   initialFilter = "all",
   hideFilterBar = false,
   searchQuery = "",
+  excludeMailboxLinked = false,
+  onCountsChanged,
 }: NotificationsInboxProps) {
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<Notif[]>([]);
@@ -264,6 +270,15 @@ export default function NotificationsInbox({
   const [threadUserNames, setThreadUserNames] = useState<Record<string, string>>({});
   const [threadHistoryExpanded, setThreadHistoryExpanded] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
+  const visibleItems = useMemo(() => {
+    if (!excludeMailboxLinked) return items;
+    return items.filter((n) => !isMailboxLinkedNotification(n.metadata));
+  }, [items, excludeMailboxLinked]);
+
+  const notifyCountsChanged = () => {
+    onCountsChanged?.();
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -368,7 +383,7 @@ export default function NotificationsInbox({
 
   const threadsList = useMemo(() => {
     const map = new Map<string, Notif[]>();
-    for (const n of items) {
+    for (const n of visibleItems) {
       const k = getThreadRootId(n);
       const arr = map.get(k) ?? [];
       arr.push(n);
@@ -394,7 +409,7 @@ export default function NotificationsInbox({
         (a, b) =>
           new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime()
       );
-  }, [items]);
+  }, [visibleItems]);
 
   const filteredThreads = useMemo(() => {
     let rows = threadsList;
@@ -416,7 +431,7 @@ export default function NotificationsInbox({
     });
   }, [threadsList, filter, query, threadUserNames]);
 
-  const unreadCount = items.filter((n) => !n.is_read).length;
+  const unreadCount = visibleItems.filter((n) => !n.is_read).length;
   const unreadThreadCount = threadsList.filter((t) => t.hasUnread).length;
   const readThreadCount = threadsList.filter((t) => t.allRead).length;
 
@@ -443,6 +458,7 @@ export default function NotificationsInbox({
     try {
       await supabase.rpc("mark_notification_read", { p_id: id });
       setItems((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
+      notifyCountsChanged();
     } catch (err) {
       console.error("Error al marcar como leída:", err);
     } finally {
@@ -501,7 +517,7 @@ export default function NotificationsInbox({
   }
 
   async function markAllRead() {
-    const unreadIds = items.filter((n) => !n.is_read).map((n) => n.id);
+    const unreadIds = visibleItems.filter((n) => !n.is_read).map((n) => n.id);
     if (unreadIds.length === 0) return;
 
     setProcessingIds((prev) => new Set([...prev, ...unreadIds]));
@@ -509,7 +525,10 @@ export default function NotificationsInbox({
       for (const id of unreadIds) {
         await supabase.rpc("mark_notification_read", { p_id: id });
       }
-      setItems((prev) => prev.map((n) => ({ ...n, is_read: true })));
+      setItems((prev) =>
+        prev.map((n) => (unreadIds.includes(n.id) ? { ...n, is_read: true } : n))
+      );
+      notifyCountsChanged();
     } catch (err) {
       console.error("Error al marcar todas como leídas:", err);
     } finally {
@@ -518,7 +537,7 @@ export default function NotificationsInbox({
   }
 
   async function deleteAllRead() {
-    const readIds = items.filter((n) => n.is_read).map((n) => n.id);
+    const readIds = visibleItems.filter((n) => n.is_read).map((n) => n.id);
     if (readIds.length === 0) return;
     if (!confirm(`¿Eliminar ${readIds.length} notificación(es) leída(s)?`)) return;
 
@@ -627,6 +646,7 @@ export default function NotificationsInbox({
           setItems((prev) =>
             prev.map((n) => (unreadIds.includes(n.id) ? { ...n, is_read: true } : n))
           );
+          notifyCountsChanged();
         }
 
         // Parsear metadata para cada mensaje del hilo
@@ -1672,7 +1692,7 @@ export default function NotificationsInbox({
                   Marcar todas como leídas
                 </button>
               )}
-              {items.filter((n) => n.is_read).length > 0 && (
+              {visibleItems.filter((n) => n.is_read).length > 0 && (
                 <button
                   onClick={deleteAllRead}
                   className="btn danger"
