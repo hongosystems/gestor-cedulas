@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { fetchUnreadBadgeCounts } from "@/lib/unread-notifications-client";
+import { fetchUnreadBadgeCounts, syncLegacyMailboxTransfers } from "@/lib/unread-notifications-client";
 import type { UnreadBadgeCounts } from "@/lib/unread-notifications";
 
 type NotificationBellProps = {
@@ -34,6 +34,12 @@ export default function NotificationBell({ variant = "inline" }: NotificationBel
     const load = async () => {
       if (!mounted) return;
       await refreshCounts();
+      try {
+        const imported = await syncLegacyMailboxTransfers();
+        if (mounted && imported > 0) await refreshCounts();
+      } catch {
+        /* sync opcional */
+      }
     };
 
     const onFocus = () => {

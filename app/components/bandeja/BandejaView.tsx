@@ -12,7 +12,7 @@ import {
 } from "@/lib/bandeja-utils";
 import { bandejaTabToFolder, isMailboxTab } from "@/lib/bandeja-mail-folders";
 import { fetchMailboxFolderCounts } from "@/lib/bandeja-inbox-search";
-import { fetchUnreadBadgeCounts } from "@/lib/unread-notifications-client";
+import { fetchUnreadBadgeCounts, syncLegacyMailboxTransfers } from "@/lib/unread-notifications-client";
 import NotificationsInbox from "@/app/components/bandeja/NotificationsInbox";
 import MailboxComposeForm from "@/app/components/bandeja/MailboxComposeForm";
 import MailboxInbox from "@/app/components/bandeja/MailboxInbox";
@@ -113,6 +113,24 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
     if (!hasSession) return;
     refreshCounts();
   }, [hasSession, refreshCounts]);
+
+  useEffect(() => {
+    if (!hasSession || !workflow) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const imported = await syncLegacyMailboxTransfers();
+        if (!cancelled && imported > 0) {
+          await refreshCounts();
+        }
+      } catch {
+        /* sync opcional al abrir bandeja */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hasSession, workflow, refreshCounts]);
 
   const setTab = useCallback(
     (tab: BandejaTab) => {

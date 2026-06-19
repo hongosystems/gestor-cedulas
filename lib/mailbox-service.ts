@@ -773,21 +773,16 @@ export async function findMailboxThreadId(
   return byLegacy?.id ?? null;
 }
 
-/** Convierte un file_transfer en hilo mailbox (idempotente) para poder responder en el mismo hilo. */
-export async function ensureMailboxThreadFromLegacy(userId: string, transferId: string): Promise<string> {
-  const svc = supabaseService();
+/** Importa un file_transfer al mailbox (idempotente). Retorna el thread_id del mailbox. */
+export async function importFileTransferToMailbox(
+  svc: ReturnType<typeof supabaseService>,
+  transferId: string
+): Promise<string> {
   const existing = await findMailboxThreadId(svc, transferId);
-  if (existing) {
-    if (!(await userCanAccessThread(svc, userId, existing))) {
-      throw new Error("No tenés acceso a este hilo");
-    }
-    return existing;
-  }
+  if (existing) return existing;
 
   const { data: t } = await svc.from("file_transfers").select("*").eq("id", transferId).single();
-  if (!t || (t.sender_user_id !== userId && t.recipient_user_id !== userId)) {
-    throw new Error("Transferencia no encontrada");
-  }
+  if (!t) throw new Error("Transferencia no encontrada");
 
   const { data: thread, error: tErr } = await svc
     .from("mailbox_threads")
@@ -870,6 +865,53 @@ export async function ensureMailboxThreadFromLegacy(userId: string, transferId: 
   }
 
   return threadId;
+}
+
+/** Convierte un file_transfer en hilo mailbox (idempotente) para poder responder en el mismo hilo. */
+export async function ensureMailboxThreadFromLegacy(userId: string, transferId: string): Promise<string> {
+  const svc = supabaseService();
+  const existing = await findMailboxThreadId(svc, transferId);
+  if (existing) {
+    if (!(await userCanAccessThread(svc, userId, existing))) {
+      throw new Error("No tenés acceso a este hilo");
+    }
+    return existing;
+  }
+
+  const { data: t } = await svc.from("file_transfers").select("sender_user_id, recipient_user_id").eq("id", transferId).single();
+  if (!t || (t.sender_user_id !== userId && t.recipient_user_id !== userId)) {
+    throw new Error("Transferencia no encontrada");
+  }
+
+  return importFileTransferToMailbox(svc, transferId);
+}
+
+/** Importa transferencias legacy pendientes al mailbox para que aparezcan en No leídas. */
+export async function syncLegacyTransfersForUser(userId: string, limit = 100): Promise<number> {
+  const svc = supabaseService();
+  const migrated = await getMigratedLegacyTransferIds(svc);
+
+  const { data: transfers } = await svc
+    .from("file_transfers")
+    .select("id")
+    .eq("recipient_user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(limit * 5);
+
+  let imported = 0;
+  for (const row of transfers || []) {
+    const transferId = row.id as string;
+    if (migrated.has(transferId)) continue;
+    try {
+      await importFileTransferToMailbox(svc, transferId);
+      migrated.add(transferId);
+      imported += 1;
+      if (imported >= limit) break;
+    } catch {
+      /* omitir filas corruptas */
+    }
+  }
+  return imported;
 }
 
 export async function resolveMailboxThreadId(userId: string, id: string): Promise<string> {
@@ -1100,12 +1142,32 @@ export async function markThreadRead(userId: string, threadId: string) {
     .eq("user_id", userId)
     .is("read_at", null);
 
+  const mailboxId = (await findMailboxThreadId(svc, threadId)) ?? threadId;
+
   await svc
     .from("notifications")
     .update({ is_read: true })
     .eq("user_id", userId)
     .eq("is_read", false)
-    .filter("metadata->>mailbox_thread_id", "eq", threadId);
+    .filter("metadata->>mailbox_thread_id", "eq", mailboxId);
+
+  const { data: thread } = await svc
+    .from("mailbox_threads")
+    .select("legacy_transfer_id")
+    .eq("id", mailboxId)
+    .maybeSingle();
+
+  const transferIds = new Set<string>([threadId]);
+  if (thread?.legacy_transfer_id) transferIds.add(thread.legacy_transfer_id as string);
+
+  for (const transferId of transferIds) {
+    await svc
+      .from("notifications")
+      .update({ is_read: true })
+      .eq("user_id", userId)
+      .eq("is_read", false)
+      .filter("metadata->>transfer_id", "eq", transferId);
+  }
 }
 
 export async function archiveRecipient(userId: string, recipientId: string, archive: boolean) {

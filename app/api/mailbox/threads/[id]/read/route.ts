@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
-import { getMailboxThread } from "@/lib/mailbox-service";
+import { findMailboxThreadId, markThreadRead } from "@/lib/mailbox-service";
+import { supabaseService } from "@/lib/supabase-server";
 import { requireMailboxUser, mailboxError } from "@/lib/mailbox-api";
 
 export const runtime = "nodejs";
 
-export async function GET(
+export async function PATCH(
   req: Request,
   ctx: { params: Promise<{ id: string }> }
 ) {
@@ -12,12 +13,13 @@ export async function GET(
     const { user, error } = await requireMailboxUser(req);
     if (error) return error;
     const { id } = await ctx.params;
-    const source = new URL(req.url).searchParams.get("source") || undefined;
 
-    const detail = await getMailboxThread(user!.id, id, source || undefined);
-    if (!detail) return NextResponse.json({ error: "No encontrado" }, { status: 404 });
+    const mailboxId = await findMailboxThreadId(supabaseService(), id);
+    if (mailboxId) {
+      await markThreadRead(user!.id, mailboxId);
+    }
 
-    return NextResponse.json(detail);
+    return NextResponse.json({ ok: true });
   } catch (e) {
     return mailboxError(e);
   }

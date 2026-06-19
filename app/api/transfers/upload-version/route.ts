@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { importFileTransferToMailbox } from "@/lib/mailbox-service";
 import { supabaseService } from "@/lib/supabase-server";
+import { userHasMailboxWorkflow } from "@/lib/unread-notifications";
 import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
@@ -115,6 +117,17 @@ export async function POST(req: Request) {
       "Usuario";
 
     const tipoTxt = t.doc_type === "CEDULA" ? "Cédula" : t.doc_type === "OFICIO" ? "Oficio" : "Causas Penales";
+
+    try {
+      await importFileTransferToMailbox(svc, transferId);
+    } catch (importErr) {
+      console.error("No se pudo sincronizar transfer a mailbox:", importErr);
+    }
+
+    const otherWorkflow = await userHasMailboxWorkflow(otherUserId);
+    if (otherWorkflow) {
+      return NextResponse.json({ ok: true, version: nextVersion });
+    }
 
     await svc.from("notifications").insert({
       user_id: otherUserId,

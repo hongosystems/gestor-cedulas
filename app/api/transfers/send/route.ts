@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { importFileTransferToMailbox } from "@/lib/mailbox-service";
 import { supabaseService } from "@/lib/supabase-server";
+import { userHasMailboxWorkflow } from "@/lib/unread-notifications";
 import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
@@ -238,6 +240,18 @@ export async function POST(req: Request) {
       notificationBody += ' Abrí Recibidos para ver el contenido o descargar el adjunto.';
     } else {
       notificationBody += " Abrí Recibidos para leer el mensaje.";
+    }
+
+    try {
+      await importFileTransferToMailbox(svc, transferId);
+    } catch (importErr) {
+      console.error("No se pudo importar transfer a mailbox:", importErr);
+    }
+
+    const recipientWorkflow = await userHasMailboxWorkflow(recipient_user_id);
+
+    if (recipientWorkflow) {
+      return NextResponse.json({ ok: true, transferId, hasAttachment: hasFile });
     }
 
     await svc.from("notifications").insert({

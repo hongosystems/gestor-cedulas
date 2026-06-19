@@ -9,6 +9,7 @@ import {
 } from "@/lib/bandeja-inbox-search";
 import type { MailboxInboxItem } from "@/lib/mailbox-types";
 import type { Profile } from "@/lib/bandeja-utils";
+import { markMailboxThreadRead } from "@/lib/mailbox-client";
 import MailboxThreadView from "@/app/components/bandeja/MailboxThreadView";
 import { docTypeLabel, fmtRelativeTime } from "@/lib/bandeja-utils";
 
@@ -79,13 +80,51 @@ export default function MailboxInbox({
     [allItems, liveSearch, profiles, searchHits]
   );
 
+  const displayItems = useMemo(() => {
+    if (folder !== "unread" || !selected) return items;
+    const selectedKey = `${selected.source}-${selected.id}`;
+    if (items.some((i) => `${i.source}-${i.id}` === selectedKey)) return items;
+    return [selected, ...items];
+  }, [items, selected, folder]);
+
+  const markItemReadIfNeeded = useCallback(
+    async (item: MailboxInboxItem | null) => {
+      if (!item?.unread || folder !== "unread") return;
+      try {
+        await markMailboxThreadRead(item.threadId);
+        await loadFolder();
+        onListChanged?.();
+      } catch {
+        /* mantener estado local si falla */
+      }
+    },
+    [folder, loadFolder, onListChanged]
+  );
+
+  const selectItem = useCallback(
+    async (next: MailboxInboxItem) => {
+      if (selected && selected.unread) {
+        await markItemReadIfNeeded(selected);
+      }
+      setSelected(next);
+    },
+    [selected, markItemReadIfNeeded]
+  );
+
+  const closeItem = useCallback(async () => {
+    if (selected?.unread) {
+      await markItemReadIfNeeded(selected);
+    }
+    setSelected(null);
+  }, [selected, markItemReadIfNeeded]);
+
   useEffect(() => {
     if (!selected) return;
-    const stillVisible = items.some(
+    const stillVisible = displayItems.some(
       (i) => i.id === selected.id && i.source === selected.source
     );
     if (!stillVisible) setSelected(null);
-  }, [items, selected]);
+  }, [displayItems, selected]);
 
   if (loading) {
     return (
@@ -117,13 +156,13 @@ export default function MailboxInbox({
               : "No hay mensajes en esta carpeta."}
           </div>
         ) : (
-          items.map((t) => (
+          displayItems.map((t) => (
             <button
               key={`${t.source}-${t.id}`}
               type="button"
               role="listitem"
               className={`bandeja-row${selected?.id === t.id && selected?.source === t.source ? " is-selected" : ""}${t.unread ? " is-unread" : ""}`}
-              onClick={() => setSelected(t)}
+              onClick={() => void selectItem(t)}
             >
               <span className="bandeja-row-type">{docTypeLabel(t.docType)}</span>
               <div className="bandeja-row-main">
@@ -152,7 +191,7 @@ export default function MailboxInbox({
         {selected ? (
           <MailboxThreadView
             item={selected}
-            onClose={() => setSelected(null)}
+            onClose={() => void closeItem()}
             onUpdated={() => {
               loadFolder();
               onListChanged?.();

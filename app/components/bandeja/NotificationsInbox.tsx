@@ -10,7 +10,7 @@ import {
   getNotificationSearchText,
   textMatchesQuery,
 } from "@/lib/bandeja-search";
-import { isMailboxLinkedNotification } from "@/lib/notification-utils";
+import { isMailboxLinkedNotification, isTransferLinkedNotification } from "@/lib/notification-utils";
 
 type Notif = {
   id: string;
@@ -273,7 +273,10 @@ export default function NotificationsInbox({
 
   const visibleItems = useMemo(() => {
     if (!excludeMailboxLinked) return items;
-    return items.filter((n) => !isMailboxLinkedNotification(n.metadata));
+    return items.filter(
+      (n) =>
+        !isMailboxLinkedNotification(n.metadata) && !isTransferLinkedNotification(n.metadata)
+    );
   }, [items, excludeMailboxLinked]);
 
   const notifyCountsChanged = () => {
@@ -413,8 +416,16 @@ export default function NotificationsInbox({
 
   const filteredThreads = useMemo(() => {
     let rows = threadsList;
-    if (filter === "unread") rows = rows.filter((t) => t.hasUnread);
-    else if (filter === "read") rows = rows.filter((t) => t.allRead);
+    if (filter === "unread") {
+      rows = rows.filter((t) => t.hasUnread);
+      if (selectedNotif) {
+        const rootId = getThreadRootId(selectedNotif);
+        if (!rows.some((t) => t.rootId === rootId)) {
+          const pinned = threadsList.find((t) => t.rootId === rootId);
+          if (pinned) rows = [pinned, ...rows];
+        }
+      }
+    } else if (filter === "read") rows = rows.filter((t) => t.allRead);
 
     if (!query.trim()) return rows;
     const q = query.trim();
@@ -429,7 +440,7 @@ export default function NotificationsInbox({
       const haystack = `${memberText} ${senderNames}`;
       return textMatchesQuery(haystack, q);
     });
-  }, [threadsList, filter, query, threadUserNames]);
+  }, [threadsList, filter, query, threadUserNames, selectedNotif]);
 
   const unreadCount = visibleItems.filter((n) => !n.is_read).length;
   const unreadThreadCount = threadsList.filter((t) => t.hasUnread).length;
@@ -557,10 +568,47 @@ export default function NotificationsInbox({
     }
   }
 
+  async function markThreadNotificationsRead(rootId: string) {
+    const unreadInThread = items.filter(
+      (n) => getThreadRootId(n) === rootId && !n.is_read
+    );
+    if (unreadInThread.length === 0) return;
+    const unreadIds = unreadInThread.map((n) => n.id);
+    setProcessingIds((prev) => new Set([...prev, ...unreadIds]));
+    try {
+      await Promise.all(unreadIds.map((id) => supabase.rpc("mark_notification_read", { p_id: id })));
+      setItems((prev) =>
+        prev.map((n) => (unreadIds.includes(n.id) ? { ...n, is_read: true } : n))
+      );
+      notifyCountsChanged();
+    } catch (err) {
+      console.error("Error al marcar hilo como leído:", err);
+    } finally {
+      setProcessingIds((prev) => {
+        const next = new Set(prev);
+        unreadIds.forEach((id) => next.delete(id));
+        return next;
+      });
+    }
+  }
+
+  async function dismissSelectedNotification() {
+    if (!selectedNotif) return;
+    const rootId = getThreadRootId(selectedNotif);
+    if (filter === "unread") {
+      await markThreadNotificationsRead(rootId);
+    }
+    setSelectedNotif(null);
+  }
+
   async function handleNotificationClick(notif: Notif) {
     setThreadHistoryExpanded(false);
-    if (!notif.is_read) {
-      await markRead(notif.id);
+    if (
+      selectedNotif &&
+      filter === "unread" &&
+      getThreadRootId(selectedNotif) !== getThreadRootId(notif)
+    ) {
+      await markThreadNotificationsRead(getThreadRootId(selectedNotif));
     }
     setSelectedNotif(notif);
     setReplyText("");
@@ -638,17 +686,6 @@ export default function NotificationsInbox({
         .order("created_at", { ascending: true });
       
         if (threadData && threadData.length > 0) {
-        const unreadIds = threadData.filter((row: any) => !row.is_read).map((row: any) => row.id);
-        if (unreadIds.length > 0) {
-          await Promise.all(
-            unreadIds.map((id) => supabase.rpc("mark_notification_read", { p_id: id }))
-          );
-          setItems((prev) =>
-            prev.map((n) => (unreadIds.includes(n.id) ? { ...n, is_read: true } : n))
-          );
-          notifyCountsChanged();
-        }
-
         // Parsear metadata para cada mensaje del hilo
         const parsedThreadData = threadData.map((item: any) => {
           const parsedMetadata = parseMetadataSafe(item.metadata);
@@ -1989,7 +2026,7 @@ export default function NotificationsInbox({
                     </div>
                     <button
                       onClick={() => {
-                        setSelectedNotif(null);
+                        void dismissSelectedNotification();
                         setThreadMessages([]);
                         setThreadUserNames({});
                         setThreadHistoryExpanded(false);

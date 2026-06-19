@@ -53,3 +53,13 @@ export async function fetchUnreadMailboxCount() {
   if (!res.ok) return 0;
   return json.count as number;
 }
+
+export async function markMailboxThreadRead(threadId: string) {
+  const h = await authHeaders();
+  const res = await fetch(`/api/mailbox/threads/${threadId}/read`, {
+    method: "PATCH",
+    headers: h,
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || "No se pudo marcar como leído");
+}

@@ -1,6 +1,6 @@
 import { canWorkflowCedulas } from "@/lib/bandeja-utils";
 import { countUnreadMailbox } from "@/lib/mailbox-service";
-import { isMailboxLinkedNotification } from "@/lib/notification-utils";
+import { isMailboxLinkedNotification, isTransferLinkedNotification } from "@/lib/notification-utils";
 import { supabaseService } from "@/lib/supabase-server";
 
 export type UnreadBadgeCounts = {
@@ -38,7 +38,11 @@ export async function countUnreadAppNotifications(userId: string): Promise<numbe
       .eq("user_id", userId)
       .eq("is_read", false);
     if (fallbackError) throw fallbackError;
-    return (rows || []).filter((row) => !isMailboxLinkedNotification(row.metadata)).length;
+    return (rows || []).filter(
+      (row) =>
+        !isMailboxLinkedNotification(row.metadata) &&
+        !isTransferLinkedNotification(row.metadata)
+    ).length;
   }
   return typeof data === "number" ? data : 0;
 }
