@@ -9,7 +9,18 @@ import { stripAutoNotasTimestamp, withAutoNotasTimestamp } from "@/lib/notas-tim
 import { FilterableTh } from "@/app/components/FilterableTh";
 import { useColumnFilters } from "@/app/hooks/useColumnFilters";
 import { usePageSearchBridge } from "@/app/hooks/usePageSearchBridge";
-import { tienePruebaPericia } from "@/lib/prueba-pericia-detect";
+import {
+  buildFavoritoIndexFromList,
+  expedienteMatchKey,
+  favoritoMatchKey,
+  favoritoNumeroExpediente,
+  findFavoritoForExpediente,
+  incluirEnDeteccion,
+  buildOrdenesDeteccionIndex,
+  ordenesDeteccionRefsFromApi,
+  type OrdenDeteccionRef,
+} from "@/lib/prueba-pericia-deteccion";
+import type { PjnFavoritoForMerge } from "@/lib/expediente-pjn-merge";
 import ExpedienteMasterDetailRow, {
   getExpedienteMasterDetailColSpan,
 } from "@/app/components/ui/ExpedienteMasterDetailRow";
@@ -1261,6 +1272,7 @@ export default function PruebaPericiaPage() {
   const [selectedOrden, setSelectedOrden] = useState<any | null>(null);
   const [uploadingOrden, setUploadingOrden] = useState<Record<string, boolean>>({});
   const [ordenesExistentes, setOrdenesExistentes] = useState<Record<string, boolean>>({}); // case_ref -> tiene orden
+  const [ordenesParaDeteccion, setOrdenesParaDeteccion] = useState<OrdenDeteccionRef[]>([]);
   
   // Filtros para órdenes/seguimiento
   const ordenesCol = useColumnFilters<PruebaOrdenesColFilter>({
@@ -1558,6 +1570,7 @@ export default function PruebaPericiaPage() {
           if (ordenesRes.ok) {
             const { data: ordenes } = await ordenesRes.json();
             if (ordenes && Array.isArray(ordenes)) {
+              setOrdenesParaDeteccion(ordenesDeteccionRefsFromApi(ordenes));
               // Crear un mapa de case_ref -> tiene orden
               const ordenesMap: Record<string, boolean> = {};
               ordenes.forEach((orden: any) => {
@@ -1679,6 +1692,7 @@ export default function PruebaPericiaPage() {
         const result = await res.json();
         const ordenes = result.data || [];
         setOrdenesData(ordenes);
+        setOrdenesParaDeteccion(ordenesDeteccionRefsFromApi(ordenes));
         
         // Construir opciones para el filtro "Cargado por" basado en los usuarios que crearon órdenes
         const userIds = new Set<string>();
@@ -1793,74 +1807,60 @@ export default function PruebaPericiaPage() {
   // Filtrar expedientes por Prueba/Pericia y juzgados
   const expedientesFiltrados = useMemo(() => {
     const todos: Array<Expediente & { is_pjn_favorito?: boolean; movimientos?: any; fecha_ultima_carga?: string | null }> = [];
-    const expedientesIds = new Set<string>();
+    const seenKeys = new Set<string>();
+    const favoritoIndex = buildFavoritoIndexFromList(pjnFavoritos as PjnFavoritoForMerge[]);
+    const ordenesIndex =
+      ordenesParaDeteccion.length > 0 ? buildOrdenesDeteccionIndex(ordenesParaDeteccion) : null;
+
+    const pasaFiltroJuzgado = (juzgado: string | null | undefined) => {
+      if (juzgadoFilter === "todos") return true;
+      if (!juzgado) return false;
+      const juzgadoNormalizado = normalizarJuzgadoParaComparar(juzgado);
+      const filtroNormalizado = normalizarJuzgadoParaComparar(juzgadoFilter);
+      if (juzgadoNormalizado === filtroNormalizado) return true;
+      const num1 = juzgadoNormalizado.match(/(\d+)/)?.[1];
+      const num2 = filtroNormalizado.match(/(\d+)/)?.[1];
+      return Boolean(
+        num1 && num2 && num1 === num2 && juzgadoNormalizado.includes("CIVIL") && filtroNormalizado.includes("CIVIL")
+      );
+    };
+
+    const registrarKey = (key: string) => {
+      if (!key || seenKeys.has(key)) return false;
+      seenKeys.add(key);
+      return true;
+    };
 
     // Agregar expedientes normales (filtrar por juzgados si aplica)
-    expedientes.forEach(e => {
-      // Filtrar por juzgados si el filtro no es "todos"
-      if (juzgadoFilter !== "todos") {
-        if (!e.juzgado) return;
-        const juzgadoNormalizado = normalizarJuzgadoParaComparar(e.juzgado);
-        const filtroNormalizado = normalizarJuzgadoParaComparar(juzgadoFilter);
-        
-        // Comparar juzgados
-        if (juzgadoNormalizado !== filtroNormalizado) {
-          const num1 = juzgadoNormalizado.match(/(\d+)/)?.[1];
-          const num2 = filtroNormalizado.match(/(\d+)/)?.[1];
-          if (!(num1 && num2 && num1 === num2 && juzgadoNormalizado.includes("CIVIL") && filtroNormalizado.includes("CIVIL"))) {
-            return;
-          }
-        }
-      }
-      
-      // Evitar duplicados por número de expediente
-      const numExp = e.numero_expediente || "";
-      if (numExp && expedientesIds.has(numExp)) return;
-      expedientesIds.add(numExp);
-      
-      // Enriquecer con movimientos del favorito PJN si existe
-      const numExpKey = e.numero_expediente || "";
-      const favMatch = pjnFavoritos.find(f => `${f.numero}/${f.anio}` === numExpKey);
-      todos.push({ 
-        ...e, 
+    expedientes.forEach((e) => {
+      if (!pasaFiltroJuzgado(e.juzgado)) return;
+
+      const matchKey = expedienteMatchKey(e);
+      if (!registrarKey(matchKey)) return;
+
+      const favMatch = findFavoritoForExpediente(e, favoritoIndex);
+
+      todos.push({
+        ...e,
         is_pjn_favorito: false,
-        movimientos: favMatch?.movimientos || null,
+        movimientos: favMatch?.movimientos ?? null,
         fecha_ultima_carga: e.fecha_ultima_carga || favMatch?.fecha_ultima_carga || null,
       });
-      if (favMatch?.movimientos) {
-        console.log('[DEBUG] Expediente enriquecido con movimientos:', numExpKey, 'tiene perito:', tienePruebaPericia(favMatch.movimientos));
-      }
     });
 
     // Agregar favoritos PJN como expedientes (filtrar por juzgados si aplica)
-    pjnFavoritos.forEach(f => {
-      // Filtrar por juzgados si el filtro no es "todos"
-      if (juzgadoFilter !== "todos") {
-        if (!f.juzgado) return;
-        const juzgadoNormalizado = normalizarJuzgadoParaComparar(f.juzgado);
-        const filtroNormalizado = normalizarJuzgadoParaComparar(juzgadoFilter);
-        
-        // Comparar juzgados
-        if (juzgadoNormalizado !== filtroNormalizado) {
-          const num1 = juzgadoNormalizado.match(/(\d+)/)?.[1];
-          const num2 = filtroNormalizado.match(/(\d+)/)?.[1];
-          if (!(num1 && num2 && num1 === num2 && juzgadoNormalizado.includes("CIVIL") && filtroNormalizado.includes("CIVIL"))) {
-            return;
-          }
-        }
-      }
-      
-      const numExp = `${f.numero}/${f.anio}`;
-      // Evitar duplicados: si ya existe un expediente con el mismo número, no agregar el favorito
-      if (expedientesIds.has(numExp)) return;
-      expedientesIds.add(numExp);
-      
+    pjnFavoritos.forEach((f) => {
+      if (!pasaFiltroJuzgado(f.juzgado)) return;
+
+      const matchKey = favoritoMatchKey(f as PjnFavoritoForMerge);
+      if (!registrarKey(matchKey)) return;
+
       todos.push({
         id: f.id,
         owner_user_id: f.id,
         caratula: f.caratula,
         juzgado: f.juzgado,
-        numero_expediente: numExp,
+        numero_expediente: favoritoNumeroExpediente(f as PjnFavoritoForMerge),
         fecha_ultima_modificacion: null,
         fecha_ultima_carga: f.fecha_ultima_carga,
         estado: f.estado || "activo",
@@ -1873,12 +1873,43 @@ export default function PruebaPericiaPage() {
       });
     });
 
-    // Filtrar solo por Prueba/Pericia usando el patrón canónico
-    console.log('[DEBUG] Total todos antes de filtro:', todos.length, 'después de filtro:', todos.filter(e => e.movimientos ? tienePruebaPericia(e.movimientos) : false).length);
-    return todos.filter(e => {
-      return e.movimientos ? tienePruebaPericia(e.movimientos) : false;
-    });
-  }, [expedientes, pjnFavoritos, juzgadoFilter, juzgadosNormalizados]);
+    const incluidos = todos.filter((e) => incluirEnDeteccion(e, ordenesIndex));
+    const incluidosKeys = new Set(incluidos.map((e) => expedienteMatchKey(e)));
+
+    // Órdenes médicas ya cargadas: siempre visibles en Detección aunque PJN no matchee hoy
+    if (ordenesIndex) {
+      for (const orden of ordenesParaDeteccion) {
+        const numero =
+          (orden.numero_expediente || orden.case_ref || "").trim() || null;
+        const syntheticKey = orden.expediente_id || expedienteMatchKey({
+          id: `orden:${orden.case_ref || numero || "sin-ref"}`,
+          numero_expediente: numero,
+        });
+        if (incluidosKeys.has(syntheticKey)) continue;
+        if (!pasaFiltroJuzgado(orden.juzgado)) continue;
+
+        incluidos.push({
+          id: orden.expediente_id || syntheticKey,
+          owner_user_id: orden.expediente_id || "",
+          caratula: orden.caratula ?? null,
+          juzgado: orden.juzgado ?? null,
+          numero_expediente: numero,
+          fecha_ultima_modificacion: null,
+          fecha_ultima_carga: null,
+          estado: "ABIERTO",
+          observaciones: null,
+          notas: null,
+          created_by_user_id: null,
+          created_by_name: "Orden médica",
+          is_pjn_favorito: !orden.expediente_id,
+          movimientos: null,
+        });
+        incluidosKeys.add(syntheticKey);
+      }
+    }
+
+    return incluidos;
+  }, [expedientes, pjnFavoritos, juzgadoFilter, ordenesParaDeteccion]);
 
   // Preparar items para mostrar
   const itemsToShow = useMemo(() => {
@@ -3511,6 +3542,24 @@ export default function PruebaPericiaPage() {
                                     [caseRef]: true,
                                     ...(!item.is_pjn_favorito ? { [item.id]: true } : {}),
                                   }));
+                                  setOrdenesParaDeteccion((prev) => {
+                                    const yaExiste = prev.some(
+                                      (o) =>
+                                        o.case_ref === caseRef ||
+                                        (!item.is_pjn_favorito && o.expediente_id === item.id)
+                                    );
+                                    if (yaExiste) return prev;
+                                    return [
+                                      ...prev,
+                                      {
+                                        case_ref: caseRef,
+                                        expediente_id: item.is_pjn_favorito ? null : item.id,
+                                        caratula: item.caratula ?? null,
+                                        juzgado: item.juzgado ?? null,
+                                        numero_expediente: item.numero || caseRef,
+                                      },
+                                    ];
+                                  });
                                   if (activeTab === "ordenes") {
                                     loadOrdenes();
                                   }
