@@ -4,7 +4,7 @@ import Link from "next/link";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { pjnScraperSupabase } from "@/lib/pjn-scraper-supabase";
-import { daysSince } from "@/lib/semaforo";
+import { colorPericia, periciaRenunciaObservaciones } from "@/lib/semaforo";
 import { stripAutoNotasTimestamp, withAutoNotasTimestamp } from "@/lib/notas-timestamp";
 import { FilterableTh } from "@/app/components/FilterableTh";
 import { useColumnFilters } from "@/app/hooks/useColumnFilters";
@@ -166,17 +166,6 @@ function ddmmaaaaToISO(ddmm: string | null): string | null {
 }
 
 type Semaforo = "VERDE" | "AMARILLO" | "ROJO";
-
-// Semáforo personalizado para Prueba/Pericia: 0-20 Verde, 20-40 Amarillo, >=50 Rojo
-function semaforoByAgePruebaPericia(dias: number): Semaforo {
-  if (dias >= 50) return "ROJO";
-  if (dias >= 20) return "AMARILLO";
-  return "VERDE";
-}
-
-function isRenunciadoObservaciones(obs: string | null | undefined): boolean {
-  return (obs || "").trim().toUpperCase().startsWith("RENUNCIADO");
-}
 
 function renunciadoRowStyle(isRenunciado: boolean): React.CSSProperties | undefined {
   if (!isRenunciado) return undefined;
@@ -1914,33 +1903,13 @@ export default function PruebaPericiaPage() {
   // Preparar items para mostrar
   const itemsToShow = useMemo(() => {
     return expedientesFiltrados.map(e => {
-      let fechaParaCalcularDias: string | null = null;
-      
-      if (e.fecha_ultima_modificacion && e.fecha_ultima_modificacion.trim() !== "") {
-        fechaParaCalcularDias = e.fecha_ultima_modificacion;
-      } else if (e.fecha_ultima_carga && e.fecha_ultima_carga.trim() !== "") {
-        const fechaConvertida = ddmmaaaaToISO(e.fecha_ultima_carga);
-        if (fechaConvertida) {
-          fechaParaCalcularDias = fechaConvertida;
-        }
-      }
-      
-      const isRenunciado =
-        isRenunciadoObservaciones(e.observaciones) || e.semaforo_congelado === true;
-      let dias = fechaParaCalcularDias ? daysSince(fechaParaCalcularDias) : null;
-      if (isRenunciado && e.fecha_semaforo_congelado && fechaParaCalcularDias) {
-        const fin = new Date(e.fecha_semaforo_congelado);
-        const inicio = new Date(fechaParaCalcularDias);
-        dias = Math.max(
-          0,
-          Math.floor((fin.getTime() - inicio.getTime()) / (1000 * 60 * 60 * 24))
-        );
-      }
-      const semaforo: Semaforo = isRenunciado
-        ? "ROJO"
-        : dias !== null
-          ? semaforoByAgePruebaPericia(dias)
-          : "VERDE";
+      const resolved = colorPericia({
+        fecha_ultima_modificacion: e.fecha_ultima_modificacion,
+        fecha_ultima_carga: e.fecha_ultima_carga,
+        observaciones: e.observaciones,
+        semaforo_congelado: e.semaforo_congelado,
+        fecha_semaforo_congelado: e.fecha_semaforo_congelado,
+      });
 
       return {
         type: "expediente" as const,
@@ -1955,9 +1924,9 @@ export default function PruebaPericiaPage() {
         is_pjn_favorito: e.is_pjn_favorito === true,
         observaciones: e.observaciones,
         notas: e.notas || null,
-        dias: isRenunciado ? dias : dias,
-        semaforo: semaforo,
-        isRenunciado,
+        dias: resolved.dias,
+        semaforo: resolved.color as Semaforo,
+        isRenunciado: resolved.renunciado,
       };
     });
   }, [expedientesFiltrados]);
@@ -2087,7 +2056,7 @@ export default function PruebaPericiaPage() {
       const session = await requireSessionOrRedirect();
       if (!session) return;
 
-      const observacionesRenuncia = `RENUNCIADO: ${renunciaRazon.trim()}`;
+      const observacionesRenuncia = periciaRenunciaObservaciones(renunciaRazon);
       const caseRef = renunciaModal.case_ref;
 
       const res = await fetch("/api/prueba-pericia/renunciar", {
@@ -2826,7 +2795,7 @@ export default function PruebaPericiaPage() {
                   >
                     ROJO
                   </button>
-                  <span style={{ color: "var(--muted)", fontSize: 12 }}>48-72hrs+</span>
+                  <span style={{ color: "var(--muted)", fontSize: 12 }}>48h+</span>
                   {ordenesCol.hasActiveFilters && (
                     <button
                       type="button"
@@ -2939,7 +2908,7 @@ export default function PruebaPericiaPage() {
                     />
                     <th>Turno</th>
                     <th>Responsable</th>
-                    <th style={{ textAlign: "center" }}>Días sin contacto</th>
+                    <th style={{ textAlign: "center" }}>SLA</th>
                     <th style={{ width: 100 }}>Acciones</th>
                   </tr>
                 </thead>
@@ -2955,7 +2924,7 @@ export default function PruebaPericiaPage() {
                       style={{ verticalAlign: "top", ...renunciadoRowStyle(isRenunciadoOrden) }}
                     >
                       <td>
-                        <SemaforoChip value={(isRenunciadoOrden ? "ROJO" : orden.semaforo) as Semaforo} />
+                        <SemaforoChip value={(orden.semaforo || "VERDE") as Semaforo} />
                       </td>
                       <td style={{ fontWeight: 650 }}>
                         {orden.case_ref || <span className="muted">—</span>}
@@ -2990,8 +2959,12 @@ export default function PruebaPericiaPage() {
                       <td>
                         {orden.gestion?.responsable?.full_name || orden.gestion?.responsable?.email || <span className="muted">—</span>}
                       </td>
-                      <td style={{ textAlign: "center", fontVariantNumeric: "tabular-nums" }}>
-                        {orden.dias_sin_contacto !== null ? orden.dias_sin_contacto : <span className="muted">—</span>}
+                      <td style={{ textAlign: "center", fontSize: 13 }}>
+                        {orden.semaforo_label ? (
+                          orden.semaforo_label
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
                       </td>
                       <td>
                         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -3395,9 +3368,7 @@ export default function PruebaPericiaPage() {
             {paginatedItems.map((item: any) => {
               const dias = item.dias ?? null;
               const isRenunciado = item.isRenunciado === true;
-              const sem = isRenunciado
-                ? "ROJO"
-                : item.semaforo || (dias !== null ? semaforoByAgePruebaPericia(dias) : "VERDE");
+              const sem = (item.semaforo || "VERDE") as Semaforo;
               const rowStyle = renunciadoRowStyle(isRenunciado);
 
               return (

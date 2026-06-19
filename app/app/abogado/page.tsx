@@ -3,7 +3,11 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { daysSince } from "@/lib/semaforo";
+import { colorExpediente } from "@/lib/semaforo";
+import {
+  applyPjnMergeToExpedienteList,
+  fetchPjnFavoritosForMerge,
+} from "@/lib/expediente-pjn-client";
 import { FilterableTh } from "@/app/components/FilterableTh";
 import NotificationBell from "@/app/components/NotificationBell";
 import ResponsableAvatars from "@/app/components/ResponsableAvatars";
@@ -16,8 +20,11 @@ type Expediente = {
   juzgado: string | null;
   numero_expediente: string | null;
   fecha_ultima_modificacion: string | null;
+  fecha_ultima_carga?: string | null;
   estado: string;
   observaciones: string | null;
+  semaforo_congelado?: boolean | null;
+  fecha_semaforo_congelado?: string | null;
   created_by_user_id: string | null;
   created_by_name: string | null;
 };
@@ -31,12 +38,6 @@ function isoToDDMMAAAA(iso: string | null): string {
 }
 
 type Semaforo = "VERDE" | "AMARILLO" | "ROJO";
-
-function semaforoByAge(diasDesdeModificacion: number): Semaforo {
-  if (diasDesdeModificacion >= 60) return "ROJO";
-  if (diasDesdeModificacion >= 30) return "AMARILLO";
-  return "VERDE";
-}
 
 function SemaforoChip({ value }: { value: Semaforo }) {
   const style: React.CSSProperties =
@@ -287,7 +288,6 @@ export default function AbogadoHomePage() {
       
       // Procesar expedientes y agregar nombres de usuarios
       const processedExps = exps.map((e: any) => {
-        // Asegurarse de que observaciones esté presente
         const observaciones = e.observaciones !== undefined ? e.observaciones : null;
         return {
           ...e,
@@ -295,8 +295,11 @@ export default function AbogadoHomePage() {
           created_by_name: e.created_by_user_id ? (userNames[e.created_by_user_id] || null) : null,
         };
       });
-      
-      setExpedientes(processedExps as Expediente[]);
+
+      const favoritos = await fetchPjnFavoritosForMerge(supabase);
+      const mergedExps = applyPjnMergeToExpedienteList(processedExps, favoritos);
+
+      setExpedientes(mergedExps as Expediente[]);
       setLoading(false);
     })();
   }, []);
@@ -371,11 +374,10 @@ export default function AbogadoHomePage() {
     }
 
     let mappedWithMeta = mapped.map((e) => {
-      const fechaModISO = e.fecha_ultima_modificacion || "";
-      const dias = fechaModISO ? daysSince(fechaModISO) : null;
-      const diasValidos = dias !== null && !isNaN(dias) && dias >= 0 ? dias : null;
-      const sem = diasValidos === null ? ("VERDE" as Semaforo) : semaforoByAge(diasValidos);
-      return { ...e, fechaModISO, dias: diasValidos, sem };
+      const resolved = colorExpediente(e);
+      const diasValidos = resolved.dias;
+      const sem = resolved.color as Semaforo;
+      return { ...e, fechaModISO: resolved.fechaBase ?? "", dias: diasValidos, sem };
     });
 
     // Aplicar filtro de semáforo

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseService } from "@/lib/supabase-server";
+import { periciaRenunciaObservaciones } from "@/lib/semaforo";
 
 export const runtime = "nodejs";
 
@@ -55,7 +56,7 @@ export async function POST(req: NextRequest) {
     const svc = supabaseService();
     const caseRef = case_ref.trim();
     const razonTrim = razon.trim();
-    const observacionesRenuncia = `RENUNCIADO: ${razonTrim}`;
+    const observacionesRenuncia = periciaRenunciaObservaciones(razonTrim);
     const nowIso = new Date().toISOString();
 
     const { data: roleData } = await svc

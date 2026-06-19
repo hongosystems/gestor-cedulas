@@ -1,8 +1,15 @@
 "use client";
 
-import CssBarChart, { type BarChartItem } from "@/app/components/ui/CssBarChart";
+import { useMemo, useState } from "react";
+import SemaforoRojosModal from "@/app/components/dashboard/SemaforoRojosModal";
+import CssBarChart, { type BarChartItem, formatRojosBreakdown, RojosTypeLegend } from "@/app/components/ui/CssBarChart";
 import MetricCard from "@/app/components/ui/MetricCard";
 import SectionCard from "@/app/components/ui/SectionCard";
+import {
+  filterDocumentosRojos,
+  type DocumentoRojoDashboard,
+} from "@/lib/semaforo-dashboard-rojos";
+import { REITERATORIO_UMBRAL_DIAS } from "@/lib/reiteratorios";
 
 export type OperationalMetrics = {
   pjnCargados: number;
@@ -20,11 +27,18 @@ export type DashboardPanelsProps = {
     totalRojas: number;
     totalAmarillas: number;
     totalVerdes: number;
+    /** Cédulas + oficios abiertos */
     totalAbiertas: number;
+    /** Cédulas + oficios + expedientes con semáforo */
+    totalUniversoSemaforo: number;
+    pctRojas: string;
+    pctAmarillas: string;
+    pctVerdes: string;
   };
   operational: OperationalMetrics;
   juzgadoRojos: BarChartItem[];
   responsableRojos: BarChartItem[];
+  documentosRojos: DocumentoRojoDashboard[];
   antiguedadBuckets: { verde: number; amarillo: number; rojo: number };
   alertas: string[];
 };
@@ -34,11 +48,38 @@ export default function SuperadminDashboardPanels({
   operational,
   juzgadoRojos,
   responsableRojos,
+  documentosRojos,
   antiguedadBuckets,
   alertas,
 }: DashboardPanelsProps) {
-  const totalSemaforo =
-    metrics.totalVerdes + metrics.totalAmarillas + metrics.totalRojas || 1;
+  const pctHint = (pct: string) => `${pct}% del universo semáforo (${metrics.totalUniversoSemaforo})`;
+
+  const [drilldown, setDrilldown] = useState<{
+    kind: "juzgado" | "responsable";
+    key: string;
+    title: string;
+    subtitle?: string;
+  } | null>(null);
+
+  const drilldownItems = useMemo(() => {
+    if (!drilldown) return [];
+    return filterDocumentosRojos(documentosRojos, drilldown.kind, drilldown.key);
+  }, [drilldown, documentosRojos]);
+
+  function handleBarClick(item: BarChartItem) {
+    if (!item.drilldownKind || !item.drilldownKey) return;
+    const subtitle =
+      item.breakdown != null ? formatRojosBreakdown(item.breakdown) : undefined;
+    setDrilldown({
+      kind: item.drilldownKind,
+      key: item.drilldownKey,
+      title:
+        item.drilldownKind === "juzgado"
+          ? `Rojos — ${item.label}`
+          : `Rojos — ${item.label}`,
+      subtitle,
+    });
+  }
 
   return (
     <div className="dashboard-panels">
@@ -55,15 +96,20 @@ export default function SuperadminDashboardPanels({
       </div>
 
       <div className="dashboard-panels__grid dashboard-panels__grid--4">
-        <MetricCard title="Semáforo verde" value={metrics.totalVerdes} hint={`${((metrics.totalVerdes / totalSemaforo) * 100).toFixed(0)}% del total`} tone="green" />
-        <MetricCard title="Semáforo amarillo" value={metrics.totalAmarillas} hint={`${((metrics.totalAmarillas / totalSemaforo) * 100).toFixed(0)}%`} tone="yellow" />
-        <MetricCard title="Semáforo rojo" value={metrics.totalRojas} hint={`${((metrics.totalRojas / totalSemaforo) * 100).toFixed(0)}%`} tone="red" />
+        <MetricCard title="Semáforo verde" value={metrics.totalVerdes} hint={pctHint(metrics.pctVerdes)} tone="green" />
+        <MetricCard title="Semáforo amarillo" value={metrics.totalAmarillas} hint={pctHint(metrics.pctAmarillas)} tone="yellow" />
+        <MetricCard title="Semáforo rojo" value={metrics.totalRojas} hint={pctHint(metrics.pctRojas)} tone="red" />
         <MetricCard
           title="Candidatos reiteratorio"
           value={operational.reiteratorioCandidatos}
-          hint="Oficios en PJN ≥14 días"
+          hint={`Oficios en PJN ≥${REITERATORIO_UMBRAL_DIAS} días`}
           tone="orange"
         />
+      </div>
+
+      <div className="dashboard-panels__grid dashboard-panels__grid--2">
+        <MetricCard title="Documentos abiertos" value={metrics.totalAbiertas} hint="Cédulas + oficios" tone="blue" />
+        <MetricCard title="Universo semáforo" value={metrics.totalUniversoSemaforo} hint="Cédulas + oficios + expedientes" tone="blue" />
       </div>
 
       <div className="dashboard-panels__grid dashboard-panels__grid--4">
@@ -74,7 +120,6 @@ export default function SuperadminDashboardPanels({
           value={operational.ultimaSyncPjn ?? "—"}
           hint="Mayor fecha en favoritos PJN"
         />
-        <MetricCard title="Total documentos" value={metrics.totalAbiertas} />
       </div>
 
       <div className="dashboard-panels__grid dashboard-panels__grid--2">
@@ -117,13 +162,22 @@ export default function SuperadminDashboardPanels({
       </div>
 
       <div className="dashboard-panels__grid dashboard-panels__grid--2">
-        <SectionCard title="Juzgados con más rojos">
-          <CssBarChart items={juzgadoRojos} />
+        <SectionCard title="Juzgados con más rojos" actions={<RojosTypeLegend />}>
+          <CssBarChart items={juzgadoRojos} onValueClick={handleBarClick} />
         </SectionCard>
-        <SectionCard title="Responsables con más rojos">
-          <CssBarChart items={responsableRojos} />
+        <SectionCard title="Responsables con más rojos" actions={<RojosTypeLegend />}>
+          <CssBarChart items={responsableRojos} onValueClick={handleBarClick} />
         </SectionCard>
       </div>
+
+      {drilldown && (
+        <SemaforoRojosModal
+          title={drilldown.title}
+          subtitle={drilldown.subtitle}
+          items={drilldownItems}
+          onClose={() => setDrilldown(null)}
+        />
+      )}
     </div>
   );
 }

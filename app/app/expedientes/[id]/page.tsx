@@ -4,7 +4,11 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { daysSince } from "@/lib/semaforo";
+import { colorExpediente } from "@/lib/semaforo";
+import {
+  applyPjnMergeToSingleExpediente,
+  fetchPjnFavoritosForMerge,
+} from "@/lib/expediente-pjn-client";
 
 type Expediente = {
   id: string;
@@ -13,7 +17,11 @@ type Expediente = {
   juzgado: string | null;
   numero_expediente: string | null;
   fecha_ultima_modificacion: string | null;
+  fecha_ultima_carga?: string | null;
   estado: string;
+  observaciones?: string | null;
+  semaforo_congelado?: boolean | null;
+  fecha_semaforo_congelado?: string | null;
 };
 
 function isoToDDMMAA(iso: string) {
@@ -23,12 +31,6 @@ function isoToDDMMAA(iso: string) {
   if (!m) return iso;
   const yy = m[1].slice(2);
   return `${m[3]}/${m[2]}/${yy}`;
-}
-
-function semaforoByAge(dias: number): "VERDE" | "AMARILLO" | "ROJO" {
-  if (dias >= 60) return "ROJO";
-  if (dias >= 30) return "AMARILLO";
-  return "VERDE";
 }
 
 export default function VerExpedientePage() {
@@ -47,7 +49,6 @@ export default function VerExpedientePage() {
         return;
       }
 
-      // Verificar rol usando consulta directa para evitar errores 400
       const uid = sess.session.user.id;
       const { data: roleData, error: roleErr } = await supabase
         .from("user_roles")
@@ -72,7 +73,10 @@ export default function VerExpedientePage() {
         return;
       }
 
-      setExpediente(exp as Expediente);
+      const favoritos = await fetchPjnFavoritosForMerge(supabase);
+      const merged = applyPjnMergeToSingleExpediente(exp as Expediente, favoritos);
+
+      setExpediente(merged);
       setLoading(false);
     })();
   }, [expedienteId]);
@@ -104,8 +108,9 @@ export default function VerExpedientePage() {
     );
   }
 
-  const dias = expediente.fecha_ultima_modificacion ? daysSince(expediente.fecha_ultima_modificacion) : 0;
-  const semaforo = semaforoByAge(dias);
+  const resolved = colorExpediente(expediente);
+  const semaforo = resolved.color;
+  const dias = resolved.dias ?? 0;
   const semaforoStyle = semaforo === "VERDE" 
     ? { background: "rgba(46, 204, 113, 0.16)", border: "1px solid rgba(46, 204, 113, 0.35)", color: "rgba(210, 255, 226, 0.95)" }
     : semaforo === "AMARILLO"

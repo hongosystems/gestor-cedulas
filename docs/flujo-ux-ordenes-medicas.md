@@ -166,11 +166,29 @@ ESTUDIO_REALIZADO (cuando se marca como realizado)
 
 ## 📊 Semáforo SLA
 
-El semáforo en la tabla indica urgencia:
+El semáforo en la tabla indica urgencia. La lógica canónica está en `lib/semaforo.ts` (`colorOrdenMedica`).
 
-- **🟢 VERDE:** < 5 días sin contacto
-- **🟡 AMARILLO:** 5-9 días sin contacto
-- **🔴 ROJO:** ≥ 10 días sin contacto O turno vencido
+### Flujo activo (gestión en curso)
+
+Cuenta **horas** desde la última comunicación registrada, o desde la creación de la gestión si no hay comunicaciones:
+
+- **🟢 VERDE:** 0–23 h sin contacto
+- **🟡 AMARILLO:** 24–47 h sin contacto
+- **🔴 ROJO:** ≥ 48 h sin contacto
+
+**Turno vencido:** si `turno_fecha_hora` es anterior a ahora, el semáforo pasa a **ROJO** aunque hayan pasado menos de 48 h (motivo `turno_vencido`).
+
+### Estudio realizado
+
+Reloj congelado en `fecha_estudio_realizado`. Cuenta **días** desde la creación de la gestión:
+
+- **🟢 VERDE:** 0–19 días
+- **🟡 AMARILLO:** 20–49 días
+- **🔴 ROJO:** ≥ 50 días
+
+### Renunciado
+
+Semáforo **ROJO** fijo. Días congelados entre creación y fecha de renuncia/congelado (columna SLA: «N días (renunciado)»).
 
 ---
 

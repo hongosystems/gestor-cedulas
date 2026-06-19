@@ -4,7 +4,7 @@ import Link from "next/link";
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { pjnScraperSupabase } from "@/lib/pjn-scraper-supabase";
-import { daysSince, isLegacySemaforoDate } from "@/lib/semaforo";
+import { daysSince, colorCedulaOficio, colorExpediente } from "@/lib/semaforo";
 import { stripAutoNotasTimestamp, withAutoNotasTimestamp } from "@/lib/notas-timestamp";
 import { FilterableTh } from "@/app/components/FilterableTh";
 import ResponsableAvatars from "@/app/components/ResponsableAvatars";
@@ -61,6 +61,7 @@ type Cedula = {
   read_by_name?: string | null;
   admin_cedulas_completada_at?: string | null;
   admin_cedulas_en_tramite_at?: string | null;
+  pjn_cargado_at?: string | null;
 };
 
 type Expediente = {
@@ -176,22 +177,6 @@ function ddmmaaaaToISO(ddmm: string | null): string | null {
 }
 
 type Semaforo = "VERDE" | "AMARILLO" | "ROJO";
-
-const UMBRAL_AMARILLO = 30;
-const UMBRAL_ROJO = 60;
-
-function semaforoByAge(dias: number): Semaforo {
-  if (dias >= UMBRAL_ROJO) return "ROJO";
-  if (dias >= UMBRAL_AMARILLO) return "AMARILLO";
-  return "VERDE";
-}
-
-function clampLegacySemaforo(base: Semaforo, fechaCargaIso: string | null | undefined): Semaforo {
-  if (!fechaCargaIso || !isLegacySemaforoDate(fechaCargaIso)) return base;
-  // Legacy: evita mostrar ROJO por antigüedad histórica.
-  if (base === "ROJO") return "AMARILLO";
-  return base;
-}
 
 type User = {
   id: string;
@@ -2076,7 +2061,7 @@ export default function MisJuzgadosPage() {
       // Intentar incluir tipo_documento, pdf_path, created_by_user_id, read_by_user_id y read_by_name, pero si no existen, usar select sin ellas
       let queryCedulas = supabase
         .from("cedulas")
-        .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado, tipo_documento, pdf_path, created_by_user_id, read_by_user_id, read_by_name, admin_cedulas_completada_at, admin_cedulas_en_tramite_at")
+        .select("id, owner_user_id, caratula, juzgado, fecha_carga, estado, tipo_documento, pdf_path, created_by_user_id, read_by_user_id, read_by_name, admin_cedulas_completada_at, admin_cedulas_en_tramite_at, pjn_cargado_at")
         .neq("estado", "CERRADA")
         .order("fecha_carga", { ascending: true }); // Por defecto: más viejo primero
       
@@ -2105,7 +2090,8 @@ export default function MisJuzgadosPage() {
           errorDetails?.includes("read_by_user_id") ||
           errorDetails?.includes("read_by_name") ||
           errorMsg.includes("admin_cedulas_completada_at") ||
-          errorMsg.includes("admin_cedulas_en_tramite_at");
+          errorMsg.includes("admin_cedulas_en_tramite_at") ||
+          errorMsg.includes("pjn_cargado_at");
         
         if (isColumnError) {
           // Intentar primero con pdf_path pero sin tipo_documento, created_by_user_id y read_by fields
@@ -2134,7 +2120,8 @@ export default function MisJuzgadosPage() {
                 read_by_user_id: null,
                 read_by_name: null,
                 admin_cedulas_completada_at: null,
-                admin_cedulas_en_tramite_at: null
+                admin_cedulas_en_tramite_at: null,
+                pjn_cargado_at: null
               })) ?? [];
             }
           } else if (cErr2) {
@@ -2148,7 +2135,8 @@ export default function MisJuzgadosPage() {
               read_by_user_id: null,
               read_by_name: null,
               admin_cedulas_completada_at: null,
-              admin_cedulas_en_tramite_at: null
+              admin_cedulas_en_tramite_at: null,
+              pjn_cargado_at: null
             })) ?? [];
           }
         } else {
@@ -2576,26 +2564,14 @@ export default function MisJuzgadosPage() {
     // Preparar items según el tab activo
     const itemsToShow = activeTab === "expedientes" 
       ? expedientes.map(e => {
-          // Determinar la fecha para calcular días
-          // Prioridad: 1) fecha_ultima_modificacion (ya convertida a ISO), 2) fecha_ultima_carga (convertir a ISO)
-          let fechaParaCalcularDias: string | null = null;
+          const resolved = colorExpediente({
+            fecha_ultima_modificacion: e.fecha_ultima_modificacion,
+            fecha_ultima_carga: e.fecha_ultima_carga,
+            observaciones: e.observaciones,
+            semaforo_congelado: (e as { semaforo_congelado?: boolean }).semaforo_congelado,
+            fecha_semaforo_congelado: (e as { fecha_semaforo_congelado?: string | null }).fecha_semaforo_congelado,
+          });
           
-          // Primero intentar usar fecha_ultima_modificacion si existe y es válida
-          if (e.fecha_ultima_modificacion && e.fecha_ultima_modificacion.trim() !== "") {
-            fechaParaCalcularDias = e.fecha_ultima_modificacion;
-          } 
-          // Si no hay fecha_ultima_modificacion válida, intentar convertir fecha_ultima_carga
-          else if (e.fecha_ultima_carga && e.fecha_ultima_carga.trim() !== "") {
-            const fechaConvertida = ddmmaaaaToISO(e.fecha_ultima_carga);
-            if (fechaConvertida) {
-              fechaParaCalcularDias = fechaConvertida;
-            }
-          }
-          
-          const dias = fechaParaCalcularDias ? daysSince(fechaParaCalcularDias) : null;
-          const semaforo = dias !== null ? semaforoByAge(dias) : "VERDE" as Semaforo;
-          
-          // Debug: verificar expediente específico
           if (e.numero_expediente && (e.numero_expediente.includes("35586/2025") || e.numero_expediente.includes("035586/2025"))) {
             console.log(
               `[Mis Juzgados] 🔍 35586/2025 en itemsToShow → juzgado="${e.juzgado ?? ""}" obs=${(e.observaciones?.length ?? 0)} chars pjn_merge=${Boolean((e as { pjn_merge_applied?: boolean }).pjn_merge_applied)}`
@@ -2606,21 +2582,23 @@ export default function MisJuzgadosPage() {
             type: "expediente" as const,
             id: e.id,
             caratula: e.caratula,
-            juzgado: e.juzgado, // Asegurar que se pasa el juzgado original
+            juzgado: e.juzgado,
             fecha: e.fecha_ultima_modificacion,
-            fecha_ultima_carga: e.fecha_ultima_carga, // Para favoritos PJN, guardar fecha original
+            fecha_ultima_carga: e.fecha_ultima_carga,
             numero: e.numero_expediente,
             created_by: e.created_by_name,
             created_by_user_id: e.created_by_user_id,
             is_pjn_favorito: e.is_pjn_favorito === true,
-            observaciones: e.observaciones, // Asegurar que se pasan las observaciones
+            observaciones: e.observaciones,
             notas: e.notas || null,
-            dias: dias,
-            semaforo: semaforo,
+            dias: resolved.dias,
+            semaforo: resolved.color as Semaforo,
           };
         })
       : activeTab === "cedulas"
-      ? cedulasFiltered.map(c => ({
+      ? cedulasFiltered.map(c => {
+          const resolved = colorCedulaOficio(c);
+          return {
           type: "cedula" as const,
           id: c.id,
           caratula: c.caratula,
@@ -2633,13 +2611,14 @@ export default function MisJuzgadosPage() {
           tipo_documento: c.tipo_documento,
           read_by_user_id: c.read_by_user_id || null,
           read_by_name: c.read_by_name || null,
-          dias: c.fecha_carga ? daysSince(c.fecha_carga) : null,
-          semaforo: c.fecha_carga
-            ? clampLegacySemaforo(semaforoByAge(daysSince(c.fecha_carga)), c.fecha_carga)
-            : "VERDE" as Semaforo,
+          dias: resolved.dias,
+          semaforo: resolved.color as Semaforo,
           estado: getEstadoCedula(c),
-        }))
-      : oficiosFiltered.map(o => ({
+        };
+        })
+      : oficiosFiltered.map(o => {
+          const resolved = colorCedulaOficio(o);
+          return {
           type: "oficio" as const,
           id: o.id,
           caratula: o.caratula,
@@ -2653,12 +2632,11 @@ export default function MisJuzgadosPage() {
           read_by_user_id: o.read_by_user_id || null,
           read_by_name: o.read_by_name || null,
           observaciones: null,
-          dias: o.fecha_carga ? daysSince(o.fecha_carga) : null,
-          semaforo: o.fecha_carga
-            ? clampLegacySemaforo(semaforoByAge(daysSince(o.fecha_carga)), o.fecha_carga)
-            : "VERDE" as Semaforo,
+          dias: resolved.dias,
+          semaforo: resolved.color as Semaforo,
           estado: getEstadoCedula(o),
-        }));
+        };
+        });
     
     // Preparar items para mostrar (agregar observaciones y notas si faltan)
     const itemsWithObservations = itemsToShow.map(item => ({
@@ -3631,8 +3609,7 @@ export default function MisJuzgadosPage() {
                 </thead>
                 <tbody>
                   {paginatedItems.map((item: any) => {
-                    const dias = item.dias ?? null;
-                    const sem = item.semaforo || (dias !== null ? semaforoByAge(dias) : "VERDE");
+                    const sem = (item.semaforo || "VERDE") as Semaforo;
                     return (
                       <MisJuzgadosTableRows
                         key={item.id}
@@ -3757,8 +3734,7 @@ export default function MisJuzgadosPage() {
               onToggleExpand={toggleExpandedRow}
               formatCaratulaFull={(t) => (t || "").trim()}
               renderSemaforo={(item) => {
-                const dias = item.dias ?? null;
-                const sem = item.semaforo || (dias !== null ? semaforoByAge(dias) : "VERDE");
+                const sem = (item.semaforo || "VERDE") as Semaforo;
                 return <SemaforoChip value={sem as Semaforo} />;
               }}
               renderJuzgado={(item) =>

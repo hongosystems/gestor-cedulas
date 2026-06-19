@@ -3,7 +3,7 @@
 import Link from "next/link";
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { daysBetween, daysSince, isLegacySemaforoDate } from "@/lib/semaforo";
+import { colorCedulaOficio, type SemaforoColor } from "@/lib/semaforo";
 import { stripAutoNotasTimestamp, withAutoNotasTimestamp } from "@/lib/notas-timestamp";
 import { FilterableTh } from "@/app/components/FilterableTh";
 import ResponsableAvatars from "@/app/components/ResponsableAvatars";
@@ -131,22 +131,9 @@ function isoToDDMMAA(iso: string) {
 }
 
 
-type Semaforo = "VERDE" | "AMARILLO" | "ROJO";
+type Semaforo = SemaforoColor;
 
-function semaforoByAge(diasDesdeCarga: number): Semaforo {
-  if (diasDesdeCarga >= 60) return "ROJO";
-  if (diasDesdeCarga >= 30) return "AMARILLO";
-  return "VERDE";
-}
-
-function clampLegacySemaforo(base: Semaforo, cargaISO: string): Semaforo {
-  if (!isLegacySemaforoDate(cargaISO)) return base;
-  // Legacy: evita mostrar ROJO por antigüedad histórica.
-  if (base === "ROJO") return "AMARILLO";
-  return base;
-}
-
-function SemaforoChip({ value }: { value: Semaforo }) {
+function SemaforoChip({ value, legacyHistorico }: { value: Semaforo; legacyHistorico?: boolean }) {
   const style: React.CSSProperties =
     value === "VERDE"
       ? {
@@ -182,6 +169,20 @@ function SemaforoChip({ value }: { value: Semaforo }) {
       }}
     >
       {value}
+      {legacyHistorico && (
+        <span
+          style={{
+            marginLeft: 6,
+            fontSize: 9,
+            fontWeight: 600,
+            opacity: 0.85,
+            letterSpacing: 0.2,
+          }}
+          title="Antigüedad histórica: el semáforo no muestra rojo por fecha de carga anterior al corte legacy"
+        >
+          histórico
+        </span>
+      )}
     </span>
   );
 }
@@ -1110,23 +1111,14 @@ export default function MisCedulasPage() {
   const rows = useMemo(() => {
     let mapped = cedulas.map((c) => {
       const cargaISO = c.fecha_carga || "";
-      let dias: number | null = null;
-      if (cargaISO) {
-        // Al quedar Completa, el semáforo se congela en esa fecha.
-        if (c.pjn_cargado_at) {
-          dias = daysBetween(cargaISO, c.pjn_cargado_at);
-        } else if (c.admin_cedulas_completada_at) {
-          dias = daysBetween(cargaISO, c.admin_cedulas_completada_at);
-        } else {
-          dias = daysSince(cargaISO);
-        }
-      }
-      const diasValidos = dias !== null && !isNaN(dias) && dias >= 0 ? dias : null;
-      const sem =
-        diasValidos === null
-          ? ("VERDE" as Semaforo)
-          : clampLegacySemaforo(semaforoByAge(diasValidos), cargaISO);
-      return { ...c, cargaISO, dias: diasValidos, sem };
+      const resolved = colorCedulaOficio(c);
+      return {
+        ...c,
+        cargaISO,
+        dias: resolved.dias,
+        sem: resolved.color,
+        legacyClampAplicado: resolved.legacyClampAplicado,
+      };
     });
 
     // Aplicar filtro de semáforo
@@ -1972,7 +1964,7 @@ export default function MisCedulasPage() {
                     onClick={isAdminCedulas ? () => setSelectedCedulaId(prev => prev === c.id ? null : c.id) : undefined}
                   >
                     <td>
-                      <SemaforoChip value={c.sem} />
+                      <SemaforoChip value={c.sem} legacyHistorico={c.legacyClampAplicado} />
                     </td>
 
                     <td>

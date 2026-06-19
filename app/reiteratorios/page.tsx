@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { usePageSearchBridge } from "@/app/hooks/usePageSearchBridge";
-import { isReiteratorioPresentado, REITERATORIO_PRESENTADO_PREFIX } from "@/lib/reiteratorios";
+import {
+  diasCalendarioDesde,
+  esCandidatoReiteratorio,
+  isReiteratorioPresentado,
+  REITERATORIO_PRESENTADO_PREFIX,
+  REITERATORIO_UMBRAL_DIAS,
+} from "@/lib/reiteratorios";
 
 type ReiteratorioRow = {
   id: string;
@@ -17,13 +23,6 @@ type ReiteratorioRow = {
   estado_ocr: string | null;
 };
 
-function diasDesde(iso: string): number {
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return 0;
-  const diffMs = Date.now() - then;
-  if (diffMs <= 0) return 0;
-  return Math.floor(diffMs / (1000 * 60 * 60 * 24));
-}
 
 function datosFaltantes(row: ReiteratorioRow): string[] {
   const faltan: string[] = [];
@@ -111,8 +110,8 @@ export default function ReiteratoriosPage() {
 
   const filas = useMemo(() => {
     let list = rows
-      .map((r) => ({ ...r, dias: r.pjn_cargado_at ? diasDesde(r.pjn_cargado_at) : 0 }))
-      .filter((r) => r.dias >= 14);
+      .map((r) => ({ ...r, dias: r.pjn_cargado_at ? diasCalendarioDesde(r.pjn_cargado_at) : 0 }))
+      .filter((r) => esCandidatoReiteratorio(r.pjn_cargado_at));
     const q = buscarTexto.trim().toLowerCase();
     if (q) {
       list = list.filter((r) => {
@@ -344,7 +343,7 @@ export default function ReiteratoriosPage() {
             <div>
               <h1 className="page-header__title">Oficios Reiteratorios</h1>
               <p className="page-header__subtitle">
-                Oficios cargados en PJN hace 14 días o más sin respuesta del juzgado.
+                Oficios cargados en PJN hace {REITERATORIO_UMBRAL_DIAS} días o más sin respuesta del juzgado.
               </p>
             </div>
           </div>
@@ -374,7 +373,7 @@ export default function ReiteratoriosPage() {
                       className="muted"
                       style={{ padding: 24, textAlign: "center" }}
                     >
-                      No hay oficios con 14 días o más sin respuesta.
+                      No hay oficios con {REITERATORIO_UMBRAL_DIAS} días o más sin respuesta.
                     </td>
                   </tr>
                 ) : (

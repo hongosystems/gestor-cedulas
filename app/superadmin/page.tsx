@@ -6,14 +6,39 @@ import { supabase } from "@/lib/supabase";
 import { pjnScraperSupabase } from "@/lib/pjn-scraper-supabase";
 import jsPDF from "jspdf";
 import SuperadminDashboardPanels from "@/app/components/dashboard/SuperadminDashboardPanels";
+import { FancySelect, type FancyItem } from "@/app/components/ui/FancySelect";
 import type { BarChartItem } from "@/app/components/ui/CssBarChart";
 import type { OperationalMetrics } from "@/app/components/dashboard/SuperadminDashboardPanels";
+import {
+  esCandidatoReiteratorio,
+  REITERATORIO_UMBRAL_DIAS,
+} from "@/lib/reiteratorios";
 import { tienePruebaPericia } from "@/lib/prueba-pericia-detect";
 import {
   dedupeExpedientesByMatchKey,
   isExpedientePjnMergeEnabled,
   mergeLocalsWithPjnFavoritos,
 } from "@/lib/expediente-pjn-merge";
+import {
+  colorCedulaOficio,
+  colorExpediente,
+  colorPorDias,
+  daysSince,
+  ddmmaaaaToISO,
+  UMBRALES,
+  type CedulaOficioColorResult,
+  type SemaforoColor,
+} from "@/lib/semaforo";
+import {
+  buildJuzgadoRojosChart,
+  buildResponsableRojosChart,
+  collectJuzgadoKeysFromSources,
+  juzgadoKeyFromRaw,
+  matchesJuzgadoFilter,
+  isJuzgadoFilterKey,
+  SIN_RESPONSABLE_LABEL,
+  type DocumentoRojoDashboard,
+} from "@/lib/semaforo-dashboard-rojos";
 
 type Cedula = {
   id: string;
@@ -26,6 +51,7 @@ type Cedula = {
   tipo_documento: "CEDULA" | "OFICIO" | "OTROS_ESCRITOS" | null;
   created_by_user_id?: string | null;
   pjn_cargado_at?: string | null;
+  admin_cedulas_completada_at?: string | null;
   estado_ocr?: string | null;
   ocr_error?: string | null;
 };
@@ -37,9 +63,13 @@ type Expediente = {
   juzgado: string | null;
   numero_expediente: string | null;
   fecha_ultima_modificacion: string | null;
+  fecha_ultima_carga?: string | null;
+  observaciones?: string | null;
+  semaforo_congelado?: boolean | null;
+  fecha_semaforo_congelado?: string | null;
   estado: string;
   created_by_user_id?: string | null;
-  is_pjn_favorito?: boolean; // Indica si viene de pjn_favoritos
+  is_pjn_favorito?: boolean;
 };
 
 type PjnFavorito = {
@@ -64,8 +94,20 @@ type UserJuzgados = {
   juzgado: string;
 };
 
-const UMBRAL_AMARILLO = 30;
-const UMBRAL_ROJO = 60;
+type CedulaConColor = Cedula & CedulaOficioColorResult & { sem: SemaforoColor };
+
+const UMBRAL_AMARILLO = UMBRALES.expediente.amarillo;
+const UMBRAL_ROJO = UMBRALES.expediente.rojo;
+
+function expedienteSemaforo(e: {
+  fecha_ultima_modificacion?: string | null;
+  fecha_ultima_carga?: string | null;
+  observaciones?: string | null;
+  semaforo_congelado?: boolean | null;
+  fecha_semaforo_congelado?: string | null;
+}) {
+  return colorExpediente(e);
+}
 
 type TimeFilter = "all" | "week" | "month" | "custom";
 
@@ -112,94 +154,6 @@ function getDateRange(filter: TimeFilter, customStart?: string, customEnd?: stri
   }
 }
 
-// Convertir fecha a ISO (YYYY-MM-DD)
-// Maneja múltiples formatos:
-// - DD/MM/AAAA (formato esperado)
-// - YYYY-MM-DD (formato actual en BD)
-// - AAAA-MM-DD (variante)
-function ddmmaaaaToISO(fecha: string | null): string | null {
-  if (!fecha || fecha.trim() === "") return null;
-  
-  const fechaTrim = fecha.trim();
-  
-  // Intentar formato DD/MM/AAAA
-  const m1 = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(fechaTrim);
-  if (m1) {
-    const [, dia, mes, anio] = m1;
-    return `${anio}-${mes}-${dia}T00:00:00.000Z`;
-  }
-  
-  // Intentar formato YYYY-MM-DD o AAAA-MM-DD (formato actual en BD)
-  const m2 = /^(\d{4})-(\d{2})-(\d{2})$/.exec(fechaTrim);
-  if (m2) {
-    const [, anio, mes, dia] = m2;
-    // Ya está en formato ISO, solo agregar la hora
-    return `${anio}-${mes}-${dia}T00:00:00.000Z`;
-  }
-  
-  // Si no coincide con ningún formato, retornar null
-  console.warn(`[Dashboard] Formato de fecha no reconocido: ${fechaTrim}`);
-  return null;
-}
-
-/**
- * Calcula los días desde una fecha, excluyendo los días de enero (feria judicial)
- * @param fechaCargaISO Fecha en formato ISO
- * @returns Número de días efectivos (excluyendo enero)
- */
-function daysSince(fechaCargaISO: string | null) {
-  if (!fechaCargaISO) return 0;
-  const carga = new Date(fechaCargaISO);
-  if (isNaN(carga.getTime())) return 0;
-  const today = startOfDay(new Date());
-  const base = startOfDay(carga);
-  
-  // Calcular días totales
-  const diffMs = today.getTime() - base.getTime();
-  const totalDays = Math.floor(diffMs / 86400000);
-  
-  // Contar días de enero (feria judicial) en el rango
-  let eneroDays = 0;
-  const currentDate = new Date(base);
-  
-  while (currentDate <= today) {
-    // Si el día actual es de enero (mes 0 en JavaScript), contarlo
-    if (currentDate.getMonth() === 0) { // Enero es mes 0
-      eneroDays++;
-    }
-    // Avanzar un día
-    currentDate.setDate(currentDate.getDate() + 1);
-  }
-  
-  // Retornar días efectivos (total - días de enero)
-  return Math.max(0, totalDays - eneroDays);
-}
-
-/**
- * Obtiene la fecha base para calcular el semáforo
- * Para cédulas/oficios: usa fecha_carga
- * Para expedientes: usa fecha_ultima_modificacion
- */
-function getFechaBaseParaSemaforo(
-  fechaCarga: string | null | undefined,
-  fechaUltimaModificacion: string | null | undefined,
-  esExpediente: boolean = false
-): string | null {
-  // Para expedientes, usar fecha_ultima_modificacion
-  if (esExpediente) {
-    return fechaUltimaModificacion || null;
-  }
-  
-  // Para cédulas/oficios, usar fecha_carga
-  return fechaCarga || null;
-}
-
-function semaforoPorAntiguedad(diasDesdeCarga: number) {
-  if (diasDesdeCarga >= UMBRAL_ROJO) return "ROJO";
-  if (diasDesdeCarga >= UMBRAL_AMARILLO) return "AMARILLO";
-  return "VERDE";
-}
-
 function displayName(p?: Profile) {
   const name = (p?.full_name || "").trim();
   if (name) return name;
@@ -208,7 +162,7 @@ function displayName(p?: Profile) {
   return "Sin nombre";
 }
 
-function KPICard({ 
+function KPICard({
   title, 
   value, 
   subValue, 
@@ -485,7 +439,7 @@ export default function SuperAdminPage() {
       const query = supabase
         .from("cedulas")
         .select(
-          "id, owner_user_id, caratula, juzgado, fecha_carga, fecha_vencimiento, estado, tipo_documento, created_by_user_id, pjn_cargado_at, estado_ocr, ocr_error"
+          "id, owner_user_id, caratula, juzgado, fecha_carga, fecha_vencimiento, estado, tipo_documento, created_by_user_id, pjn_cargado_at, admin_cedulas_completada_at, estado_ocr, ocr_error"
         )
         .neq("estado", "CERRADA")
         .order("fecha_carga", { ascending: true });
@@ -499,6 +453,7 @@ export default function SuperAdminPage() {
           msg.includes("created_by_user_id") ||
           msg.includes("fecha_vencimiento") ||
           msg.includes("pjn_cargado_at") ||
+          msg.includes("admin_cedulas_completada_at") ||
           msg.includes("estado_ocr") ||
           msg.includes("ocr_error");
         if (optionalCols) {
@@ -520,6 +475,7 @@ export default function SuperAdminPage() {
             created_by_user_id: null,
             fecha_vencimiento: null,
             pjn_cargado_at: null,
+            admin_cedulas_completada_at: null,
             estado_ocr: null,
             ocr_error: null,
           }));
@@ -762,33 +718,11 @@ export default function SuperAdminPage() {
       });
     } else if (juzgadoFilter === "todos") {
       console.log(`[Dashboard] Filtro juzgados = "todos" - NO aplicando filtro de juzgados. Cédulas: ${filtered.length}`);
-    } else if (juzgadoFilter && juzgadoFilter !== "mis_juzgados" && juzgadoFilter !== "todos") {
-      // Filtro por juzgado específico
+    } else if (isJuzgadoFilterKey(juzgadoFilter)) {
       const beforeJuzgadoFilter = filtered.length;
-      const juzgadoFiltroNormalizado = normalizarJuzgado(juzgadoFilter);
-      
-      filtered = filtered.filter(c => {
-        if (!c.juzgado) return false;
-        const juzgadoNormalizado = normalizarJuzgado(c.juzgado);
-        
-        // Comparación exacta normalizada
-        if (juzgadoNormalizado === juzgadoFiltroNormalizado) return true;
-        
-        // Comparación por número de juzgado (más flexible)
-        const numFiltro = juzgadoFiltroNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
-        const numJuzgado = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
-        if (numFiltro && numJuzgado && numFiltro === numJuzgado) {
-          if (juzgadoFiltroNormalizado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
-            return true;
-          }
-        }
-        
-        return false;
-      });
-      
-      console.log(`[Dashboard] Filtro cédulas por juzgado específico: ${beforeJuzgadoFilter} -> ${filtered.length}`, {
+      filtered = filtered.filter((c) => matchesJuzgadoFilter(c.juzgado, juzgadoFilter));
+      console.log(`[Dashboard] Filtro cédulas por juzgado (clave exacta): ${beforeJuzgadoFilter} -> ${filtered.length}`, {
         juzgadoFilter,
-        juzgadoFiltroNormalizado
       });
     }
 
@@ -858,141 +792,37 @@ export default function SuperAdminPage() {
     return false;
   };
 
-  // Obtener todos los juzgados únicos de cédulas, expedientes y favoritos, ordenados ascendente
-  // Separar entre asignados y sin asignar
-  const juzgadosData = useMemo(() => {
-    const juzgadosSet = new Set<string>();
-    
-    // Agregar juzgados de cédulas
-    allCedulas.forEach(c => {
-      if (c.juzgado && c.juzgado.trim()) {
-        juzgadosSet.add(c.juzgado.trim());
-      }
-    });
-    
-    // Agregar juzgados de expedientes
-    allExpedientes.forEach(e => {
-      if (e.juzgado && e.juzgado.trim()) {
-        juzgadosSet.add(e.juzgado.trim());
-      }
-    });
-    
-    // Agregar juzgados de favoritos
-    pjnFavoritos.forEach(f => {
-      if (f.juzgado && f.juzgado.trim()) {
-        juzgadosSet.add(f.juzgado.trim());
-      }
-    });
-    
-    // Obtener todos los juzgados asignados (de todos los usuarios)
-    const juzgadosAsignadosSet = new Set<string>();
-    Object.values(userJuzgadosMap).forEach(juzgadosDelUsuario => {
-      juzgadosDelUsuario.forEach(j => {
-        if (j && j.trim()) {
-          juzgadosAsignadosSet.add(j.trim());
-        }
-      });
-    });
-    
-    // Separar juzgados en asignados y sin asignar
-    // Primero, eliminar duplicados por número de juzgado, priorizando el formato "JUZGADO CIVIL [NÚMERO]"
-    const juzgadosArray = Array.from(juzgadosSet);
-    const juzgadosPorNumero = new Map<string, string>(); // Map: número -> mejor formato
-    const juzgadosSinNumero = new Set<string>(); // Juzgados que no tienen número extraíble
-    
-    juzgadosArray.forEach(juzgado => {
-      // Intentar extraer número de cualquier formato
-      const numMatch = juzgado.match(/(?:N[°º]?\s*|NRO\.?\s*|NUMERO\s+)?(\d+)/i);
-      
-      if (numMatch && numMatch[1]) {
-        const numero = numMatch[1];
-        const formatoPreferido = `JUZGADO CIVIL ${numero}`;
-        const juzgadoUpper = juzgado.toUpperCase().trim();
-        const esFormatoPreferido = juzgadoUpper === formatoPreferido;
-        
-        // Si ya existe un juzgado con este número
-        if (juzgadosPorNumero.has(numero)) {
-          const existente = juzgadosPorNumero.get(numero)!;
-          const existenteUpper = existente.toUpperCase().trim();
-          const existenteEsPreferido = existenteUpper === formatoPreferido;
-          
-          // Priorizar el formato "JUZGADO CIVIL [NÚMERO]" sobre otros formatos
-          if (esFormatoPreferido && !existenteEsPreferido) {
-            juzgadosPorNumero.set(numero, formatoPreferido);
-          } else if (!esFormatoPreferido && !existenteEsPreferido) {
-            // Si ninguno es el formato preferido, usar el más corto
-            if (juzgado.length < existente.length) {
-              juzgadosPorNumero.set(numero, juzgado);
-            }
-          }
-          // Si ambos son el formato preferido o el existente ya es preferido, mantener el existente
-        } else {
-          // Si es el formato preferido, usarlo directamente
-          if (esFormatoPreferido) {
-            juzgadosPorNumero.set(numero, formatoPreferido);
-          } else {
-            juzgadosPorNumero.set(numero, juzgado);
-          }
-        }
-      } else {
-        // Si no tiene número extraíble, agregarlo directamente (sin duplicados por nombre exacto)
-        juzgadosSinNumero.add(juzgado);
-      }
-    });
-    
-    // Convertir el Map a array de juzgados únicos y agregar los que no tienen número
-    const juzgadosUnicos = [...Array.from(juzgadosPorNumero.values()), ...Array.from(juzgadosSinNumero)];
-    
-    const asignados: string[] = [];
-    const sinAsignar: string[] = [];
-    
-    juzgadosUnicos.forEach(juzgado => {
-      // Normalizar para comparar
-      const juzgadoNorm = normalizarJuzgado(juzgado);
-      const estaAsignado = Array.from(juzgadosAsignadosSet).some(jAsignado => {
-        const jAsignadoNorm = normalizarJuzgado(jAsignado);
-        return juzgadosCoinciden(juzgadoNorm, jAsignadoNorm);
-      });
-      
-      if (estaAsignado) {
-        asignados.push(juzgado);
-      } else {
-        sinAsignar.push(juzgado);
-      }
-    });
-    
-    // Función de ordenamiento
-    const sortJuzgados = (a: string, b: string) => {
-      // Normalizar para comparación
-      const aNorm = normalizarJuzgado(a);
-      const bNorm = normalizarJuzgado(b);
-      
-      // Extraer números para ordenamiento numérico
-      const aNum = parseInt(aNorm.match(/\d+/)?.[0] || "0", 10);
-      const bNum = parseInt(bNorm.match(/\d+/)?.[0] || "0", 10);
-      
-      if (aNum !== bNum) {
-        return aNum - bNum;
-      }
-      
-      return aNorm.localeCompare(bNorm, 'es', { numeric: true, sensitivity: 'base' });
-    };
-    
-    // Ordenar ambos grupos
-    asignados.sort(sortJuzgados);
-    sinAsignar.sort(sortJuzgados);
-    
-    return {
-      todosLosJuzgados: juzgadosUnicos.sort(sortJuzgados),
-      juzgadosAsignados: asignados,
-      juzgadosSinAsignar: sinAsignar
-    };
-  }, [allCedulas, allExpedientes, pjnFavoritos, userJuzgadosMap]);
-  
-  // Valores por defecto para evitar errores durante la carga inicial
-  const todosLosJuzgados = juzgadosData?.todosLosJuzgados || [];
-  const juzgadosAsignados = juzgadosData?.juzgadosAsignados || [];
-  const juzgadosSinAsignar = juzgadosData?.juzgadosSinAsignar || [];
+  // Obtener todos los juzgados únicos — ver collectJuzgadoKeysFromSources tras expedientesUnificados
+
+  const usuarioFilterItems = useMemo((): FancyItem[] => {
+    if (roleFlags.isAbogado && !roleFlags.isSuperadmin) {
+      return [
+        {
+          kind: "option",
+          value: currentUserId,
+          label: displayName(profiles[currentUserId]),
+        },
+      ];
+    }
+    return [
+      { kind: "option", value: "all", label: "Todos los usuarios" },
+      ...Object.entries(profiles).map(([uid, profile]) => ({
+        kind: "option" as const,
+        value: uid,
+        label: displayName(profile),
+      })),
+    ];
+  }, [roleFlags.isAbogado, roleFlags.isSuperadmin, currentUserId, profiles]);
+
+  const periodoFilterItems = useMemo(
+    (): FancyItem[] => [
+      { kind: "option", value: "all", label: "Todos" },
+      { kind: "option", value: "week", label: "Última semana" },
+      { kind: "option", value: "month", label: "Último mes" },
+      { kind: "option", value: "custom", label: "Rango personalizado" },
+    ],
+    []
+  );
 
   // Convertir favoritos de pjn-scraper a expedientes (SIN duplicar - solo mostrar favoritos filtrados por juzgado)
   const favoritosComoExpedientes = useMemo(() => {
@@ -1075,6 +905,37 @@ export default function SuperAdminPage() {
 
     return combined as Expediente[];
   }, [allExpedientes, pjnFavoritos, favoritosComoExpedientes]);
+
+  /** Claves de juzgado canónicas (misma fuente que barras/modal). */
+  const dashboardJuzgadoKeys = useMemo(
+    () => collectJuzgadoKeysFromSources([...allCedulas, ...expedientesUnificados]),
+    [allCedulas, expedientesUnificados]
+  );
+
+  const juzgadoFilterItems = useMemo((): FancyItem[] => {
+    const items: FancyItem[] = [
+      { kind: "option", value: "todos", label: "Todos los Juzgados" },
+      {
+        kind: "option",
+        value: "mis_juzgados",
+        label:
+          selectedUserJuzgados.length === 0
+            ? "Mis Juzgados (sin asignar)"
+            : "Mis Juzgados",
+        badge: selectedUserJuzgados.length > 0 ? selectedUserJuzgados.length : undefined,
+        disabled: selectedUserJuzgados.length === 0,
+      },
+      { kind: "option", value: "beneficio", label: "Beneficio" },
+      { kind: "option", value: "prueba_pericia", label: "Prueba/Pericia" },
+    ];
+    if (dashboardJuzgadoKeys.length > 0) {
+      items.push({ kind: "group", label: "Juzgados" });
+      for (const key of dashboardJuzgadoKeys) {
+        items.push({ kind: "option", value: key, label: key });
+      }
+    }
+    return items;
+  }, [dashboardJuzgadoKeys, selectedUserJuzgados.length]);
 
   // Cargar movimientos desde cases cuando el filtro es "prueba_pericia"
   useEffect(() => {
@@ -1186,36 +1047,10 @@ export default function SuperAdminPage() {
 
       console.log(`[Dashboard] Filtro por usuario (local por owner, PJN por juzgado asignado): ${beforeUserFilter} -> ${filtered.length}`);
     } else {
-      // Cuando se selecciona "Todos los usuarios", mostrar TODOS los expedientes:
-      // 1. Todos los expedientes locales (ya tienen owner_user_id)
-      // 2. Todos los favoritos PJN asignados a usuarios (asignar al primer usuario que coincida)
-      // IMPORTANTE: NO filtrar, solo asignar favoritos PJN sin asignar
-      filtered = filtered.map(e => {
-        // Si es un favorito PJN sin asignar, buscar el primer usuario que tenga este juzgado asignado
-        if (e.is_pjn_favorito && (!e.owner_user_id || e.owner_user_id.trim() === "")) {
-          if (!e.juzgado) return e; // Mantener sin asignar si no tiene juzgado
-          
-          // Buscar el primer usuario que tenga este juzgado asignado
-          for (const [userId, juzgadosDelUsuario] of Object.entries(userJuzgadosMap)) {
-            const juzgadosNormalizados = juzgadosDelUsuario.map(j => normalizarJuzgado(j));
-            
-            // Usar comparación estricta
-            const matchJuzgado = juzgadosNormalizados.some(jAsignado => {
-              return juzgadosCoinciden(e.juzgado || "", jAsignado);
-            });
-            
-            if (matchJuzgado) {
-              return { ...e, owner_user_id: userId };
-            }
-          }
-          // Si no se encuentra ningún usuario con este juzgado, mantener sin asignar (no se contará en métricas)
-          return e;
-        }
-        // Mantener todos los demás expedientes (locales y favoritos ya asignados)
-        return e;
-      });
+      // Todos los usuarios: sin inferir owner en favoritos PJN (van a "Sin responsable" en ranking)
+      filtered = filtered.map((e) => e);
       
-      console.log(`[Dashboard] Modo "Todos los usuarios" - Total expedientes: ${filtered.length} (${filtered.filter(e => !e.is_pjn_favorito).length} locales + ${filtered.filter(e => e.is_pjn_favorito && e.owner_user_id && e.owner_user_id.trim() !== "").length} favoritos PJN asignados)`);
+      console.log(`[Dashboard] Modo "Todos los usuarios" - Total expedientes: ${filtered.length} (${filtered.filter(e => !e.is_pjn_favorito).length} locales + ${filtered.filter(e => e.is_pjn_favorito).length} favoritos PJN)`);
     }
 
     // Filtro por juzgados
@@ -1300,19 +1135,11 @@ export default function SuperAdminPage() {
         favoritosSinMovimientos,
         expedientesFiltrados: filtered.length
       });
-    } else if (juzgadoFilter && juzgadoFilter !== "mis_juzgados" && juzgadoFilter !== "todos" && juzgadoFilter !== "beneficio" && juzgadoFilter !== "prueba_pericia") {
-      // Filtro por juzgado específico
+    } else if (isJuzgadoFilterKey(juzgadoFilter)) {
       const beforeJuzgadoFilter = filtered.length;
-      const juzgadoFiltroNormalizado = normalizarJuzgado(juzgadoFilter);
-      
-      filtered = filtered.filter(e => {
-        if (!e.juzgado) return false;
-        return juzgadosCoinciden(e.juzgado, juzgadoFilter);
-      });
-      
-      console.log(`[Dashboard] Filtro expedientes por juzgado específico: ${beforeJuzgadoFilter} -> ${filtered.length}`, {
+      filtered = filtered.filter((e) => matchesJuzgadoFilter(e.juzgado, juzgadoFilter));
+      console.log(`[Dashboard] Filtro expedientes por juzgado (clave exacta): ${beforeJuzgadoFilter} -> ${filtered.length}`, {
         juzgadoFilter,
-        juzgadoFiltroNormalizado
       });
     }
 
@@ -1332,68 +1159,102 @@ export default function SuperAdminPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expedientesUnificados, timeFilter, selectedUserId, juzgadoFilter, selectedUserJuzgados, customStartDate, customEndDate, userJuzgados.length]);
 
+  /** GUARDA 1: color de cédula/oficio resuelto una sola vez — fuente para conteos, ranking y juzgadoRojos. */
+  const cedulasConColor = useMemo((): CedulaConColor[] => {
+    return cedulas.map((c) => {
+      const resolved = colorCedulaOficio(c);
+      return { ...c, ...resolved, sem: resolved.color };
+    });
+  }, [cedulas]);
+
+  /** Lista canónica de documentos rojos — fuente única para gráficos y modal drill-down. */
+  const documentosRojos = useMemo((): DocumentoRojoDashboard[] => {
+    const ownerExplicit = (uid: string | null | undefined): string | null =>
+      uid?.trim() ? uid.trim() : null;
+
+    const unificadosById = new Map(expedientesUnificados.map((e) => [e.id, e]));
+    const items: DocumentoRojoDashboard[] = [];
+
+    for (const c of cedulasConColor) {
+      if (c.color !== "ROJO") continue;
+      const tipo = c.tipo_documento === "OFICIO" ? "OFICIO" : "CEDULA";
+      const caratula = c.caratula?.trim() || "Sin carátula";
+      const ownerUserId = ownerExplicit(c.owner_user_id);
+      items.push({
+        id: c.id,
+        tipo,
+        tipoLabel: tipo === "OFICIO" ? "Oficio" : "Cédula",
+        caratula,
+        juzgado: c.juzgado?.trim() || null,
+        juzgadoKey: juzgadoKeyFromRaw(c.juzgado),
+        dias: c.dias,
+        ownerUserId,
+        ownerName: ownerUserId ? displayName(profiles[ownerUserId]) : SIN_RESPONSABLE_LABEL,
+        href: "/app",
+      });
+    }
+
+    for (const e of expedientes) {
+      const { color, dias, fechaBase } = expedienteSemaforo(e);
+      if (!fechaBase || color !== "ROJO") continue;
+      const caratula = e.caratula?.trim() || e.numero_expediente?.trim() || "Sin carátula";
+      const base = unificadosById.get(e.id) ?? e;
+      const ownerUserId = ownerExplicit(base.owner_user_id);
+      items.push({
+        id: e.id,
+        tipo: "EXPEDIENTE",
+        tipoLabel: "Expediente",
+        caratula,
+        juzgado: e.juzgado?.trim() || null,
+        juzgadoKey: juzgadoKeyFromRaw(e.juzgado),
+        dias,
+        ownerUserId,
+        ownerName: ownerUserId ? displayName(profiles[ownerUserId]) : SIN_RESPONSABLE_LABEL,
+        href: "/superadmin/mis-juzgados",
+      });
+    }
+
+    return items;
+  }, [cedulasConColor, expedientes, expedientesUnificados, profiles]);
+
+  const juzgadoRojos = useMemo(
+    (): BarChartItem[] => buildJuzgadoRojosChart(documentosRojos),
+    [documentosRojos]
+  );
+
+  const responsableRojos = useMemo(
+    (): BarChartItem[] => buildResponsableRojosChart(documentosRojos),
+    [documentosRojos]
+  );
+
   const ranking = useMemo(() => {
     const perUser: Record<string, { rojos: number; amarillos: number; verdes: number; total: number; maxDias: number }> = {};
 
-    // Contar cédulas (tipo_documento === "CEDULA" o null)
-    // IMPORTANTE: Para cédulas, el semáforo se calcula desde fecha_carga
-    for (const c of cedulas) {
-      // Solo contar cédulas, no oficios (los oficios se cuentan por separado)
-      if (c.tipo_documento === "OFICIO") continue;
-      
-      // Ignorar cédulas sin owner_user_id válido
+    for (const c of cedulasConColor) {
       if (!c.owner_user_id || c.owner_user_id.trim() === "") continue;
-      
-      const fechaBase = getFechaBaseParaSemaforo(c.fecha_carga, null, false);
-      const dias = daysSince(fechaBase);
-      const s = semaforoPorAntiguedad(dias);
+
+      const s = c.color;
+      const dias = c.dias ?? 0;
       const uid = c.owner_user_id;
 
       perUser[uid] ||= { rojos: 0, amarillos: 0, verdes: 0, total: 0, maxDias: -1 };
       perUser[uid].total++;
-      perUser[uid].maxDias = Math.max(perUser[uid].maxDias, dias);
+      perUser[uid].maxDias = Math.max(perUser[uid].maxDias, dias ?? 0);
 
       if (s === "ROJO") perUser[uid].rojos++;
       else if (s === "AMARILLO") perUser[uid].amarillos++;
       else perUser[uid].verdes++;
     }
 
-    // Contar oficios (tipo_documento === "OFICIO")
-    // IMPORTANTE: Para oficios, el semáforo se calcula desde fecha_carga
-    for (const c of cedulas) {
-      if (c.tipo_documento !== "OFICIO") continue;
-      
-      // Ignorar oficios sin owner_user_id válido
-      if (!c.owner_user_id || c.owner_user_id.trim() === "") continue;
-      
-      const fechaBase = getFechaBaseParaSemaforo(c.fecha_carga, null, false);
-      const dias = daysSince(fechaBase);
-      const s = semaforoPorAntiguedad(dias);
-      const uid = c.owner_user_id;
-
-      perUser[uid] ||= { rojos: 0, amarillos: 0, verdes: 0, total: 0, maxDias: -1 };
-      perUser[uid].total++;
-      perUser[uid].maxDias = Math.max(perUser[uid].maxDias, dias);
-
-      if (s === "ROJO") perUser[uid].rojos++;
-      else if (s === "AMARILLO") perUser[uid].amarillos++;
-      else perUser[uid].verdes++;
-    }
-
-    // Contar expedientes (ignorar los que no tienen owner_user_id válido)
-    // IMPORTANTE: Para expedientes, el semáforo se calcula desde fecha_ultima_modificacion
     for (const e of expedientes) {
-      // Ignorar expedientes sin owner_user_id (favoritos PJN sin asignar a usuario)
       if (!e.owner_user_id || e.owner_user_id.trim() === "") continue;
-      
-      const fechaBase = getFechaBaseParaSemaforo(null, e.fecha_ultima_modificacion, true);
-      const dias = daysSince(fechaBase);
-      const s = semaforoPorAntiguedad(dias);
+
+      const { color: s, dias } = expedienteSemaforo(e);
       const uid = e.owner_user_id;
 
       perUser[uid] ||= { rojos: 0, amarillos: 0, verdes: 0, total: 0, maxDias: -1 };
       perUser[uid].total++;
-      perUser[uid].maxDias = Math.max(perUser[uid].maxDias, dias);
+      perUser[uid].maxDias = Math.max(perUser[uid].maxDias, dias ?? 0);
 
       if (s === "ROJO") perUser[uid].rojos++;
       else if (s === "AMARILLO") perUser[uid].amarillos++;
@@ -1427,27 +1288,20 @@ export default function SuperAdminPage() {
       (b.amarillos - a.amarillos) ||
       (b.maxDias - a.maxDias)
     );
-  }, [cedulas, expedientes, profiles]);
+  }, [cedulasConColor, expedientes, profiles]);
 
   const rankingExpedientes = useMemo(() => {
     const perUser: Record<string, { rojos: number; amarillos: number; verdes: number; total: number; maxDias: number }> = {};
 
-    // IMPORTANTE: Usar el array filtrado (expedientes) para que el ranking refleje los filtros aplicados
-    // Esto asegura que cuando se filtra por juzgado, el ranking solo muestre los expedientes filtrados
-    
-    // IMPORTANTE: Para expedientes, el semáforo se calcula desde fecha_ultima_modificacion
     for (const e of expedientes) {
-      // Ignorar expedientes sin owner_user_id válido
       if (!e.owner_user_id || e.owner_user_id.trim() === "") continue;
-      
-      const fechaBase = getFechaBaseParaSemaforo(null, e.fecha_ultima_modificacion, true);
-      const dias = daysSince(fechaBase);
-      const s = semaforoPorAntiguedad(dias);
+
+      const { color: s, dias } = expedienteSemaforo(e);
       const uid = e.owner_user_id;
 
       perUser[uid] ||= { rojos: 0, amarillos: 0, verdes: 0, total: 0, maxDias: -1 };
       perUser[uid].total++;
-      perUser[uid].maxDias = Math.max(perUser[uid].maxDias, dias);
+      perUser[uid].maxDias = Math.max(perUser[uid].maxDias, dias ?? 0);
 
       if (s === "ROJO") perUser[uid].rojos++;
       else if (s === "AMARILLO") perUser[uid].amarillos++;
@@ -1466,10 +1320,11 @@ export default function SuperAdminPage() {
   }, [expedientes, profiles]);
 
   const metrics = useMemo(() => {
-    const cedulasFiltered = cedulas.filter(c => !c.tipo_documento || c.tipo_documento === "CEDULA");
-    const oficiosFiltered = cedulas.filter(c => c.tipo_documento === "OFICIO");
+    const cedulasFiltered = cedulasConColor.filter(c => !c.tipo_documento || c.tipo_documento === "CEDULA");
+    const oficiosFiltered = cedulasConColor.filter(c => c.tipo_documento === "OFICIO");
+    const cedulasConOwner = cedulasConColor.filter(c => c.owner_user_id && c.owner_user_id.trim() !== "");
     
-    const totalAbiertas = cedulas.length;
+    const totalAbiertas = cedulasConColor.length;
     const totalCedulas = cedulasFiltered.length;
     const totalOficios = oficiosFiltered.length;
     
@@ -1542,42 +1397,24 @@ export default function SuperAdminPage() {
     let totalAmarillas = 0;
     let totalVerdes = 0;
     
-    // Contar cédulas (semáforo desde fecha_carga)
-    for (const c of cedulasFiltered) {
-      if (!c.owner_user_id || c.owner_user_id.trim() === "") continue;
-      const fechaBase = getFechaBaseParaSemaforo(c.fecha_carga, null, false);
-      const dias = daysSince(fechaBase);
-      const s = semaforoPorAntiguedad(dias);
-      if (s === "ROJO") totalRojas++;
-      else if (s === "AMARILLO") totalAmarillas++;
-      else totalVerdes++;
-    }
-    
-    // Contar oficios (semáforo desde fecha_carga)
-    for (const c of oficiosFiltered) {
-      if (!c.owner_user_id || c.owner_user_id.trim() === "") continue;
-      const fechaBase = getFechaBaseParaSemaforo(c.fecha_carga, null, false);
-      const dias = daysSince(fechaBase);
-      const s = semaforoPorAntiguedad(dias);
-      if (s === "ROJO") totalRojas++;
-      else if (s === "AMARILLO") totalAmarillas++;
+    // Cédulas + oficios: conteos desde array canónico
+    for (const c of cedulasConOwner) {
+      if (c.color === "ROJO") totalRojas++;
+      else if (c.color === "AMARILLO") totalAmarillas++;
       else totalVerdes++;
     }
     
     // Contar expedientes (usando expedientesParaContar que incluye todos cuando juzgadoFilter === "todos")
-    // IMPORTANTE: Para expedientes, el semáforo se calcula desde fecha_ultima_modificacion
     let expedientesSinFecha = 0;
     let expedientesConFecha = 0;
     for (const e of expedientesParaContar) {
       if (!e.owner_user_id || e.owner_user_id.trim() === "") continue;
-      const fechaBase = getFechaBaseParaSemaforo(null, e.fecha_ultima_modificacion, true);
-      if (!fechaBase) {
+      if (!e.fecha_ultima_modificacion) {
         expedientesSinFecha++;
-        continue; // Si no hay fecha, no se puede calcular el semáforo
+        continue;
       }
       expedientesConFecha++;
-      const dias = daysSince(fechaBase);
-      const s = semaforoPorAntiguedad(dias);
+      const { color: s } = expedienteSemaforo(e);
       if (s === "ROJO") totalRojas++;
       else if (s === "AMARILLO") totalAmarillas++;
       else totalVerdes++;
@@ -1598,44 +1435,21 @@ export default function SuperAdminPage() {
     
     // Calcular métricas por tipo de documento
     // IMPORTANTE: Cédulas y oficios usan fecha_carga para el semáforo
-    const cedulasRojas = cedulasFiltered.filter(c => {
-      const fechaBase = getFechaBaseParaSemaforo(c.fecha_carga, null, false);
-      const dias = daysSince(fechaBase);
-      return semaforoPorAntiguedad(dias) === "ROJO";
-    }).length;
-    const cedulasAmarillas = cedulasFiltered.filter(c => {
-      const fechaBase = getFechaBaseParaSemaforo(c.fecha_carga, null, false);
-      const dias = daysSince(fechaBase);
-      return semaforoPorAntiguedad(dias) === "AMARILLO";
-    }).length;
-    const cedulasVerdes = cedulasFiltered.filter(c => {
-      const fechaBase = getFechaBaseParaSemaforo(c.fecha_carga, null, false);
-      const dias = daysSince(fechaBase);
-      return semaforoPorAntiguedad(dias) === "VERDE";
-    }).length;
-    
-    const oficiosRojos = oficiosFiltered.filter(c => {
-      const fechaBase = getFechaBaseParaSemaforo(c.fecha_carga, null, false);
-      const dias = daysSince(fechaBase);
-      return semaforoPorAntiguedad(dias) === "ROJO";
-    }).length;
-    const oficiosAmarillos = oficiosFiltered.filter(c => {
-      const fechaBase = getFechaBaseParaSemaforo(c.fecha_carga, null, false);
-      const dias = daysSince(fechaBase);
-      return semaforoPorAntiguedad(dias) === "AMARILLO";
-    }).length;
-    const oficiosVerdes = oficiosFiltered.filter(c => {
-      const fechaBase = getFechaBaseParaSemaforo(c.fecha_carga, null, false);
-      const dias = daysSince(fechaBase);
-      return semaforoPorAntiguedad(dias) === "VERDE";
-    }).length;
+    const cedulasRojas = cedulasFiltered.filter(c => c.color === "ROJO").length;
+    const cedulasAmarillas = cedulasFiltered.filter(c => c.color === "AMARILLO").length;
+    const cedulasVerdes = cedulasFiltered.filter(c => c.color === "VERDE").length;
+
+    const oficiosRojos = oficiosFiltered.filter(c => c.color === "ROJO").length;
+    const oficiosAmarillos = oficiosFiltered.filter(c => c.color === "AMARILLO").length;
+    const oficiosVerdes = oficiosFiltered.filter(c => c.color === "VERDE").length;
     
     const totalUsuarios = ranking.length;
     const promedioPorUsuario = totalUsuarios > 0 ? (totalAbiertas / totalUsuarios).toFixed(1) : "0";
-    
-    const pctRojas = totalAbiertas > 0 ? ((totalRojas / totalAbiertas) * 100).toFixed(1) : "0";
-    const pctAmarillas = totalAbiertas > 0 ? ((totalAmarillas / totalAbiertas) * 100).toFixed(1) : "0";
-    const pctVerdes = totalAbiertas > 0 ? ((totalVerdes / totalAbiertas) * 100).toFixed(1) : "0";
+
+    const totalUniversoSemaforo = totalRojas + totalAmarillas + totalVerdes;
+    const pctRojas = totalUniversoSemaforo > 0 ? ((totalRojas / totalUniversoSemaforo) * 100).toFixed(1) : "0";
+    const pctAmarillas = totalUniversoSemaforo > 0 ? ((totalAmarillas / totalUniversoSemaforo) * 100).toFixed(1) : "0";
+    const pctVerdes = totalUniversoSemaforo > 0 ? ((totalVerdes / totalUniversoSemaforo) * 100).toFixed(1) : "0";
     
     const pctCedulasRojas = totalCedulas > 0 ? ((cedulasRojas / totalCedulas) * 100).toFixed(1) : "0";
     const pctCedulasAmarillas = totalCedulas > 0 ? ((cedulasAmarillas / totalCedulas) * 100).toFixed(1) : "0";
@@ -1662,21 +1476,15 @@ export default function SuperAdminPage() {
     // Debug: Contar expedientes por estado del semáforo
     const expedientesRojosDebug = expedientesParaContar.filter(e => {
       if (!e.owner_user_id || e.owner_user_id.trim() === "") return false;
-      const fechaBase = getFechaBaseParaSemaforo(null, e.fecha_ultima_modificacion, true);
-      const dias = daysSince(fechaBase);
-      return semaforoPorAntiguedad(dias) === "ROJO";
+      return expedienteSemaforo(e).color === "ROJO";
     }).length;
     const expedientesAmarillosDebug = expedientesParaContar.filter(e => {
       if (!e.owner_user_id || e.owner_user_id.trim() === "") return false;
-      const fechaBase = getFechaBaseParaSemaforo(null, e.fecha_ultima_modificacion, true);
-      const dias = daysSince(fechaBase);
-      return semaforoPorAntiguedad(dias) === "AMARILLO";
+      return expedienteSemaforo(e).color === "AMARILLO";
     }).length;
     const expedientesVerdesDebug = expedientesParaContar.filter(e => {
       if (!e.owner_user_id || e.owner_user_id.trim() === "") return false;
-      const fechaBase = getFechaBaseParaSemaforo(null, e.fecha_ultima_modificacion, true);
-      const dias = daysSince(fechaBase);
-      return semaforoPorAntiguedad(dias) === "VERDE";
+      return expedienteSemaforo(e).color === "VERDE";
     }).length;
     
     console.log(`[Dashboard Metrics] Expedientes por semáforo:`, {
@@ -1688,21 +1496,15 @@ export default function SuperAdminPage() {
     
     const totalExpedientes = expedientesParaContar.length;
     // IMPORTANTE: Expedientes usan fecha_ultima_modificacion para el semáforo
-    const expedientesRojos = expedientesParaContar.filter(e => {
-      const fechaBase = getFechaBaseParaSemaforo(null, e.fecha_ultima_modificacion, true);
-      const dias = daysSince(fechaBase);
-      return semaforoPorAntiguedad(dias) === "ROJO";
-    }).length;
-    const expedientesAmarillos = expedientesParaContar.filter(e => {
-      const fechaBase = getFechaBaseParaSemaforo(null, e.fecha_ultima_modificacion, true);
-      const dias = daysSince(fechaBase);
-      return semaforoPorAntiguedad(dias) === "AMARILLO";
-    }).length;
-    const expedientesVerdes = expedientesParaContar.filter(e => {
-      const fechaBase = getFechaBaseParaSemaforo(null, e.fecha_ultima_modificacion, true);
-      const dias = daysSince(fechaBase);
-      return semaforoPorAntiguedad(dias) === "VERDE";
-    }).length;
+    const expedientesRojos = expedientesParaContar.filter(e =>
+      expedienteSemaforo(e).color === "ROJO"
+    ).length;
+    const expedientesAmarillos = expedientesParaContar.filter(e =>
+      expedienteSemaforo(e).color === "AMARILLO"
+    ).length;
+    const expedientesVerdes = expedientesParaContar.filter(e =>
+      expedienteSemaforo(e).color === "VERDE"
+    ).length;
     
     const pctExpedientesRojos = totalExpedientes > 0 ? ((expedientesRojos / totalExpedientes) * 100).toFixed(1) : "0";
     const pctExpedientesAmarillos = totalExpedientes > 0 ? ((expedientesAmarillos / totalExpedientes) * 100).toFixed(1) : "0";
@@ -1712,6 +1514,7 @@ export default function SuperAdminPage() {
     
     return {
       totalAbiertas,
+      totalUniversoSemaforo,
       totalCedulas,
       totalOficios,
       totalExpedientes,
@@ -1744,7 +1547,7 @@ export default function SuperAdminPage() {
       maxDias,
       maxDiasExpedientes,
     };
-  }, [cedulas, expedientes, ranking, rankingExpedientes, selectedUserId, juzgadoFilter, selectedUserJuzgados, expedientesUnificados, userJuzgadosMap]);
+  }, [cedulasConColor, expedientes, ranking, rankingExpedientes, selectedUserId, juzgadoFilter, selectedUserJuzgados, expedientesUnificados, userJuzgadosMap]);
 
   const operationalMetrics = useMemo((): OperationalMetrics => {
     let pjnCargados = 0;
@@ -1759,8 +1562,7 @@ export default function SuperAdminPage() {
       if (estado === "error" || (c.ocr_error && c.ocr_error.trim())) ocrError++;
 
       if (c.tipo_documento === "OFICIO" && estado === "listo" && c.pjn_cargado_at) {
-        const dias = daysSince(c.pjn_cargado_at);
-        if (dias >= 14) reiteratorioCandidatos++;
+        if (esCandidatoReiteratorio(c.pjn_cargado_at)) reiteratorioCandidatos++;
       }
     }
 
@@ -1773,34 +1575,6 @@ export default function SuperAdminPage() {
 
     return { pjnCargados, ocrPendiente, ocrError, reiteratorioCandidatos, ultimaSyncPjn };
   }, [cedulas, pjnFavoritos]);
-
-  const juzgadoRojos = useMemo((): BarChartItem[] => {
-    const perJuzgado: Record<string, number> = {};
-    const bump = (juzgado: string | null | undefined, s: string) => {
-      if (s !== "ROJO") return;
-      const key = (juzgado || "Sin juzgado").trim() || "Sin juzgado";
-      perJuzgado[key] = (perJuzgado[key] || 0) + 1;
-    };
-    for (const c of cedulas) {
-      const fechaBase = getFechaBaseParaSemaforo(c.fecha_carga, null, false);
-      bump(c.juzgado, semaforoPorAntiguedad(daysSince(fechaBase)));
-    }
-    for (const e of expedientes) {
-      const fechaBase = getFechaBaseParaSemaforo(null, e.fecha_ultima_modificacion, true);
-      if (!fechaBase) continue;
-      bump(e.juzgado, semaforoPorAntiguedad(daysSince(fechaBase)));
-    }
-    return Object.entries(perJuzgado)
-      .map(([label, value]) => ({ label, value, tone: "red" as const }))
-      .sort((a, b) => b.value - a.value);
-  }, [cedulas, expedientes]);
-
-  const responsableRojos = useMemo((): BarChartItem[] => {
-    return ranking
-      .filter((r) => r.rojos > 0)
-      .slice(0, 8)
-      .map((r) => ({ label: r.name, value: r.rojos, tone: "red" as const }));
-  }, [ranking]);
 
   const antiguedadBuckets = useMemo(
     () => ({
@@ -1817,7 +1591,7 @@ export default function SuperAdminPage() {
       list.push(`${metrics.totalRojas} documentos en estado crítico (rojo).`);
     }
     if (operationalMetrics.reiteratorioCandidatos > 0) {
-      list.push(`${operationalMetrics.reiteratorioCandidatos} oficios candidatos a reiteratorio (≥14 días en PJN).`);
+      list.push(`${operationalMetrics.reiteratorioCandidatos} oficios candidatos a reiteratorio (≥${REITERATORIO_UMBRAL_DIAS} días en PJN).`);
     }
     if (operationalMetrics.ocrError > 0) {
       list.push(`${operationalMetrics.ocrError} documentos con error de OCR.`);
@@ -1977,7 +1751,9 @@ export default function SuperAdminPage() {
     doc.text("Totales:", margin, yPos);
     yPos += 6;
     doc.setFont("helvetica", "normal");
-    doc.text(`  • Total Documentos Abiertos: ${metrics.totalAbiertas}`, margin + 5, yPos);
+    doc.text(`  • Documentos abiertos (cédulas + oficios): ${metrics.totalAbiertas}`, margin + 5, yPos);
+    yPos += 5;
+    doc.text(`  • Universo semáforo (céd. + of. + exp.): ${metrics.totalUniversoSemaforo}`, margin + 5, yPos);
     yPos += 5;
     doc.text(`  • Total Cédulas: ${metrics.totalCedulas}`, margin + 5, yPos);
     yPos += 5;
@@ -1999,15 +1775,15 @@ export default function SuperAdminPage() {
     doc.setFont("helvetica", "normal");
     
     doc.setTextColor(colorRedR, colorRedG, colorRedB);
-    doc.text(`  • Estado Crítico (Rojo): ${metrics.totalRojas} (${metrics.pctRojas}%)`, margin + 5, yPos);
+    doc.text(`  • Estado Crítico (Rojo): ${metrics.totalRojas} (${metrics.pctRojas}% del universo semáforo)`, margin + 5, yPos);
     yPos += 5;
     
     doc.setTextColor(colorYellowR, colorYellowG, colorYellowB);
-    doc.text(`  • Estado Advertencia (Amarillo): ${metrics.totalAmarillas} (${metrics.pctAmarillas}%)`, margin + 5, yPos);
+    doc.text(`  • Estado Advertencia (Amarillo): ${metrics.totalAmarillas} (${metrics.pctAmarillas}% del universo semáforo)`, margin + 5, yPos);
     yPos += 5;
     
     doc.setTextColor(colorGreenR, colorGreenG, colorGreenB);
-    doc.text(`  • Estado Normal (Verde): ${metrics.totalVerdes} (${metrics.pctVerdes}%)`, margin + 5, yPos);
+    doc.text(`  • Estado Normal (Verde): ${metrics.totalVerdes} (${metrics.pctVerdes}% del universo semáforo)`, margin + 5, yPos);
     yPos += 10;
 
     checkNewPage(40);
@@ -2645,44 +2421,14 @@ export default function SuperAdminPage() {
               }}>
                 Usuario
               </label>
-              <select
+              <FancySelect
                 value={selectedUserId}
-                onChange={(e) => setSelectedUserId(e.target.value)}
+                onChange={setSelectedUserId}
+                items={usuarioFilterItems}
+                searchable
+                searchPlaceholder="Buscar usuario…"
                 disabled={roleFlags.isAbogado && !roleFlags.isSuperadmin}
-                style={{
-                  width: "100%",
-                  padding: "10px 12px",
-                  background: "#ffffff",
-                  border: "1px solid rgba(0,0,0,.15)",
-                  borderRadius: 8,
-                  color: "#1a1a1a",
-                  fontSize: 14,
-                  cursor: roleFlags.isAbogado && !roleFlags.isSuperadmin ? "not-allowed" : "pointer",
-                  outline: "none",
-                  transition: "all 0.2s ease"
-                }}
-                onFocus={(e) => {
-                  e.currentTarget.style.borderColor = "rgba(0,82,156,.5)";
-                  e.currentTarget.style.boxShadow = "0 0 0 3px rgba(0,82,156,.1)";
-                }}
-                onBlur={(e) => {
-                  e.currentTarget.style.borderColor = "rgba(0,0,0,.15)";
-                  e.currentTarget.style.boxShadow = "none";
-                }}
-              >
-                {roleFlags.isAbogado && !roleFlags.isSuperadmin ? (
-                  <option value={currentUserId}>{displayName(profiles[currentUserId])}</option>
-                ) : (
-                  <>
-                    <option value="all">Todos los usuarios</option>
-                    {Object.entries(profiles).map(([uid, profile]) => (
-                      <option key={uid} value={uid}>
-                        {displayName(profile)}
-                      </option>
-                    ))}
-                  </>
-                )}
-              </select>
+              />
             </div>
 
             {/* Filtro por Juzgados */}
@@ -2696,74 +2442,19 @@ export default function SuperAdminPage() {
               }}>
                 Juzgados
               </label>
-              <select
+              <FancySelect
                 value={juzgadoFilter}
-                onChange={(e) => {
-                  const newFilter = e.target.value;
+                onChange={(newFilter) => {
                   setJuzgadoFilter(newFilter);
                   console.log(`[Dashboard] Filtro de juzgados cambiado a: ${newFilter}`, {
                     userJuzgadosCount: userJuzgados.length,
-                    userJuzgados: userJuzgados,
-                    todosLosJuzgadosCount: todosLosJuzgados.length,
-                    asignadosCount: juzgadosAsignados.length,
-                    sinAsignarCount: juzgadosSinAsignar.length
+                    dashboardJuzgadoKeysCount: dashboardJuzgadoKeys.length,
                   });
                 }}
-                style={{
-                  width: "100%",
-                  padding: "10px 12px",
-                  background: "#ffffff",
-                  border: "1px solid rgba(0,0,0,.15)",
-                  borderRadius: 8,
-                  color: "#1a1a1a",
-                  fontSize: 14,
-                  cursor: "pointer",
-                  outline: "none",
-                  transition: "all 0.2s ease"
-                }}
-                onFocus={(e) => {
-                  e.currentTarget.style.borderColor = "rgba(0,82,156,.5)";
-                  e.currentTarget.style.boxShadow = "0 0 0 3px rgba(0,82,156,.1)";
-                }}
-                onBlur={(e) => {
-                  e.currentTarget.style.borderColor = "rgba(0,0,0,.15)";
-                  e.currentTarget.style.boxShadow = "none";
-                }}
-              >
-                <option value="todos">Todos los Juzgados</option>
-                <option value="mis_juzgados" disabled={selectedUserJuzgados.length === 0}>
-                  Mis Juzgados {selectedUserJuzgados.length === 0 ? "(sin asignar)" : `(${selectedUserJuzgados.length})`}
-                </option>
-                <option value="beneficio">Beneficio</option>
-                <option value="prueba_pericia">Prueba/Pericia</option>
-                {juzgadosAsignados.length > 0 && (
-                  <optgroup label="Juzgados individuales">
-                    {juzgadosAsignados.map((juzgado) => (
-                      <option key={juzgado} value={juzgado}>
-                        {juzgado}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-                {juzgadosSinAsignar.length > 0 && (
-                  <optgroup label="Juzgados Sin Asignar">
-                    {juzgadosSinAsignar.map((juzgado) => (
-                      <option key={juzgado} value={juzgado}>
-                        {juzgado}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-                {juzgadosSinAsignar.length > 0 && (
-                  <optgroup label="Juzgados Sin Asignar">
-                    {juzgadosSinAsignar.map((juzgado) => (
-                      <option key={juzgado} value={juzgado}>
-                        {juzgado}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-              </select>
+                items={juzgadoFilterItems}
+                searchable
+                searchPlaceholder="Buscar juzgado…"
+              />
             </div>
 
             {/* Filtro por Tiempo */}
@@ -2777,41 +2468,18 @@ export default function SuperAdminPage() {
               }}>
                 Período de tiempo
               </label>
-              <select
+              <FancySelect
                 value={timeFilter}
-                onChange={(e) => {
-                  setTimeFilter(e.target.value as TimeFilter);
-                  if (e.target.value !== "custom") {
+                onChange={(v) => {
+                  setTimeFilter(v as TimeFilter);
+                  if (v !== "custom") {
                     setCustomStartDate("");
                     setCustomEndDate("");
                   }
                 }}
-                style={{
-                  width: "100%",
-                  padding: "10px 12px",
-                  background: "#ffffff",
-                  border: "1px solid rgba(0,0,0,.15)",
-                  borderRadius: 8,
-                  color: "#1a1a1a",
-                  fontSize: 14,
-                  cursor: "pointer",
-                  outline: "none",
-                  transition: "all 0.2s ease"
-                }}
-                onFocus={(e) => {
-                  e.currentTarget.style.borderColor = "rgba(0,82,156,.5)";
-                  e.currentTarget.style.boxShadow = "0 0 0 3px rgba(0,82,156,.1)";
-                }}
-                onBlur={(e) => {
-                  e.currentTarget.style.borderColor = "rgba(0,0,0,.15)";
-                  e.currentTarget.style.boxShadow = "none";
-                }}
-              >
-                <option value="all">Todos</option>
-                <option value="week">Última semana</option>
-                <option value="month">Último mes</option>
-                <option value="custom">Rango personalizado</option>
-              </select>
+                items={periodoFilterItems}
+                searchable={false}
+              />
             </div>
 
             {/* Fechas personalizadas */}
@@ -2901,10 +2569,15 @@ export default function SuperAdminPage() {
             totalAmarillas: metrics.totalAmarillas,
             totalVerdes: metrics.totalVerdes,
             totalAbiertas: metrics.totalAbiertas,
+            totalUniversoSemaforo: metrics.totalUniversoSemaforo,
+            pctRojas: metrics.pctRojas,
+            pctAmarillas: metrics.pctAmarillas,
+            pctVerdes: metrics.pctVerdes,
           }}
           operational={operationalMetrics}
           juzgadoRojos={juzgadoRojos}
           responsableRojos={responsableRojos}
+          documentosRojos={documentosRojos}
           antiguedadBuckets={antiguedadBuckets}
           alertas={dashboardAlertas}
         />
@@ -2929,8 +2602,9 @@ export default function SuperAdminPage() {
             marginBottom: 20
           }}>
             <KPICard
-              title="Total Documentos Abiertos"
+              title="Documentos abiertos"
               value={metrics.totalAbiertas}
+              subValue="Cédulas + oficios"
               color="blue"
               trend={metrics.totalAbiertas > 0 ? "up" : undefined}
             />
@@ -2954,6 +2628,12 @@ export default function SuperAdminPage() {
             marginBottom: 20
           }}>
             <KPICard
+              title="Universo semáforo"
+              value={metrics.totalUniversoSemaforo}
+              subValue="Cédulas + oficios + expedientes"
+              color="blue"
+            />
+            <KPICard
               title="Total Expedientes"
               value={metrics.totalExpedientes}
               color="blue"
@@ -2962,12 +2642,6 @@ export default function SuperAdminPage() {
               title="Total de Usuarios"
               value={metrics.totalUsuarios}
               color="blue"
-            />
-            <KPICard
-              title="Promedio por Usuario"
-              value={metrics.promedioPorUsuario}
-              subValue="documentos"
-              color="orange"
             />
           </div>
           
@@ -2981,7 +2655,7 @@ export default function SuperAdminPage() {
             <KPICard
               title="Estado Crítico (Rojo)"
               value={metrics.totalRojas}
-              subValue={`${metrics.pctRojas}%`}
+              subValue={`${metrics.pctRojas}% del universo semáforo`}
               color="red"
               trend={metrics.totalRojas > 0 ? "up" : undefined}
               change={`${metrics.pctRojas}%`}
@@ -2990,7 +2664,7 @@ export default function SuperAdminPage() {
             <KPICard
               title="Estado Advertencia (Amarillo)"
               value={metrics.totalAmarillas}
-              subValue={`${metrics.pctAmarillas}%`}
+              subValue={`${metrics.pctAmarillas}% del universo semáforo`}
               color="yellow"
               trend={metrics.totalAmarillas > 0 ? "up" : undefined}
               change={`${metrics.pctAmarillas}%`}
@@ -2999,7 +2673,7 @@ export default function SuperAdminPage() {
             <KPICard
               title="Estado Normal (Verde)"
               value={metrics.totalVerdes}
-              subValue={`${metrics.pctVerdes}%`}
+              subValue={`${metrics.pctVerdes}% del universo semáforo`}
               color="green"
               trend="up"
               change={`${metrics.pctVerdes}%`}
@@ -3026,8 +2700,12 @@ export default function SuperAdminPage() {
               subValue="días"
               color="red"
             />
-            {/* Espacio vacío para mantener 3 columnas */}
-            <div></div>
+            <KPICard
+              title="Promedio por Usuario"
+              value={metrics.promedioPorUsuario}
+              subValue="documentos abiertos"
+              color="orange"
+            />
           </div>
         </section>
 
