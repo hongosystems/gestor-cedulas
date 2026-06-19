@@ -730,6 +730,8 @@ function NotasTextarea({
       textareaRef.current?.focus();
     }, 0);
   }, [autoStartEditing, itemId, editableInitialValue, setNotasEditables]);
+
+  React.useEffect(() => {
     return () => {
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
