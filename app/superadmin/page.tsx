@@ -9,6 +9,11 @@ import SuperadminDashboardPanels from "@/app/components/dashboard/SuperadminDash
 import type { BarChartItem } from "@/app/components/ui/CssBarChart";
 import type { OperationalMetrics } from "@/app/components/dashboard/SuperadminDashboardPanels";
 import { tienePruebaPericia } from "@/lib/prueba-pericia-detect";
+import {
+  dedupeExpedientesByMatchKey,
+  isExpedientePjnMergeEnabled,
+  mergeLocalsWithPjnFavoritos,
+} from "@/lib/expediente-pjn-merge";
 
 type Cedula = {
   id: string;
@@ -1034,6 +1039,43 @@ export default function SuperAdminPage() {
     return expedientesFromFavoritos;
   }, [pjnFavoritos]);
 
+  // Misma unificación que Mis Juzgados: merge PJN + dedupe por número de expediente.
+  const expedientesUnificados = useMemo((): Expediente[] => {
+    if (!isExpedientePjnMergeEnabled()) {
+      const expedientesMap = new Map<string, Expediente>();
+      allExpedientes.forEach((e) => expedientesMap.set(e.id, e));
+      favoritosComoExpedientes.forEach((e) => {
+        if (!expedientesMap.has(e.id)) expedientesMap.set(e.id, e);
+      });
+      return Array.from(expedientesMap.values());
+    }
+
+    const { mergedLocals, unmatchedFavoritos, mergedCount } = mergeLocalsWithPjnFavoritos(
+      allExpedientes,
+      pjnFavoritos,
+      { ddmmaaaaToISO, normalizeJuzgado: (raw) => normalizarJuzgado(raw ?? null) }
+    );
+
+    const unmatchedIds = new Set(unmatchedFavoritos.map((f) => f.id));
+    const favoritosSinParLocal = favoritosComoExpedientes.filter((e) => {
+      const favId = e.id.replace(/^pjn_/, "");
+      return unmatchedIds.has(favId);
+    });
+
+    const combined = dedupeExpedientesByMatchKey([
+      ...mergedLocals,
+      ...favoritosSinParLocal,
+    ]);
+
+    if (mergedCount > 0) {
+      console.log(
+        `[Dashboard] Merge PJN: ${mergedCount} manuales enlazados → ${combined.length} expedientes unificados`
+      );
+    }
+
+    return combined as Expediente[];
+  }, [allExpedientes, pjnFavoritos, favoritosComoExpedientes]);
+
   // Cargar movimientos desde cases cuando el filtro es "prueba_pericia"
   useEffect(() => {
     if (juzgadoFilter === "prueba_pericia" && pjnFavoritos.length > 0) {
@@ -1108,27 +1150,12 @@ export default function SuperAdminPage() {
 
   // Filtrar expedientes según los filtros seleccionados
   useEffect(() => {
-    // Combinar expedientes locales con favoritos convertidos
-    // IMPORTANTE: Eliminar duplicados por ID antes de filtrar
-    const expedientesMap = new Map<string, Expediente>();
-    
-    // Primero agregar expedientes locales (tienen prioridad)
-    allExpedientes.forEach(e => {
-      expedientesMap.set(e.id, e);
-    });
-    
-    // Luego agregar favoritos PJN solo si no existen ya (por ID único)
-    favoritosComoExpedientes.forEach(e => {
-      if (!expedientesMap.has(e.id)) {
-        expedientesMap.set(e.id, e);
-      }
-    });
-    
-    let filtered: Expediente[] = Array.from(expedientesMap.values());
+    let filtered: Expediente[] = [...expedientesUnificados];
     const initialCount = filtered.length;
     
     console.log(`[Dashboard] Filtrando expedientes - Inicial: ${initialCount}, Filtro juzgados: ${juzgadoFilter}`, {
       allExpedientesCount: allExpedientes.length,
+      expedientesUnificadosCount: expedientesUnificados.length,
       juzgadoFilter,
       userJuzgadosCount: userJuzgados.length
     });
@@ -1303,7 +1330,7 @@ export default function SuperAdminPage() {
 
     setExpedientes(filtered);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allExpedientes, favoritosComoExpedientes, timeFilter, selectedUserId, juzgadoFilter, selectedUserJuzgados, customStartDate, customEndDate, userJuzgados.length]);
+  }, [expedientesUnificados, timeFilter, selectedUserId, juzgadoFilter, selectedUserJuzgados, customStartDate, customEndDate, userJuzgados.length]);
 
   const ranking = useMemo(() => {
     const perUser: Record<string, { rojos: number; amarillos: number; verdes: number; total: number; maxDias: number }> = {};
@@ -1450,49 +1477,41 @@ export default function SuperAdminPage() {
     let expedientesParaContar: Expediente[];
     
     if (juzgadoFilter === "todos") {
-      // Cuando es "todos", contar desde los datos originales sin filtrar por juzgado
-      // Combinar expedientes locales y favoritos PJN únicos
+      // Cuando es "todos", contar desde expedientes unificados (merge PJN + dedupe)
       const expedientesMap = new Map<string, Expediente>();
-      
-      // Agregar todos los expedientes locales
-      allExpedientes.forEach(e => {
+
+      expedientesUnificados.forEach((e) => {
         if (e.owner_user_id && e.owner_user_id.trim() !== "") {
           expedientesMap.set(e.id, e);
+          return;
         }
-      });
-      
-      // Agregar favoritos PJN únicos (solo si tienen juzgado asignado a algún usuario)
-      favoritosComoExpedientes.forEach(e => {
-        if (!expedientesMap.has(e.id)) {
-          if (e.juzgado) {
-            let tieneUsuarioAsignado = false;
-            for (const [, juzgadosDelUsuario] of Object.entries(userJuzgadosMap)) {
-              const juzgadosNormalizados = juzgadosDelUsuario.map(j => normalizarJuzgado(j));
-              const matchJuzgado = juzgadosNormalizados.some(jAsignado => {
-                return juzgadosCoinciden(e.juzgado || "", jAsignado);
-              });
-              if (matchJuzgado) {
-                tieneUsuarioAsignado = true;
-                break;
-              }
-            }
-            if (tieneUsuarioAsignado) {
-              // Asignar al primer usuario que coincida para contar en métricas
-              for (const [userId, juzgadosDelUsuario] of Object.entries(userJuzgadosMap)) {
-                const juzgadosNormalizados = juzgadosDelUsuario.map(j => normalizarJuzgado(j));
-                const matchJuzgado = juzgadosNormalizados.some(jAsignado => {
-                  return juzgadosCoinciden(e.juzgado || "", jAsignado);
-                });
-                if (matchJuzgado) {
-                  expedientesMap.set(e.id, { ...e, owner_user_id: userId });
-                  break;
-                }
-              }
-            }
+        if (!e.is_pjn_favorito || !e.juzgado) return;
+
+        let tieneUsuarioAsignado = false;
+        for (const [, juzgadosDelUsuario] of Object.entries(userJuzgadosMap)) {
+          const juzgadosNormalizados = juzgadosDelUsuario.map((j) => normalizarJuzgado(j));
+          const matchJuzgado = juzgadosNormalizados.some((jAsignado) =>
+            juzgadosCoinciden(e.juzgado || "", jAsignado)
+          );
+          if (matchJuzgado) {
+            tieneUsuarioAsignado = true;
+            break;
+          }
+        }
+        if (!tieneUsuarioAsignado) return;
+
+        for (const [userId, juzgadosDelUsuario] of Object.entries(userJuzgadosMap)) {
+          const juzgadosNormalizados = juzgadosDelUsuario.map((j) => normalizarJuzgado(j));
+          const matchJuzgado = juzgadosNormalizados.some((jAsignado) =>
+            juzgadosCoinciden(e.juzgado || "", jAsignado)
+          );
+          if (matchJuzgado) {
+            expedientesMap.set(e.id, { ...e, owner_user_id: userId });
+            break;
           }
         }
       });
-      
+
       expedientesParaContar = Array.from(expedientesMap.values());
       
       // Si hay filtro de usuario, filtrar por usuario
@@ -1725,7 +1744,7 @@ export default function SuperAdminPage() {
       maxDias,
       maxDiasExpedientes,
     };
-  }, [cedulas, expedientes, ranking, rankingExpedientes, selectedUserId, juzgadoFilter, selectedUserJuzgados, allExpedientes, favoritosComoExpedientes, userJuzgadosMap]);
+  }, [cedulas, expedientes, ranking, rankingExpedientes, selectedUserId, juzgadoFilter, selectedUserJuzgados, expedientesUnificados, userJuzgadosMap]);
 
   const operationalMetrics = useMemo((): OperationalMetrics => {
     let pjnCargados = 0;
