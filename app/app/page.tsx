@@ -323,7 +323,7 @@ function NotasTextareaCedula({
       .single();
     
     const currentUserName = currentUserProfile?.full_name || currentUserProfile?.email || "Un usuario";
-    const link = `/app#${itemId}`;
+    const link = "/app/bandeja?tab=alertas";
     const notaCompleta = texto.trim();
     const { data: session } = await supabase.auth.getSession();
     const senderId = session.session?.user.id;

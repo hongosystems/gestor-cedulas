@@ -87,7 +87,7 @@ export default function MisJuzgadosTableRows({
 
   return (
     <>
-      <tr className={`mj-master-row${isExpanded ? " is-expanded" : ""}`}>
+      <tr id={item.id} className={`mj-master-row${isExpanded ? " is-expanded" : ""}`}>
         <td>{renderSemaforo()}</td>
         <td className="mj-col-primary">
           {activeTab === "expedientes" && item.numero?.trim() ? (

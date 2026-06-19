@@ -211,7 +211,8 @@ function NotasTextarea({
   setMsg,
   caratula,
   numeroExpediente,
-  juzgado
+  juzgado,
+  autoStartEditing = false,
 }: {
   itemId: string;
   isPjnFavorito: boolean;
@@ -224,6 +225,7 @@ function NotasTextarea({
   caratula?: string | null;
   numeroExpediente?: string | null;
   juzgado?: string | null;
+  autoStartEditing?: boolean;
 }) {
   const timeoutRef = React.useRef<NodeJS.Timeout | null>(null);
   const mencionesNotificadasRef = React.useRef<Set<string>>(new Set());
@@ -288,9 +290,7 @@ function NotasTextarea({
       .single();
     
     const currentUserName = currentUserProfile?.full_name || currentUserProfile?.email || "Un usuario";
-    const link = isPjnFavorito
-      ? `/superadmin/mis-juzgados#pjn_${itemId.replace(/^pjn_/, "")}`
-      : `/superadmin/mis-juzgados#${itemId}`;
+    const link = "/app/bandeja?tab=alertas";
     const notaCompleta = texto.trim();
     const expedienteIdLimpio = itemId.replace(/^pjn_/, "");
     const { data: session } = await supabase.auth.getSession();
@@ -720,6 +720,16 @@ function NotasTextarea({
   };
 
   React.useEffect(() => {
+    if (!autoStartEditing) return;
+    setNotasEditables(prev => {
+      if (prev[itemId] !== undefined) return prev;
+      return { ...prev, [itemId]: editableInitialValue };
+    });
+    setIsEditing(true);
+    setTimeout(() => {
+      textareaRef.current?.focus();
+    }, 0);
+  }, [autoStartEditing, itemId, editableInitialValue, setNotasEditables]);
     return () => {
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
@@ -1079,6 +1089,7 @@ export default function MisJuzgadosPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"expedientes" | "cedulas" | "oficios">("expedientes");
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
+  const [hashFocusItemId, setHashFocusItemId] = useState<string | null>(null);
   const [sortField, setSortField] = useState<SortField>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc"); // Por defecto: más viejo primero
   const { filters, setFilter, clearAll, hasActiveFilters, openFilter, setOpenFilter } =
@@ -2771,6 +2782,34 @@ export default function MisJuzgadosPage() {
     return Math.ceil(sortedItems.length / itemsPerPage);
   }, [sortedItems.length, activeTab]);
 
+  // Links legacy: /superadmin/mis-juzgados#pjn_<id> o #<uuid>
+  const hashHandledRef = React.useRef(false);
+  useEffect(() => {
+    if (loading || sortedItems.length === 0 || hashHandledRef.current) return;
+    const rawHash = window.location.hash.replace(/^#/, "").trim();
+    if (!rawHash) return;
+    hashHandledRef.current = true;
+
+    const targetId = rawHash.startsWith("pjn_") ? rawHash : rawHash;
+    const itemIndex = sortedItems.findIndex(
+      (item: { id: string }) => item.id === targetId || item.id === rawHash
+    );
+    if (itemIndex < 0) return;
+
+    if (activeTab === "expedientes") {
+      const page = Math.floor(itemIndex / itemsPerPage) + 1;
+      setCurrentPage(page);
+    }
+
+    const targetItem = sortedItems[itemIndex] as { id: string };
+    setExpandedRowId(targetItem.id);
+    setHashFocusItemId(targetItem.id);
+
+    window.requestAnimationFrame(() => {
+      document.getElementById(targetItem.id)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }, [loading, sortedItems, activeTab, itemsPerPage]);
+
   // Resetear a página 1 cuando cambia el filtro o el tab
   useEffect(() => {
     setCurrentPage(1);
@@ -3685,6 +3724,7 @@ export default function MisJuzgadosPage() {
                             caratula={item.caratula}
                             numeroExpediente={item.numero}
                             juzgado={item.juzgado}
+                            autoStartEditing={hashFocusItemId === item.id}
                           />
                         )}
                       />

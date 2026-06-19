@@ -78,8 +78,9 @@ export default function NotificationBell({ variant = "inline" }: NotificationBel
 
     let href = "/app/bandeja?tab=recibidos";
     if (counts.workflow) {
-      if (counts.mailbox > 0) href = "/app/bandeja?tab=no-leidas";
-      else if (counts.app > 0) href = "/app/bandeja?tab=alertas";
+      // Menciones y alertas de sistema: priorizar Alertas (responder ahí).
+      if (counts.app > 0) href = "/app/bandeja?tab=alertas";
+      else if (counts.mailbox > 0) href = "/app/bandeja?tab=no-leidas";
     } else if (counts.total > 0) {
       href = "/app/bandeja?tab=no-leidas";
     }

@@ -464,15 +464,7 @@ export async function POST(req: NextRequest) {
       }
       const isCedula = (parentMetadata as any)?.cedula_id || false;
       
-      if (isPjn) {
-        replyLink = `/superadmin/mis-juzgados#pjn_${expId}`;
-      } else if (isCedula) {
-        // Para cédulas, el link debe apuntar a /app#cedula_id
-        const cedulaId = (parentMetadata as any)?.cedula_id || expId;
-        replyLink = `/app#${cedulaId}`;
-      } else {
-        replyLink = `/superadmin/mis-juzgados#${expId}`;
-      }
+      replyLink = `/app/bandeja?tab=alertas`;
     } else if (parentNotif.link) {
       // Si no hay expediente_id pero hay link, usar el link del padre
       replyLink = parentNotif.link;

@@ -567,7 +567,7 @@ function NotasTextarea({
       .eq("id", currentUserId)
       .single();
     const currentUserName = currentUserProfile?.full_name || currentUserProfile?.email || "Un usuario";
-    const link = isPjnFavorito ? `/prueba-pericia#pjn_${itemId.replace(/^pjn_/, "")}` : `/prueba-pericia#${itemId}`;
+    const link = "/app/bandeja?tab=alertas";
     const notaCompleta = texto.trim();
     const expedienteIdLimpio = itemId.replace(/^pjn_/, "");
     const expedienteIdForDb = isUuid(expedienteIdLimpio) ? expedienteIdLimpio : null;

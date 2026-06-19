@@ -46,6 +46,8 @@ type FilterType = "all" | "unread" | "read";
 export type NotificationsInboxProps = {
   embedded?: boolean;
   initialFilter?: FilterType;
+  /** Abre un hilo concreto al cargar (p. ej. desde ?thread= en la URL). */
+  initialThreadId?: string | null;
   hideFilterBar?: boolean;
   searchQuery?: string;
   /** Oculta notifications duplicadas de bandeja (usuarios con workflow). */
@@ -233,6 +235,7 @@ function ThreadMessageBubble({
 export default function NotificationsInbox({
   embedded = false,
   initialFilter = "all",
+  initialThreadId = null,
   hideFilterBar = false,
   searchQuery = "",
   excludeMailboxLinked = false,
@@ -270,6 +273,11 @@ export default function NotificationsInbox({
   const [threadUserNames, setThreadUserNames] = useState<Record<string, string>>({});
   const [threadHistoryExpanded, setThreadHistoryExpanded] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [pendingThreadId, setPendingThreadId] = useState<string | null>(initialThreadId);
+
+  useEffect(() => {
+    setPendingThreadId(initialThreadId);
+  }, [initialThreadId]);
 
   const visibleItems = useMemo(() => {
     if (!excludeMailboxLinked) return items;
@@ -1166,6 +1174,15 @@ export default function NotificationsInbox({
     }
   }
 
+  useEffect(() => {
+    if (!pendingThreadId || loading || selectedNotif) return;
+    const row = threadsList.find((t) => t.rootId === pendingThreadId);
+    if (row) {
+      void handleNotificationClick(row.latest);
+      setPendingThreadId(null);
+    }
+  }, [pendingThreadId, loading, selectedNotif, threadsList]);
+
   async function downloadTransfer(transferId: string) {
     try {
       const { data: sess } = await supabase.auth.getSession();
@@ -1814,7 +1831,11 @@ export default function NotificationsInbox({
           >
             {/* Lista de notificaciones (inbox) */}
             <div
-              className={embedded ? "bandeja-notifications-list" : undefined}
+              className={
+                embedded
+                  ? `bandeja-notifications-list${selectedNotif ? " is-hidden-mobile" : ""}`
+                  : undefined
+              }
               role={embedded ? "list" : undefined}
               aria-label={embedded ? "Alertas" : undefined}
               style={
@@ -2189,7 +2210,7 @@ export default function NotificationsInbox({
                 )}
 
                 {/* Botón de responder */}
-                <div style={{ borderTop: "1px solid rgba(255,255,255,.1)", paddingTop: 16 }}>
+                <div className="bandeja-notifications-reply bandeja-notifications-reply--sticky" style={{ borderTop: "1px solid rgba(255,255,255,.1)", paddingTop: 16 }}>
                   {isAutoPericia ? (
                     <div style={{
                       padding: 12, background: "rgba(241,196,15,.08)",
@@ -2204,7 +2225,8 @@ export default function NotificationsInbox({
                         <textarea
                           value={replyText}
                           onChange={(e) => setReplyText(e.target.value)}
-                          placeholder="Escribe tu respuesta..."
+                          placeholder="Escribí tu respuesta..."
+                          autoComplete="off"
                           style={{
                             width: "100%",
                             minHeight: 100,

@@ -33,7 +33,8 @@ type NavItem = {
 };
 
 function tabToNotificationFilter(tab: BandejaTab): "all" | "unread" | "read" {
-  if (tab === "no-leidas" || tab === "alertas") return "unread";
+  // Alertas: mostrar todo el historial (menciones leídas siguen visibles para responder).
+  if (tab === "no-leidas") return "unread";
   return "all";
 }
 
@@ -168,15 +169,13 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
           alert: folderCounts.unread > 0,
         }
       );
-      if (appAlertUnread > 0) {
-        items.push({
-          id: "alertas",
-          label: "Alertas",
-          icon: "🔔",
-          badge: appAlertUnread,
-          alert: true,
-        });
-      }
+      items.push({
+        id: "alertas",
+        label: "Alertas",
+        icon: "🔔",
+        badge: appAlertUnread > 0 ? appAlertUnread : undefined,
+        alert: appAlertUnread > 0,
+      });
       items.push({
         id: "todas",
         label: "Todas",
@@ -244,11 +243,13 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
     }
 
     if (activeTab === "alertas" || !workflow) {
+      const threadParam = searchParams.get("thread");
       return (
         <NotificationsInbox
           embedded
           hideFilterBar
           initialFilter={tabToNotificationFilter(activeTab)}
+          initialThreadId={threadParam}
           searchQuery={effectiveSearch}
           excludeMailboxLinked={workflow}
           onCountsChanged={refreshBadgeCounts}
