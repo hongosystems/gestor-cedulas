@@ -15,6 +15,8 @@
     "verify:favoritos": "node scripts/verify-favoritos-discrepancy.mjs",
     "test:pjn-merge": "tsx scripts/test-expediente-pjn-merge.ts",
     "check:semaforo": "tsx scripts/check-semaforo.ts",
+    "diag:sin-owner": "tsx scripts/diag-expedientes-sin-owner.ts",
+    "assign:expedientes-owner": "tsx scripts/assign-expedientes-owner.ts",
     "analyze:scraper": "node scripts/analyze-scraper-completeness.mjs",
     "view:scraper-errors": "node scripts/view-scraper-errors.mjs"
   },

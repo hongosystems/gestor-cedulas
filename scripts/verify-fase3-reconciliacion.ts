@@ -28,6 +28,11 @@ import {
   isExpedientePjnMergeEnabled,
   mergeLocalsWithPjnFavoritos,
 } from "../lib/expediente-pjn-merge";
+import {
+  buildCedulaOwnerIndex,
+  esMonitoreoPJN,
+  type CedulaForOwnerSignal,
+} from "../lib/expediente-owner-resolve";
 
 function formatRojosBreakdown(b: { exp: number; ced: number; of: number }): string {
   return `${b.exp} exp · ${b.ced} céd · ${b.of} of`;
@@ -47,6 +52,8 @@ type Cedula = {
   tipo_documento: "CEDULA" | "OFICIO" | "OTROS_ESCRITOS" | null;
   pjn_cargado_at?: string | null;
   admin_cedulas_completada_at?: string | null;
+  ocr_exp_nro?: string | null;
+  estado?: string | null;
 };
 
 type Expediente = {
@@ -265,7 +272,9 @@ function buildDashboardDocumentosRojos(
   cedulas: Cedula[],
   expedientes: Expediente[],
   expedientesUnificados: Expediente[],
-  profiles: Record<string, Profile>
+  profiles: Record<string, Profile>,
+  localIds: Set<string>,
+  cedulaOwnerIndex: Map<string, import("../lib/expediente-owner-resolve").OwnerSignal>
 ): DocumentoRojoDashboard[] {
   const unificadosById = new Map(expedientesUnificados.map((e) => [e.id, e]));
   const items: DocumentoRojoDashboard[] = [];
@@ -293,6 +302,7 @@ function buildDashboardDocumentosRojos(
     const { color, dias, fechaBase } = semaforoExpedienteDashboard(e);
     if (!fechaBase || color !== "ROJO") continue;
     const base = unificadosById.get(e.id) ?? e;
+    if (esMonitoreoPJN(base, localIds, cedulaOwnerIndex)) continue;
     const ownerUserId = ownerExplicit(base.owner_user_id);
     items.push({
       id: e.id,
@@ -352,7 +362,12 @@ function buildMisJuzgadosExpedientesTodos(
   return combined;
 }
 
-function buildMisJuzgadosRedItems(cedulas: Cedula[], expedientes: Expediente[]): RedItem[] {
+function buildMisJuzgadosRedItems(
+  cedulas: Cedula[],
+  expedientes: Expediente[],
+  localIds: Set<string>,
+  cedulaOwnerIndex: Map<string, import("../lib/expediente-owner-resolve").OwnerSignal>
+): RedItem[] {
   const items: RedItem[] = [];
 
   for (const c of cedulas) {
@@ -373,6 +388,7 @@ function buildMisJuzgadosRedItems(cedulas: Cedula[], expedientes: Expediente[]):
   }
 
   for (const e of expedientes) {
+    if (esMonitoreoPJN(e, localIds, cedulaOwnerIndex)) continue;
     const { color, dias, fechaBase } = misJuzgadosSemaforoExpediente(e);
     if (color !== "ROJO") continue;
     items.push({
@@ -418,34 +434,15 @@ function countBreakdown(docs: { tipo: DocumentoRojoTipo }[]) {
 function computeDashboardMetrics(
   cedulas: Cedula[],
   expedientesUnificados: Expediente[],
-  userJuzgadosMap: Record<string, string[]>
+  localIds: Set<string>,
+  cedulaOwnerIndex: Map<string, import("../lib/expediente-owner-resolve").OwnerSignal>
 ) {
   const cedulasConColor = cedulas.map((c) => ({ ...c, ...colorCedulaOficio(c) }));
   const cedulasConOwner = cedulasConColor.filter((c) => c.owner_user_id?.trim());
 
-  const expedientesMap = new Map<string, Expediente>();
-  expedientesUnificados.forEach((e) => {
-    if (e.owner_user_id?.trim()) {
-      expedientesMap.set(e.id, e);
-      return;
-    }
-    if (!e.is_pjn_favorito || !e.juzgado) return;
-    let assigned = false;
-    for (const [, juzgadosDelUsuario] of Object.entries(userJuzgadosMap)) {
-      if (juzgadosDelUsuario.some((j) => juzgadosCoincidenDashboard(e.juzgado || "", j))) {
-        assigned = true;
-        break;
-      }
-    }
-    if (!assigned) return;
-    for (const [userId, juzgadosDelUsuario] of Object.entries(userJuzgadosMap)) {
-      if (juzgadosDelUsuario.some((j) => juzgadosCoincidenDashboard(e.juzgado || "", j))) {
-        expedientesMap.set(e.id, { ...e, owner_user_id: userId });
-        break;
-      }
-    }
-  });
-  const expedientesParaContar = Array.from(expedientesMap.values());
+  const expedientesParaContar = expedientesUnificados.filter(
+    (e) => !esMonitoreoPJN(e, localIds, cedulaOwnerIndex)
+  );
 
   let totalRojas = 0;
   let totalAmarillas = 0;
@@ -458,7 +455,7 @@ function computeDashboardMetrics(
   }
 
   for (const e of expedientesParaContar) {
-    if (!e.owner_user_id?.trim()) continue;
+    if (!e.fecha_ultima_modificacion) continue;
     const { color, fechaBase } = semaforoExpedienteDashboard(e);
     if (!fechaBase) continue;
     if (color === "ROJO") totalRojas++;
@@ -506,7 +503,7 @@ async function main() {
     supabase
       .from("cedulas")
       .select(
-        "id, owner_user_id, caratula, juzgado, fecha_carga, tipo_documento, pjn_cargado_at, admin_cedulas_completada_at"
+        "id, owner_user_id, caratula, juzgado, fecha_carga, tipo_documento, pjn_cargado_at, admin_cedulas_completada_at, ocr_exp_nro, estado"
       )
       .neq("estado", "CERRADA"),
     supabase
@@ -533,6 +530,8 @@ async function main() {
   });
 
   const pjnFavoritos = await loadPjnFavoritos(supabase);
+  const localIds = new Set(allExpedientes.map((e) => e.id));
+  const cedulaOwnerIndex = buildCedulaOwnerIndex(cedulas as CedulaForOwnerSignal[]);
   const expedientesUnificados = buildExpedientesUnificadosDashboard(allExpedientes, pjnFavoritos);
   const expedientesDashboard = expedientesUnificados;
 
@@ -540,10 +539,17 @@ async function main() {
     cedulas,
     expedientesDashboard,
     expedientesUnificados,
-    profiles
+    profiles,
+    localIds,
+    cedulaOwnerIndex
   );
   const misJuzgadosExpedientes = buildMisJuzgadosExpedientesTodos(allExpedientes, pjnFavoritos);
-  const misJuzgadosRojos = buildMisJuzgadosRedItems(cedulas, misJuzgadosExpedientes);
+  const misJuzgadosRojos = buildMisJuzgadosRedItems(
+    cedulas,
+    misJuzgadosExpedientes,
+    localIds,
+    cedulaOwnerIndex
+  );
 
   const bd = countBreakdown(documentosRojos);
   console.log("\n═══ PASO 1 — Dataset canónico (dashboard, filtro todos) ═══");
@@ -705,7 +711,10 @@ async function main() {
   }
 
   console.log("\n═══ PASO 5 — Porcentajes (misma fórmula panel + Métricas Generales) ═══");
-  const m = computeDashboardMetrics(cedulas, expedientesUnificados, userJuzgadosMap);
+  const m = computeDashboardMetrics(cedulas, expedientesUnificados, localIds, cedulaOwnerIndex);
+  const chartRojosSum = juzgadoCharts.reduce((s, c) => s + c.value, 0);
+  const chartMatchesTotal = chartRojosSum === documentosRojos.length;
+  console.log(`Charts juzgado suman ${chartRojosSum} vs documentosRojos ${documentosRojos.length}: ${chartMatchesTotal ? "✓" : "✗"}`);
   const suma =
     parseFloat(m.pctRojas) + parseFloat(m.pctAmarillas) + parseFloat(m.pctVerdes);
   console.log("Documentos abiertos (céd+of):", m.totalAbiertas);
@@ -717,7 +726,12 @@ async function main() {
   console.log(`Suma: ${suma.toFixed(1)}% ${Math.abs(suma - 100) <= 1 ? "✓" : "✗"}`);
 
   console.log("\n═══ RESUMEN GATE ═══");
-  const gateOk = juzgadoFails === 0 && respFails === 0 && paso4Fails === 0 && Math.abs(suma - 100) <= 1;
+  const gateOk =
+    juzgadoFails === 0 &&
+    respFails === 0 &&
+    paso4Fails === 0 &&
+    Math.abs(suma - 100) <= 1 &&
+    chartMatchesTotal;
   console.log(
     gateOk
       ? "GATE OK — conjuntos reconciliados (o divergencias documentadas arriba para diagnóstico FASE 4)"

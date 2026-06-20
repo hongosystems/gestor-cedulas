@@ -15,7 +15,7 @@ import { useColumnFilters, uniqueOptionsFromField } from "@/app/hooks/useColumnF
 
 type Expediente = {
   id: string;
-  owner_user_id: string;
+  owner_user_id: string | null;
   caratula: string | null;
   juzgado: string | null;
   numero_expediente: string | null;
@@ -139,7 +139,7 @@ async function requireSessionOrRedirect() {
 type SortField = "dias" | "semaforo" | "fecha_ultima_modificacion" | "juzgado" | null;
 type SortDirection = "asc" | "desc";
 
-type ExpedientesTableFilterKey = "semaforo" | "tablaJuzgado";
+type ExpedientesTableFilterKey = "semaforo" | "tablaJuzgado" | "sinResponsable";
 
 export default function MisExpedientesPage() {
   const [loading, setLoading] = useState(true);
@@ -153,6 +153,7 @@ export default function MisExpedientesPage() {
     useColumnFilters<ExpedientesTableFilterKey>({
       semaforo: null as string | null,
       tablaJuzgado: null as string | null,
+      sinResponsable: null as string | null,
     });
   const [userRoles, setUserRoles] = useState<{
     isSuperadmin: boolean;
@@ -167,6 +168,8 @@ export default function MisExpedientesPage() {
   });
   const [currentUserName, setCurrentUserName] = useState<string>("");
   const [usuariosByKey, setUsuariosByKey] = useState<Record<string, { id: string; nombre: string; email?: string }[]>>({});
+  const [assignableUsers, setAssignableUsers] = useState<{ id: string; nombre: string }[]>([]);
+  const [assigningId, setAssigningId] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -221,6 +224,36 @@ export default function MisExpedientesPage() {
         isAbogado: isAbogado || false,
         isAdminMediaciones: isAdminMediaciones || false,
       });
+
+      if (isSuperadmin) {
+        try {
+          const { data: sessionData } = await supabase.auth.getSession();
+          const token = sessionData.session?.access_token;
+          if (token) {
+            const res = await fetch("/api/users/list", {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (res.ok) {
+              const json = await res.json();
+              const users = (json.users ?? json ?? []) as {
+                id: string;
+                full_name?: string | null;
+                email?: string | null;
+              }[];
+              setAssignableUsers(
+                users
+                  .map((u) => ({
+                    id: u.id,
+                    nombre: (u.full_name || u.email || u.id).trim(),
+                  }))
+                  .sort((a, b) => a.nombre.localeCompare(b.nombre, "es"))
+              );
+            }
+          }
+        } catch {
+          setAssignableUsers([]);
+        }
+      }
 
       // must_change_password guard
       const { data: prof, error: pErr } = await supabase
@@ -438,6 +471,10 @@ export default function MisExpedientesPage() {
       mapped = mapped.filter((e) => (e.juzgado || "").trim() === jf);
     }
 
+    if (filters.sinResponsable === "si") {
+      mapped = mapped.filter((e) => !e.owner_user_id?.trim());
+    }
+
     // Aplicar ordenamiento
     if (sortField) {
       mapped.sort((a, b) => {
@@ -486,6 +523,40 @@ export default function MisExpedientesPage() {
     } else {
       setSortField(field);
       setSortDirection(field === "juzgado" ? "asc" : "desc");
+    }
+  }
+
+  async function assignOwner(expedienteId: string, ownerUserId: string) {
+    if (!ownerUserId) return;
+    setAssigningId(expedienteId);
+    setMsg("");
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        setMsg("Sesión expirada.");
+        return;
+      }
+      const res = await fetch(`/api/admin/expedientes/${expedienteId}/assign-owner`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ owner_user_id: ownerUserId, motivo: "manual_superadmin" }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setMsg(json.error || "Error al asignar responsable.");
+        return;
+      }
+      setExpedientes((prev) =>
+        prev.map((e) => (e.id === expedienteId ? { ...e, owner_user_id: ownerUserId } : e))
+      );
+    } catch {
+      setMsg("Error de red al asignar responsable.");
+    } finally {
+      setAssigningId(null);
     }
   }
 
@@ -745,6 +816,34 @@ export default function MisExpedientesPage() {
               ROJO
             </button>
             <span style={{ color: "var(--muted)", fontSize: 13 }}>60+ días</span>
+            {userRoles.isSuperadmin && (
+              <button
+                type="button"
+                onClick={() =>
+                  setFilter("sinResponsable", filters.sinResponsable === "si" ? null : "si")
+                }
+                style={{
+                  cursor: "pointer",
+                  border:
+                    filters.sinResponsable === "si"
+                      ? "2px solid rgba(96, 141, 186, 0.8)"
+                      : "1px solid rgba(96, 141, 186, 0.35)",
+                  background:
+                    filters.sinResponsable === "si"
+                      ? "rgba(96, 141, 186, 0.25)"
+                      : "rgba(96, 141, 186, 0.12)",
+                  color: "rgba(210, 230, 255, 0.95)",
+                  padding: "6px 12px",
+                  borderRadius: 999,
+                  fontWeight: 700,
+                  fontSize: 12,
+                  letterSpacing: 0.4,
+                }}
+                title="Expedientes locales sin owner_user_id"
+              >
+                Sin responsable
+              </button>
+            )}
             {hasActiveFilters && (
               <button
                 type="button"
@@ -844,13 +943,46 @@ export default function MisExpedientesPage() {
                     <td>{e.juzgado?.trim() ? e.juzgado : <span className="muted">—</span>}</td>
 
                     <td style={{ textAlign: "center", verticalAlign: "middle" }}>
-                      <ResponsableAvatars
-                        usuarios={
-                          e.juzgado?.trim()
-                            ? usuariosByKey[`${e.juzgado.trim()}|||${(e.caratula || "").trim()}`] || []
-                            : []
-                        }
-                      />
+                      {userRoles.isSuperadmin && !e.owner_user_id?.trim() ? (
+                        <select
+                          value=""
+                          disabled={assigningId === e.id}
+                          onChange={(ev) => {
+                            const uid = ev.target.value;
+                            if (uid) assignOwner(e.id, uid);
+                          }}
+                          style={{
+                            fontSize: 11,
+                            maxWidth: 140,
+                            padding: "4px 6px",
+                            borderRadius: 6,
+                            border: "1px solid rgba(255,255,255,.2)",
+                            background: "rgba(255,255,255,.08)",
+                            color: "var(--text)",
+                          }}
+                          title="Asignar responsable (superadmin)"
+                        >
+                          <option value="">Asignar…</option>
+                          {assignableUsers.map((u) => (
+                            <option key={u.id} value={u.id}>
+                              {u.nombre}
+                            </option>
+                          ))}
+                        </select>
+                      ) : e.owner_user_id?.trim() ? (
+                        <span style={{ fontSize: 11, color: "var(--muted)" }} title={e.owner_user_id}>
+                          {assignableUsers.find((u) => u.id === e.owner_user_id)?.nombre ||
+                            e.owner_user_id.slice(0, 8)}
+                        </span>
+                      ) : (
+                        <ResponsableAvatars
+                          usuarios={
+                            e.juzgado?.trim()
+                              ? usuariosByKey[`${e.juzgado.trim()}|||${(e.caratula || "").trim()}`] || []
+                              : []
+                          }
+                        />
+                      )}
                     </td>
 
                     <td>

@@ -39,6 +39,11 @@ import {
   SIN_RESPONSABLE_LABEL,
   type DocumentoRojoDashboard,
 } from "@/lib/semaforo-dashboard-rojos";
+import {
+  buildCedulaOwnerIndex,
+  computeMonitoreoPJNStats,
+  esMonitoreoPJN,
+} from "@/lib/expediente-owner-resolve";
 
 type Cedula = {
   id: string;
@@ -54,6 +59,7 @@ type Cedula = {
   admin_cedulas_completada_at?: string | null;
   estado_ocr?: string | null;
   ocr_error?: string | null;
+  ocr_exp_nro?: string | null;
 };
 
 type Expediente = {
@@ -439,7 +445,7 @@ export default function SuperAdminPage() {
       const query = supabase
         .from("cedulas")
         .select(
-          "id, owner_user_id, caratula, juzgado, fecha_carga, fecha_vencimiento, estado, tipo_documento, created_by_user_id, pjn_cargado_at, admin_cedulas_completada_at, estado_ocr, ocr_error"
+          "id, owner_user_id, caratula, juzgado, fecha_carga, fecha_vencimiento, estado, tipo_documento, created_by_user_id, pjn_cargado_at, admin_cedulas_completada_at, estado_ocr, ocr_error, ocr_exp_nro"
         )
         .neq("estado", "CERRADA")
         .order("fecha_carga", { ascending: true });
@@ -869,6 +875,25 @@ export default function SuperAdminPage() {
     return expedientesFromFavoritos;
   }, [pjnFavoritos]);
 
+  const localExpedienteIds = useMemo(
+    () => new Set(allExpedientes.map((e) => e.id)),
+    [allExpedientes]
+  );
+
+  const cedulaOwnerIndex = useMemo(
+    () =>
+      buildCedulaOwnerIndex(
+        cedulas.map((c) => ({
+          id: c.id,
+          owner_user_id: c.owner_user_id,
+          ocr_exp_nro: c.ocr_exp_nro ?? null,
+          tipo_documento: c.tipo_documento,
+          estado: c.estado,
+        }))
+      ),
+    [cedulas]
+  );
+
   // Misma unificación que Mis Juzgados: merge PJN + dedupe por número de expediente.
   const expedientesUnificados = useMemo((): Expediente[] => {
     if (!isExpedientePjnMergeEnabled()) {
@@ -905,6 +930,11 @@ export default function SuperAdminPage() {
 
     return combined as Expediente[];
   }, [allExpedientes, pjnFavoritos, favoritosComoExpedientes]);
+
+  const monitoreoPJN = useMemo(
+    () => computeMonitoreoPJNStats(expedientesUnificados, localExpedienteIds, cedulaOwnerIndex),
+    [expedientesUnificados, localExpedienteIds, cedulaOwnerIndex]
+  );
 
   /** Claves de juzgado canónicas (misma fuente que barras/modal). */
   const dashboardJuzgadoKeys = useMemo(
@@ -1197,8 +1227,9 @@ export default function SuperAdminPage() {
     for (const e of expedientes) {
       const { color, dias, fechaBase } = expedienteSemaforo(e);
       if (!fechaBase || color !== "ROJO") continue;
-      const caratula = e.caratula?.trim() || e.numero_expediente?.trim() || "Sin carátula";
       const base = unificadosById.get(e.id) ?? e;
+      if (esMonitoreoPJN(base, localExpedienteIds, cedulaOwnerIndex)) continue;
+      const caratula = e.caratula?.trim() || e.numero_expediente?.trim() || "Sin carátula";
       const ownerUserId = ownerExplicit(base.owner_user_id);
       items.push({
         id: e.id,
@@ -1215,7 +1246,29 @@ export default function SuperAdminPage() {
     }
 
     return items;
-  }, [cedulasConColor, expedientes, expedientesUnificados, profiles]);
+  }, [cedulasConColor, expedientes, expedientesUnificados, profiles, localExpedienteIds, cedulaOwnerIndex]);
+
+  const documentosMonitoreoRojos = useMemo((): DocumentoRojoDashboard[] => {
+    const items: DocumentoRojoDashboard[] = [];
+    for (const e of expedientesUnificados) {
+      if (!esMonitoreoPJN(e, localExpedienteIds, cedulaOwnerIndex)) continue;
+      const { color, dias, fechaBase } = expedienteSemaforo(e);
+      if (!fechaBase || color !== "ROJO") continue;
+      items.push({
+        id: e.id,
+        tipo: "EXPEDIENTE",
+        tipoLabel: "Monitoreo PJN",
+        caratula: e.caratula?.trim() || e.numero_expediente?.trim() || "Sin carátula",
+        juzgado: e.juzgado?.trim() || null,
+        juzgadoKey: juzgadoKeyFromRaw(e.juzgado),
+        dias,
+        ownerUserId: null,
+        ownerName: "Monitoreo PJN",
+        href: "/superadmin/mis-juzgados",
+      });
+    }
+    return items;
+  }, [expedientesUnificados, localExpedienteIds, cedulaOwnerIndex]);
 
   const juzgadoRojos = useMemo(
     (): BarChartItem[] => buildJuzgadoRojosChart(documentosRojos),
@@ -1247,6 +1300,7 @@ export default function SuperAdminPage() {
     }
 
     for (const e of expedientes) {
+      if (esMonitoreoPJN(e, localExpedienteIds, cedulaOwnerIndex)) continue;
       if (!e.owner_user_id || e.owner_user_id.trim() === "") continue;
 
       const { color: s, dias } = expedienteSemaforo(e);
@@ -1288,12 +1342,13 @@ export default function SuperAdminPage() {
       (b.amarillos - a.amarillos) ||
       (b.maxDias - a.maxDias)
     );
-  }, [cedulasConColor, expedientes, profiles]);
+  }, [cedulasConColor, expedientes, profiles, localExpedienteIds, cedulaOwnerIndex]);
 
   const rankingExpedientes = useMemo(() => {
     const perUser: Record<string, { rojos: number; amarillos: number; verdes: number; total: number; maxDias: number }> = {};
 
     for (const e of expedientes) {
+      if (esMonitoreoPJN(e, localExpedienteIds, cedulaOwnerIndex)) continue;
       if (!e.owner_user_id || e.owner_user_id.trim() === "") continue;
 
       const { color: s, dias } = expedienteSemaforo(e);
@@ -1317,7 +1372,7 @@ export default function SuperAdminPage() {
       (b.amarillos - a.amarillos) ||
       (b.maxDias - a.maxDias)
     );
-  }, [expedientes, profiles]);
+  }, [expedientes, profiles, localExpedienteIds, cedulaOwnerIndex]);
 
   const metrics = useMemo(() => {
     const cedulasFiltered = cedulasConColor.filter(c => !c.tipo_documento || c.tipo_documento === "CEDULA");
@@ -1332,63 +1387,28 @@ export default function SuperAdminPage() {
     let expedientesParaContar: Expediente[];
     
     if (juzgadoFilter === "todos") {
-      // Cuando es "todos", contar desde expedientes unificados (merge PJN + dedupe)
-      const expedientesMap = new Map<string, Expediente>();
+      expedientesParaContar = expedientesUnificados.filter(
+        (e) => !esMonitoreoPJN(e, localExpedienteIds, cedulaOwnerIndex)
+      );
 
-      expedientesUnificados.forEach((e) => {
-        if (e.owner_user_id && e.owner_user_id.trim() !== "") {
-          expedientesMap.set(e.id, e);
-          return;
-        }
-        if (!e.is_pjn_favorito || !e.juzgado) return;
-
-        let tieneUsuarioAsignado = false;
-        for (const [, juzgadosDelUsuario] of Object.entries(userJuzgadosMap)) {
-          const juzgadosNormalizados = juzgadosDelUsuario.map((j) => normalizarJuzgado(j));
-          const matchJuzgado = juzgadosNormalizados.some((jAsignado) =>
-            juzgadosCoinciden(e.juzgado || "", jAsignado)
-          );
-          if (matchJuzgado) {
-            tieneUsuarioAsignado = true;
-            break;
-          }
-        }
-        if (!tieneUsuarioAsignado) return;
-
-        for (const [userId, juzgadosDelUsuario] of Object.entries(userJuzgadosMap)) {
-          const juzgadosNormalizados = juzgadosDelUsuario.map((j) => normalizarJuzgado(j));
-          const matchJuzgado = juzgadosNormalizados.some((jAsignado) =>
-            juzgadosCoinciden(e.juzgado || "", jAsignado)
-          );
-          if (matchJuzgado) {
-            expedientesMap.set(e.id, { ...e, owner_user_id: userId });
-            break;
-          }
-        }
-      });
-
-      expedientesParaContar = Array.from(expedientesMap.values());
-      
-      // Si hay filtro de usuario, filtrar por usuario
       if (selectedUserId !== "all") {
-        expedientesParaContar = expedientesParaContar.filter(e => {
-          // Para favoritos PJN, verificar si el usuario seleccionado tiene el juzgado asignado
-          if (e.is_pjn_favorito) {
-            if (!e.juzgado) return false;
-            const juzgadosDelUsuario = selectedUserJuzgados.map(j => normalizarJuzgado(j));
-            return juzgadosDelUsuario.some(jAsignado => {
-              return juzgadosCoinciden(e.juzgado || "", jAsignado);
-            });
+        expedientesParaContar = expedientesParaContar.filter((e) => {
+          if (e.owner_user_id?.trim()) {
+            return e.owner_user_id === selectedUserId;
           }
-          // Para expedientes locales, verificar por owner
-          return e.owner_user_id === selectedUserId;
+          if (!e.juzgado) return false;
+          const juzgadosDelUsuario = selectedUserJuzgados.map((j) => normalizarJuzgado(j));
+          return juzgadosDelUsuario.some((jAsignado) =>
+            juzgadosCoinciden(e.juzgado || "", jAsignado)
+          );
         });
       }
     } else {
-      // Cuando hay filtro de juzgado específico, usar el array filtrado
-      expedientesParaContar = expedientes.filter(e => {
-        return e.owner_user_id && e.owner_user_id.trim() !== "";
-      });
+      expedientesParaContar = expedientes.filter(
+        (e) =>
+          !esMonitoreoPJN(e, localExpedienteIds, cedulaOwnerIndex) &&
+          Boolean(e.owner_user_id?.trim())
+      );
     }
     
     // Calcular métricas generales del semáforo contando TODOS los documentos (cédulas + oficios + expedientes)
@@ -1408,7 +1428,6 @@ export default function SuperAdminPage() {
     let expedientesSinFecha = 0;
     let expedientesConFecha = 0;
     for (const e of expedientesParaContar) {
-      if (!e.owner_user_id || e.owner_user_id.trim() === "") continue;
       if (!e.fecha_ultima_modificacion) {
         expedientesSinFecha++;
         continue;
@@ -1547,7 +1566,7 @@ export default function SuperAdminPage() {
       maxDias,
       maxDiasExpedientes,
     };
-  }, [cedulasConColor, expedientes, ranking, rankingExpedientes, selectedUserId, juzgadoFilter, selectedUserJuzgados, expedientesUnificados, userJuzgadosMap]);
+  }, [cedulasConColor, expedientes, ranking, rankingExpedientes, selectedUserId, juzgadoFilter, selectedUserJuzgados, expedientesUnificados, localExpedienteIds, cedulaOwnerIndex]);
 
   const operationalMetrics = useMemo((): OperationalMetrics => {
     let pjnCargados = 0;
@@ -2578,6 +2597,8 @@ export default function SuperAdminPage() {
           juzgadoRojos={juzgadoRojos}
           responsableRojos={responsableRojos}
           documentosRojos={documentosRojos}
+          monitoreoPJN={monitoreoPJN}
+          documentosMonitoreoRojos={documentosMonitoreoRojos}
           antiguedadBuckets={antiguedadBuckets}
           alertas={dashboardAlertas}
         />

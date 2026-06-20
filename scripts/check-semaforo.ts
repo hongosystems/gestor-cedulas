@@ -103,6 +103,7 @@ function runScript(script: string): boolean {
     cwd: ROOT,
     stdio: "inherit",
     env: process.env,
+    shell: process.platform === "win32",
   });
   return r.status === 0;
 }

@@ -39,6 +39,8 @@ export type DashboardPanelsProps = {
   juzgadoRojos: BarChartItem[];
   responsableRojos: BarChartItem[];
   documentosRojos: DocumentoRojoDashboard[];
+  monitoreoPJN: { total: number; rojos: number; amarillos: number; verdes: number };
+  documentosMonitoreoRojos: DocumentoRojoDashboard[];
   antiguedadBuckets: { verde: number; amarillo: number; rojo: number };
   alertas: string[];
 };
@@ -49,13 +51,15 @@ export default function SuperadminDashboardPanels({
   juzgadoRojos,
   responsableRojos,
   documentosRojos,
+  monitoreoPJN,
+  documentosMonitoreoRojos,
   antiguedadBuckets,
   alertas,
 }: DashboardPanelsProps) {
   const pctHint = (pct: string) => `${pct}% del universo semáforo (${metrics.totalUniversoSemaforo})`;
 
   const [drilldown, setDrilldown] = useState<{
-    kind: "juzgado" | "responsable";
+    kind: "juzgado" | "responsable" | "monitoreo";
     key: string;
     title: string;
     subtitle?: string;
@@ -63,8 +67,9 @@ export default function SuperadminDashboardPanels({
 
   const drilldownItems = useMemo(() => {
     if (!drilldown) return [];
+    if (drilldown.kind === "monitoreo") return documentosMonitoreoRojos;
     return filterDocumentosRojos(documentosRojos, drilldown.kind, drilldown.key);
-  }, [drilldown, documentosRojos]);
+  }, [drilldown, documentosRojos, documentosMonitoreoRojos]);
 
   function handleBarClick(item: BarChartItem) {
     if (!item.drilldownKind || !item.drilldownKey) return;
@@ -169,6 +174,43 @@ export default function SuperadminDashboardPanels({
           <CssBarChart items={responsableRojos} onValueClick={handleBarClick} />
         </SectionCard>
       </div>
+
+      <SectionCard title="Monitoreo PJN">
+        <p className="muted" style={{ margin: "0 0 12px 0", fontSize: 13 }}>
+          Causas vigiladas vía favoritos PJN — no son trabajo del estudio. Fuera de rankings y semáforo gerencial.
+        </p>
+        <div className="dashboard-panels__grid dashboard-panels__grid--3">
+          <MetricCard
+            title="Causas en monitoreo"
+            value={monitoreoPJN.total}
+            hint="Favoritos PJN sin cédulas/oficios propios"
+            tone="blue"
+          />
+          <button
+            type="button"
+            className="metric-card metric-card--red"
+            style={{ textAlign: "left", cursor: monitoreoPJN.rojos > 0 ? "pointer" : "default", border: "none", width: "100%" }}
+            disabled={monitoreoPJN.rojos === 0}
+            onClick={() =>
+              setDrilldown({
+                kind: "monitoreo",
+                key: "monitoreo",
+                title: "Monitoreo PJN — rojos",
+                subtitle: `${monitoreoPJN.rojos} causas vigiladas`,
+              })
+            }
+          >
+            <div className="metric-card__label">Monitoreo en rojo</div>
+            <div className="metric-card__value">{monitoreoPJN.rojos}</div>
+            <div className="metric-card__hint">Antigüedad PJN — informativo, no gerencial</div>
+          </button>
+          <MetricCard
+            title="Monitoreo amarillo / verde"
+            value={monitoreoPJN.amarillos + monitoreoPJN.verdes}
+            hint={`${monitoreoPJN.amarillos} am · ${monitoreoPJN.verdes} ver`}
+          />
+        </div>
+      </SectionCard>
 
       {drilldown && (
         <SemaforoRojosModal
