@@ -31,6 +31,8 @@ export type PjnCargarPayload = {
   cedulaId: string;
   expNro: string;
   jurisdiccion: string;
+  /** Juzgado de la cédula (ej. JUZGADO CIVIL 19) — el VPS lo usa para elegir destinatario en paso 3. */
+  juzgado?: string | null;
   pdfUrl: string;
   tipoDocumento: "OFICIO" | "CEDULA";
   descripcion: string;
@@ -41,6 +43,7 @@ export function buildPjnDiligenciamientoPayload(input: {
   cedulaId: string;
   expNro: string;
   jurisdiccion: string;
+  juzgado?: string | null;
   pdfUrl: string;
   tipo_documento: string | null | undefined;
 }): PjnCargarPayload {
@@ -50,6 +53,7 @@ export function buildPjnDiligenciamientoPayload(input: {
     cedulaId: input.cedulaId,
     expNro: input.expNro,
     jurisdiccion: input.jurisdiccion,
+    juzgado: input.juzgado?.trim() || null,
     pdfUrl: input.pdfUrl,
     tipoDocumento,
     descripcion,

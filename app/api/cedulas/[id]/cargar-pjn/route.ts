@@ -183,6 +183,7 @@ export async function POST(
       cedulaId,
       expNro: cedula.ocr_exp_nro ?? "",
       jurisdiccion: expData.jurisdiccion,
+      juzgado: cedula.juzgado,
       pdfUrl: signedData.signedUrl,
       tipo_documento: cedula.tipo_documento,
     });
