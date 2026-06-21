@@ -16,7 +16,8 @@ async function invocarCargarPjnTrasOcr(
   svc: ReturnType<typeof supabaseService>,
   cedulaId: string,
   expNro: string | null,
-  tipo_documento: string | null | undefined
+  tipo_documento: string | null | undefined,
+  juzgado: string | null | undefined
 ) {
   const base = pjnVpsBaseUrl();
   if (!base || !expNro?.trim()) {
@@ -60,6 +61,7 @@ async function invocarCargarPjnTrasOcr(
       cedulaId,
       expNro: expNro.trim(),
       jurisdiccion,
+      juzgado,
       pdfUrl: signedData.signedUrl,
       tipo_documento,
     });
@@ -144,7 +146,7 @@ export async function procesarOcrEnBackground(
   try {
     const { data: cedula, error: cedulaErr } = await svc
       .from("cedulas")
-      .select("id, pdf_path, tipo_documento")
+      .select("id, pdf_path, tipo_documento, juzgado")
       .eq("id", cedulaId)
       .single();
 
@@ -295,7 +297,13 @@ export async function procesarOcrEnBackground(
 
     if (!opts?.skipCargarPjn) {
       try {
-        await invocarCargarPjnTrasOcr(svc, cedulaId, expNro, cedula.tipo_documento);
+        await invocarCargarPjnTrasOcr(
+          svc,
+          cedulaId,
+          expNro,
+          cedula.tipo_documento,
+          cedula.juzgado
+        );
       } catch (e: unknown) {
         const errMsg = e instanceof Error ? e.message : String(e);
         await svc.from("cedulas").update({ observaciones_pjn: errMsg }).eq("id", cedulaId);
