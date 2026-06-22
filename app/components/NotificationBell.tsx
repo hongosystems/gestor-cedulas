@@ -60,6 +60,11 @@ export default function NotificationBell({ variant = "inline" }: NotificationBel
           { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${uid}` },
           () => load()
         )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "mailbox_recipients", filter: `user_id=eq.${uid}` },
+          () => load()
+        )
         .subscribe();
     })();
 

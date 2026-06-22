@@ -89,26 +89,30 @@ export default function MailboxInbox({
 
   const markItemReadIfNeeded = useCallback(
     async (item: MailboxInboxItem | null) => {
-      if (!item?.unread || folder !== "unread") return;
+      if (!item?.unread) return;
       try {
         await markMailboxThreadRead(item.threadId);
-        await loadFolder();
+        setAllItems((prev) =>
+          prev.map((i) =>
+            i.threadId === item.threadId ? { ...i, unread: false } : i
+          )
+        );
         onListChanged?.();
       } catch {
         /* mantener estado local si falla */
       }
     },
-    [folder, loadFolder, onListChanged]
+    [onListChanged]
   );
 
   const selectItem = useCallback(
     async (next: MailboxInboxItem) => {
-      if (selected && selected.unread) {
-        await markItemReadIfNeeded(selected);
-      }
       setSelected(next);
+      if (next.unread) {
+        void markItemReadIfNeeded(next);
+      }
     },
-    [selected, markItemReadIfNeeded]
+    [markItemReadIfNeeded]
   );
 
   const closeItem = useCallback(async () => {
@@ -151,9 +155,31 @@ export default function MailboxInbox({
         ) : null}
         {items.length === 0 ? (
           <div className="bandeja-empty">
-            {liveSearch
-              ? `Sin resultados para “${liveSearch}”.`
-              : "No hay mensajes en esta carpeta."}
+            {liveSearch ? (
+              <>
+                <p style={{ margin: "0 0 8px" }}>
+                  Sin resultados para “{liveSearch}”.
+                </p>
+                {allItems.length > 0 ? (
+                  <>
+                    <p style={{ margin: "0 0 12px", color: "rgba(234,243,255,.65)" }}>
+                      {folder === "unread"
+                        ? `Hay ${allItems.length} mensaje${allItems.length === 1 ? "" : "s"} no leído${allItems.length === 1 ? "" : "s"} oculto${allItems.length === 1 ? "" : "s"} por la búsqueda.`
+                        : `Hay ${allItems.length} mensaje${allItems.length === 1 ? "" : "s"} en esta carpeta que no coincide${allItems.length === 1 ? "" : "n"} con la búsqueda.`}
+                    </p>
+                    <button
+                      type="button"
+                      className="bandeja-empty-action"
+                      onClick={() => pageSearch?.onChange("")}
+                    >
+                      Limpiar búsqueda
+                    </button>
+                  </>
+                ) : null}
+              </>
+            ) : (
+              "No hay mensajes en esta carpeta."
+            )}
           </div>
         ) : (
           displayItems.map((t) => (

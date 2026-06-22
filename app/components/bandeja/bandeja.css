@@ -400,6 +400,22 @@
   font-size: 14px;
 }
 
+.bandeja-empty-action {
+  margin-top: 4px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(96, 141, 186, 0.45);
+  background: rgba(96, 141, 186, 0.15);
+  color: rgba(234, 243, 255, 0.9);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.bandeja-empty-action:hover {
+  background: rgba(96, 141, 186, 0.28);
+}
+
 /* Composer */
 .bandeja-compose-panel {
   width: 100%;

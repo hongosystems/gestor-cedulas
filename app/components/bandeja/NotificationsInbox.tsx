@@ -2034,7 +2034,25 @@ export default function NotificationsInbox({
                   color: "rgba(234,243,255,.6)",
                   fontSize: 14 
                 }}>
-                  {embedded
+                  {query.trim() && threadsList.length > 0 ? (
+                    <>
+                      <p style={{ margin: "0 0 8px" }}>
+                        Sin resultados para “{query.trim()}”.
+                      </p>
+                      <p style={{ margin: "0 0 12px", color: "rgba(234,243,255,.65)" }}>
+                        {filter === "unread"
+                          ? `Hay ${unreadThreadCount} alerta${unreadThreadCount === 1 ? "" : "s"} sin leer oculta${unreadThreadCount === 1 ? "" : "s"} por la búsqueda.`
+                          : `Hay ${threadsList.length} conversación${threadsList.length === 1 ? "" : "es"} que no coincide${threadsList.length === 1 ? "" : "n"} con la búsqueda.`}
+                      </p>
+                      <button
+                        type="button"
+                        className="bandeja-empty-action"
+                        onClick={() => pageSearch?.onChange("")}
+                      >
+                        Limpiar búsqueda
+                      </button>
+                    </>
+                  ) : embedded
                     ? filter === "unread"
                       ? "No hay alertas sin leer."
                       : "No hay alertas."

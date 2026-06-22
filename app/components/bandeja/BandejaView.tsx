@@ -113,7 +113,7 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
   useEffect(() => {
     if (!hasSession) return;
     refreshCounts();
-  }, [hasSession, refreshCounts]);
+  }, [hasSession, refreshCounts, activeTab]);
 
   useEffect(() => {
     if (!hasSession || !workflow) return;
@@ -135,13 +135,17 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
 
   const setTab = useCallback(
     (tab: BandejaTab) => {
+      if (tab === "no-leidas" || tab === "alertas") {
+        pageSearch?.onChange("");
+        setSearch("");
+      }
       if (tab === "nuevo") {
         router.push("/app/bandeja?action=nuevo");
         return;
       }
       router.push(`/app/bandeja?tab=${tab}`);
     },
-    [router]
+    [router, pageSearch]
   );
 
   const navItems: NavItem[] = useMemo(() => {

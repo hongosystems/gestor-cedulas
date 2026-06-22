@@ -518,7 +518,10 @@ export async function listMailboxInbox(
   }
 ): Promise<MailboxInboxItem[]> {
   const svc = supabaseService();
-  const limit = opts.limit ?? 80;
+  const limit =
+    opts.folder === "unread" || opts.folder === "action"
+      ? (opts.limit ?? 200)
+      : (opts.limit ?? 80);
   const items: MailboxInboxItem[] = [];
 
   if (opts.folder === "sent") {
