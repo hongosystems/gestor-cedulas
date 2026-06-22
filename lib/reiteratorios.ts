@@ -29,3 +29,23 @@ export function isReiteratorioPresentado(
 ): boolean {
   return (observacionesPjn || "").trim().startsWith(REITERATORIO_PRESENTADO_PREFIX);
 }
+
+/** ISO de presentación guardado en `observaciones_pjn`, o null si no aplica. */
+export function fechaPresentacionReiteratorio(
+  observacionesPjn: string | null | undefined
+): string | null {
+  const text = (observacionesPjn || "").trim();
+  if (!text.startsWith(REITERATORIO_PRESENTADO_PREFIX)) return null;
+  const rest = text.slice(REITERATORIO_PRESENTADO_PREFIX.length).trim();
+  if (!rest) return null;
+  const date = new Date(rest);
+  return Number.isNaN(date.getTime()) ? null : rest;
+}
+
+export function diasDesdePresentacionReiteratorio(
+  observacionesPjn: string | null | undefined
+): number | null {
+  const iso = fechaPresentacionReiteratorio(observacionesPjn);
+  if (!iso) return null;
+  return diasCalendarioDesde(iso);
+}

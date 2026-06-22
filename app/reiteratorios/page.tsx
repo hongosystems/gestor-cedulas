@@ -5,7 +5,9 @@ import { supabase } from "@/lib/supabase";
 import { usePageSearchBridge } from "@/app/hooks/usePageSearchBridge";
 import {
   diasCalendarioDesde,
+  diasDesdePresentacionReiteratorio,
   esCandidatoReiteratorio,
+  fechaPresentacionReiteratorio,
   isReiteratorioPresentado,
   REITERATORIO_PRESENTADO_PREFIX,
   REITERATORIO_UMBRAL_DIAS,
@@ -30,6 +32,16 @@ function datosFaltantes(row: ReiteratorioRow): string[] {
   if (!row.ocr_caratula?.trim() && !row.caratula?.trim()) faltan.push("carátula");
   if (!row.ocr_destinatario?.trim()) faltan.push("destinatario");
   return faltan;
+}
+
+function formatFechaCorta(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("es-AR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
 }
 
 async function getFreshAccessToken(): Promise<string | null> {
@@ -345,6 +357,11 @@ export default function ReiteratoriosPage() {
               <p className="page-header__subtitle">
                 Oficios cargados en PJN hace {REITERATORIO_UMBRAL_DIAS} días o más sin respuesta del juzgado.
               </p>
+              <p className="helper" style={{ marginTop: 8, maxWidth: 920, lineHeight: 1.45 }}>
+                Los días se cuentan desde la carga original del oficio en PJN, no desde la presentación del
+                reiteratorio. Un mismo expediente puede tener varios oficios (un renglón por destinatario):
+                presentar uno no marca los demás. Los ya presentados quedan al final del listado.
+              </p>
             </div>
           </div>
         </header>
@@ -360,7 +377,12 @@ export default function ReiteratoriosPage() {
                   <th style={{ minWidth: 260 }}>Carátula</th>
                   <th style={{ minWidth: 220 }}>Destinatario</th>
                   <th style={{ minWidth: 220 }}>Juzgado</th>
-                  <th style={{ width: 160 }}>Días sin respuesta</th>
+                  <th
+                    style={{ width: 180 }}
+                    title="Días calendario desde la carga del oficio en PJN. No se reinician al presentar el reiteratorio."
+                  >
+                    Días sin respuesta
+                  </th>
                   <th style={{ width: 140 }}>Alerta</th>
                   <th style={{ width: 380 }}>Acción</th>
                 </tr>
@@ -384,6 +406,12 @@ export default function ReiteratoriosPage() {
                     const faltan = datosFaltantes(r);
                     const puedeGenerarPdf = faltan.length === 0;
                     const presentado = isReiteratorioPresentado(r.observaciones_pjn);
+                    const fechaPresentado = presentado
+                      ? fechaPresentacionReiteratorio(r.observaciones_pjn)
+                      : null;
+                    const diasDesdePresentado = presentado
+                      ? diasDesdePresentacionReiteratorio(r.observaciones_pjn)
+                      : null;
                     const ocrEnProceso = r.estado_ocr === "procesando";
                     const filaOcupada =
                       enProcesoId === r.id ||
@@ -411,12 +439,40 @@ export default function ReiteratoriosPage() {
                         </td>
                         <td>{r.juzgado?.trim() || <span className="muted">—</span>}</td>
                         <td
-                          style={{
-                            fontVariantNumeric: "tabular-nums",
-                            fontWeight: 700,
-                          }}
+                          title={
+                            presentado
+                              ? `${r.dias} días desde la carga en PJN. Reiteratorio presentado${
+                                  fechaPresentado
+                                    ? ` el ${formatFechaCorta(fechaPresentado)}`
+                                    : ""
+                                }.`
+                              : `${r.dias} días desde la carga del oficio en PJN.`
+                          }
                         >
-                          {r.dias}
+                          <div
+                            style={{
+                              fontVariantNumeric: "tabular-nums",
+                              fontWeight: 700,
+                            }}
+                          >
+                            {r.dias}
+                          </div>
+                          <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                            desde carga en PJN
+                          </div>
+                          {presentado && diasDesdePresentado != null && (
+                            <div
+                              className="muted"
+                              style={{ fontSize: 11, marginTop: 2 }}
+                              title={
+                                fechaPresentado
+                                  ? `Presentado el ${formatFechaCorta(fechaPresentado)}`
+                                  : undefined
+                              }
+                            >
+                              presentado hace {diasDesdePresentado} d.
+                            </div>
+                          )}
                         </td>
                         <td>
                           <span className={alertaClass}>
@@ -428,7 +484,14 @@ export default function ReiteratoriosPage() {
                           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                               {presentado && (
-                                <span className="badge badge--verde">
+                                <span
+                                  className="badge badge--verde"
+                                  title={
+                                    fechaPresentado
+                                      ? `Reiteratorio presentado el ${formatFechaCorta(fechaPresentado)}. El conteo de días sigue desde la carga original en PJN.`
+                                      : "Reiteratorio presentado. El conteo de días sigue desde la carga original en PJN."
+                                  }
+                                >
                                   <span className="badgeDot" />
                                   PRESENTADO
                                 </span>
