@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, type ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
 import NotificationBell from "@/app/components/NotificationBell";
 import { usePageSearchBridge } from "@/app/hooks/usePageSearchBridge";
@@ -136,6 +136,32 @@ type ThreadBubbleProps = {
   compact?: boolean;
   onDownloadTransfer: (transferId: string) => void;
 };
+
+function NotificationsShell({
+  embedded,
+  children,
+}: {
+  embedded?: boolean;
+  children: ReactNode;
+}) {
+  if (embedded) {
+    return <div className="bandeja-notifications-shell">{children}</div>;
+  }
+  return <main className="container">{children}</main>;
+}
+
+function NotificationsBody({
+  embedded,
+  children,
+}: {
+  embedded?: boolean;
+  children: ReactNode;
+}) {
+  if (embedded) {
+    return <div className="bandeja-notifications-body">{children}</div>;
+  }
+  return <section className="card">{children}</section>;
+}
 
 function ThreadMessageBubble({
   msg,
@@ -1545,20 +1571,6 @@ export default function NotificationsInbox({
     window.location.href = "/login";
   }
 
-  function ShellWrapper({ children }: { children: React.ReactNode }) {
-    if (embedded) {
-      return <div className="bandeja-notifications-shell">{children}</div>;
-    }
-    return <main className="container">{children}</main>;
-  }
-
-  function BodyWrapper({ children }: { children: React.ReactNode }) {
-    if (embedded) {
-      return <div className="bandeja-notifications-body">{children}</div>;
-    }
-    return <section className="card">{children}</section>;
-  }
-
   if (loading) {
     if (embedded) {
       return (
@@ -1579,7 +1591,7 @@ export default function NotificationsInbox({
   }
 
   return (
-    <ShellWrapper>
+    <NotificationsShell embedded={embedded}>
       {/* Toast Notification */}
       {toast && (
         <div
@@ -1661,7 +1673,7 @@ export default function NotificationsInbox({
           </button>
         </div>
       )}
-      <BodyWrapper>
+      <NotificationsBody embedded={embedded}>
         {!embedded && (
         <header className="nav">
           <img className="logoMini" src="/logo.png" alt="Logo" />
@@ -2333,7 +2345,7 @@ export default function NotificationsInbox({
             )}
           </div>
         </div>
-      </BodyWrapper>
-    </ShellWrapper>
+      </NotificationsBody>
+    </NotificationsShell>
   );
 }
