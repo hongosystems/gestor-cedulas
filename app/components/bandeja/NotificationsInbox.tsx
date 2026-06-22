@@ -676,6 +676,29 @@ export default function NotificationsInbox({
         setOrdenPdfUrl(null);
       }
     }
+    if ((meta as any).source === "gastos_pericia") {
+      try {
+        const pdfFromMeta = (meta as any).pdf_url;
+        if (pdfFromMeta) {
+          setOrdenPdfUrl(pdfFromMeta);
+        } else if ((meta as any).gasto_id) {
+          const { data: gasto } = await supabase
+            .from("gastos_anticipo")
+            .select("pdf_storage_path")
+            .eq("id", (meta as any).gasto_id)
+            .maybeSingle();
+          if (gasto?.pdf_storage_path) {
+            const { data: signedUrlData } = await supabase.storage
+              .from("gastos-pericia")
+              .createSignedUrl(gasto.pdf_storage_path, 3600);
+            setOrdenPdfUrl(signedUrlData?.signedUrl || null);
+          }
+        }
+      } catch (err) {
+        console.warn("Error obteniendo PDF de gastos:", err);
+        setOrdenPdfUrl(null);
+      }
+    }
     // Usar un mensaje del hilo con mejor contexto de expediente/cédula si el seleccionado no lo trae.
     let contextNotif: Notif = notif;
     let resolutionThreadData: Notif[] = [notif];

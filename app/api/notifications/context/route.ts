@@ -84,16 +84,42 @@ function parsePjnCaseKey(raw: string | null | undefined): { jurisdiccion: string
 }
 
 function parseLink(link: string | null | undefined) {
-  if (!link) return { cedulaId: null, pjnRef: null, ordenId: null, expedienteRef: null };
+  if (!link) {
+    return { cedulaId: null, pjnRef: null, ordenId: null, gastoId: null, expedienteRef: null };
+  }
   const cedulaMatch = link.match(/^\/app#([a-f0-9-]+)$/i);
   const pjnMatch = link.match(/#pjn_(.+)$/i);
   const expHashMatch = link.match(/#([a-f0-9-]+)$/i);
   const ordenIdMatch = link.match(/[?&]orden_id=([^&#]+)/i);
+  const gastoIdMatch = link.match(/[?&]gasto_id=([^&#]+)/i);
   return {
     cedulaId: cedulaMatch?.[1] || null,
     pjnRef: pjnMatch?.[1] || null,
     ordenId: ordenIdMatch?.[1] || null,
+    gastoId: gastoIdMatch?.[1] || null,
     expedienteRef: expHashMatch?.[1] || null,
+  };
+}
+
+async function resolveFromGastoId(svc: ReturnType<typeof supabaseService>, gastoId: string): Promise<ResolvedInfo | null> {
+  const { data: gasto } = await svc
+    .from("gastos_anticipo")
+    .select("caratula, juzgado, jurisdiccion, numero, anio")
+    .eq("id", gastoId)
+    .maybeSingle();
+
+  if (!gasto) return null;
+  const numero =
+    gasto.jurisdiccion && gasto.numero && gasto.anio
+      ? `${gasto.jurisdiccion} ${String(gasto.numero).padStart(6, "0")}/${gasto.anio}`
+      : gasto.numero && gasto.anio
+        ? `${gasto.numero}/${gasto.anio}`
+        : null;
+  return {
+    caratula: (gasto as any).caratula || null,
+    juzgado: (gasto as any).juzgado || null,
+    numero,
+    source: "gastos_anticipo.id",
   };
 }
 
@@ -210,6 +236,14 @@ export async function POST(req: NextRequest) {
       || rows.map((r) => parseLink(r.link).ordenId).find(Boolean);
     if (ordenId) {
       const info = await resolveFromOrdenId(svc, String(ordenId));
+      if (info) return NextResponse.json({ ok: true, data: info });
+    }
+
+    // 2b) gasto_id en metadata/link
+    const gastoId = metadataList.map((m) => m.gasto_id).find(Boolean)
+      || rows.map((r) => parseLink(r.link).gastoId).find(Boolean);
+    if (gastoId && isUuidLike(String(gastoId))) {
+      const info = await resolveFromGastoId(svc, String(gastoId));
       if (info) return NextResponse.json({ ok: true, data: info });
     }
 

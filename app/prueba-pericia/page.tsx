@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { pjnScraperSupabase } from "@/lib/pjn-scraper-supabase";
@@ -1214,8 +1215,34 @@ type PruebaOrdenesColFilter = "semaforo" | "estado_gestion" | "centro_medico";
 // IMPORTANTE: Para activar, crear .env.local con: NEXT_PUBLIC_FEATURE_ORDENES_SEGUIMIENTO=true
 // y reiniciar el servidor de desarrollo
 const FEATURE_ORDENES_SEGUIMIENTO = process.env.NEXT_PUBLIC_FEATURE_ORDENES_SEGUIMIENTO === "true";
+const FEATURE_GASTOS = process.env.NEXT_PUBLIC_FEATURE_GASTOS === "true";
+const HAS_FEATURE_TABS = FEATURE_ORDENES_SEGUIMIENTO || FEATURE_GASTOS;
+
+type PruebaPericiaTab = "deteccion" | "ordenes" | "gastos";
+
+type GastoAnticipoRow = {
+  id: string;
+  jurisdiccion: string | null;
+  numero: string;
+  anio: string;
+  caratula: string | null;
+  juzgado: string | null;
+  actuacion_fecha: string | null;
+  actuacion_fs: string | null;
+  actuacion_tipo: string | null;
+  detalle: string;
+  monto: number | null;
+  plazo_dias: number | null;
+  articulo: string | null;
+  estado: string;
+  notificado_at: string | null;
+  pdf_signed_url: string | null;
+  match_score: number | null;
+  match_regla: string | null;
+};
 
 export default function PruebaPericiaPage() {
+  const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
   const [expedientes, setExpedientes] = useState<Expediente[]>([]);
@@ -1254,9 +1281,15 @@ export default function PruebaPericiaPage() {
   });
   
   // Estados para órdenes/seguimiento (solo si el flag está activo)
-  const [activeTab, setActiveTab] = useState<"deteccion" | "ordenes">("deteccion");
+  const [activeTab, setActiveTab] = useState<PruebaPericiaTab>("deteccion");
   const [ordenesData, setOrdenesData] = useState<any[]>([]);
   const [loadingOrdenes, setLoadingOrdenes] = useState(false);
+  const [gastosData, setGastosData] = useState<GastoAnticipoRow[]>([]);
+  const [loadingGastos, setLoadingGastos] = useState(false);
+  const [gastosDrawerOpen, setGastosDrawerOpen] = useState(false);
+  const [selectedGasto, setSelectedGasto] = useState<GastoAnticipoRow | null>(null);
+  const [gastosActionLoading, setGastosActionLoading] = useState<string | null>(null);
+  const [gastosLoadError, setGastosLoadError] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedOrden, setSelectedOrden] = useState<any | null>(null);
   const [uploadingOrden, setUploadingOrden] = useState<Record<string, boolean>>({});
@@ -1270,11 +1303,17 @@ export default function PruebaPericiaPage() {
     centro_medico: null as string | null,
   });
   const [searchTermOrdenes, setSearchTermOrdenes] = useState<string>("");
+  const [searchTermGastos, setSearchTermGastos] = useState<string>("");
   const pageSearchValue =
-    FEATURE_ORDENES_SEGUIMIENTO && activeTab === "ordenes" ? searchTermOrdenes : searchTerm;
+    FEATURE_GASTOS && activeTab === "gastos"
+      ? searchTermGastos
+      : FEATURE_ORDENES_SEGUIMIENTO && activeTab === "ordenes"
+        ? searchTermOrdenes
+        : searchTerm;
   const handlePageSearchChange = useCallback(
     (v: string) => {
-      if (FEATURE_ORDENES_SEGUIMIENTO && activeTab === "ordenes") setSearchTermOrdenes(v);
+      if (FEATURE_GASTOS && activeTab === "gastos") setSearchTermGastos(v);
+      else if (FEATURE_ORDENES_SEGUIMIENTO && activeTab === "ordenes") setSearchTermOrdenes(v);
       else setSearchTerm(v);
     },
     [activeTab]
@@ -1760,6 +1799,164 @@ export default function PruebaPericiaPage() {
     }
   };
 
+  const loadGastos = async () => {
+    if (!FEATURE_GASTOS) return;
+    try {
+      setLoadingGastos(true);
+      setGastosLoadError(null);
+      const session = await requireSessionOrRedirect();
+      if (!session) return;
+
+      const { data, error } = await supabase
+        .from("gastos_anticipo")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        console.warn("[loadGastos] Supabase directo falló, intentando API:", error.message);
+        const res = await fetch("/api/gastos/list", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          const message = err.error || error.message || res.statusText;
+          setGastosLoadError(message);
+          setGastosData([]);
+          return;
+        }
+        const result = await res.json();
+        setGastosData(result.data || []);
+        if (result.warning) setMsg(result.warning);
+        return;
+      }
+
+      const rows: GastoAnticipoRow[] = await Promise.all(
+        (data || []).map(async (row) => {
+          let pdf_signed_url: string | null = null;
+          if (row.pdf_storage_path) {
+            const paths = [
+              row.pdf_storage_path,
+              String(row.pdf_storage_path).replace(/^gastos-pericia\//, ""),
+            ];
+            for (const p of paths) {
+              const { data: signed, error: signErr } = await supabase.storage
+                .from("gastos-pericia")
+                .createSignedUrl(p, 3600);
+              if (!signErr && signed?.signedUrl) {
+                pdf_signed_url = signed.signedUrl;
+                break;
+              }
+            }
+          }
+          return { ...(row as GastoAnticipoRow), pdf_signed_url };
+        })
+      );
+
+      setGastosData(rows);
+    } catch (err) {
+      console.error("Error en loadGastos:", err);
+      setGastosLoadError(err instanceof Error ? err.message : "Error al cargar gastos");
+      setGastosData([]);
+    } finally {
+      setLoadingGastos(false);
+    }
+  };
+
+  const handleNotificarGasto = async (gastoId: string) => {
+    try {
+      setGastosActionLoading(gastoId);
+      const session = await requireSessionOrRedirect();
+      if (!session) return;
+      const res = await fetch("/api/gastos/notificar", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ gasto_id: gastoId }),
+      });
+      const result = await res.json();
+      if (!res.ok) {
+        setMsg(result.error || "Error al notificar");
+        return;
+      }
+      await loadGastos();
+      setMsg(
+        result.notificados > 0
+          ? `Notificación enviada a ${result.notificados} destinatario(s)`
+          : "Ya estaba notificado"
+      );
+    } catch {
+      setMsg("Error al enviar a bandeja");
+    } finally {
+      setGastosActionLoading(null);
+    }
+  };
+
+  const handleMarcarRevisadoGasto = async (gastoId: string) => {
+    try {
+      setGastosActionLoading(gastoId);
+      const session = await requireSessionOrRedirect();
+      if (!session) return;
+      const res = await fetch("/api/gastos/marcar-revisado", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ gasto_id: gastoId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setMsg(err.error || "Error al marcar revisado");
+        return;
+      }
+      await loadGastos();
+    } catch {
+      setMsg("Error al marcar revisado");
+    } finally {
+      setGastosActionLoading(null);
+    }
+  };
+
+  const handleDownloadGasto = async (gasto: GastoAnticipoRow) => {
+    try {
+      const session = await requireSessionOrRedirect();
+      if (!session) return;
+      const res = await fetch(`/api/gastos/download?id=${gasto.id}`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (!res.ok) {
+        setMsg("Error al descargar PDF");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `anticipo_gastos_${gasto.numero}_${gasto.anio}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setMsg("Error al descargar PDF");
+    }
+  };
+
+  const gastosFiltrados = useMemo(() => {
+    const q = searchTermGastos.trim().toLowerCase();
+    if (!q) return gastosData;
+    return gastosData.filter((g) => {
+      const exp = `${g.jurisdiccion || ""} ${g.numero}/${g.anio}`.toLowerCase();
+      return (
+        exp.includes(q) ||
+        (g.caratula || "").toLowerCase().includes(q) ||
+        (g.juzgado || "").toLowerCase().includes(q) ||
+        (g.detalle || "").toLowerCase().includes(q) ||
+        (g.estado || "").toLowerCase().includes(q)
+      );
+    });
+  }, [gastosData, searchTermGastos]);
+
   // Función para normalizar juzgado para comparación
   const normalizarJuzgadoParaComparar = (j: string | null): string => {
     if (!j) return "";
@@ -1792,6 +1989,28 @@ export default function PruebaPericiaPage() {
       loadOrdenes();
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    if (FEATURE_GASTOS && activeTab === "gastos") {
+      loadGastos();
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (!FEATURE_GASTOS) return;
+    const tab = searchParams.get("tab");
+    const gastoId = searchParams.get("gasto_id");
+    if (tab === "gastos") {
+      setActiveTab("gastos");
+      if (gastoId && gastosData.length > 0) {
+        const found = gastosData.find((g) => g.id === gastoId);
+        if (found) {
+          setSelectedGasto(found);
+          setGastosDrawerOpen(true);
+        }
+      }
+    }
+  }, [searchParams, gastosData]);
 
   // Filtrar expedientes por Prueba/Pericia y juzgados
   const expedientesFiltrados = useMemo(() => {
@@ -2637,8 +2856,8 @@ export default function PruebaPericiaPage() {
         )}
       </div>
 
-      {/* Tabs (solo si el flag está activo) */}
-      {FEATURE_ORDENES_SEGUIMIENTO && (
+      {/* Tabs (solo si algún feature flag está activo) */}
+      {HAS_FEATURE_TABS && (
         <div style={{ 
           display: "flex", 
           gap: 8, 
@@ -2661,6 +2880,7 @@ export default function PruebaPericiaPage() {
           >
             Detección
           </button>
+          {FEATURE_ORDENES_SEGUIMIENTO && (
           <button
             onClick={() => setActiveTab("ordenes")}
             style={{
@@ -2677,6 +2897,29 @@ export default function PruebaPericiaPage() {
           >
             Órdenes/Seguimiento
           </button>
+          )}
+          {FEATURE_GASTOS && (
+          <button
+            onClick={() => {
+              setSearchTermGastos("");
+              setActiveTab("gastos");
+              void loadGastos();
+            }}
+            style={{
+              padding: "12px 24px",
+              background: activeTab === "gastos" ? "rgba(96,141,186,.2)" : "transparent",
+              border: "none",
+              borderBottom: activeTab === "gastos" ? "2px solid rgba(96,141,186,.8)" : "2px solid transparent",
+              color: "var(--text)",
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: "pointer",
+              transition: "all 0.2s ease",
+            }}
+          >
+            Gastos
+          </button>
+          )}
         </div>
       )}
 
@@ -3033,8 +3276,138 @@ export default function PruebaPericiaPage() {
         </div>
       )}
 
-      {/* Contenido del tab de Detección (o vista completa si el flag está desactivado) */}
-      {(FEATURE_ORDENES_SEGUIMIENTO ? activeTab === "deteccion" : true) && (
+      {/* Contenido del tab Gastos */}
+      {FEATURE_GASTOS && activeTab === "gastos" && (
+        <div>
+          {loadingGastos ? (
+            <div style={{ padding: "40px 20px", textAlign: "center", color: "var(--text)" }}>
+              Cargando anticipos de gastos...
+            </div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              {gastosLoadError && (
+                <div style={{
+                  marginBottom: 12,
+                  padding: "12px 16px",
+                  borderRadius: 8,
+                  background: "rgba(220,53,69,.12)",
+                  border: "1px solid rgba(220,53,69,.35)",
+                  color: "var(--text)",
+                  fontSize: 13,
+                }}>
+                  No se pudieron cargar los gastos: {gastosLoadError}
+                </div>
+              )}
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ borderBottom: "1px solid rgba(255,255,255,.1)" }}>
+                    {["Estado", "Expediente", "Carátula", "Juzgado", "Fecha", "fs", "Monto", "Plazo", "Art.", "PDF", "Acciones"].map((h) => (
+                      <th key={h} style={{ padding: "10px 8px", textAlign: "left", color: "var(--muted)", fontWeight: 600 }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {gastosFiltrados.length === 0 ? (
+                    <tr>
+                      <td colSpan={11} style={{ padding: 24, textAlign: "center", color: "var(--muted)" }}>
+                        {gastosData.length > 0
+                          ? "Sin resultados para la búsqueda actual"
+                          : "Sin registros de anticipo de gastos"}
+                      </td>
+                    </tr>
+                  ) : (
+                    gastosFiltrados.map((g) => {
+                      const expLabel = g.jurisdiccion
+                        ? `${g.jurisdiccion} ${String(g.numero).padStart(6, "0")}/${g.anio}`
+                        : `${g.numero}/${g.anio}`;
+                      const busy = gastosActionLoading === g.id;
+                      return (
+                        <tr
+                          key={g.id}
+                          style={{ borderBottom: "1px solid rgba(255,255,255,.06)", cursor: "pointer" }}
+                          onClick={() => { setSelectedGasto(g); setGastosDrawerOpen(true); }}
+                        >
+                          <td style={{ padding: "10px 8px" }}>
+                            <span style={{
+                              padding: "2px 8px",
+                              borderRadius: 4,
+                              fontSize: 11,
+                              fontWeight: 600,
+                              background: g.estado === "NUEVO" ? "rgba(255,193,7,.2)" : g.estado === "NOTIFICADO" ? "rgba(96,141,186,.2)" : "rgba(76,175,80,.2)",
+                            }}>{g.estado}</span>
+                          </td>
+                          <td style={{ padding: "10px 8px" }}>{expLabel}</td>
+                          <td style={{ padding: "10px 8px", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={g.caratula || ""}>{g.caratula || "—"}</td>
+                          <td style={{ padding: "10px 8px" }}>{g.juzgado || "—"}</td>
+                          <td style={{ padding: "10px 8px" }}>{g.actuacion_fecha || "—"}</td>
+                          <td style={{ padding: "10px 8px" }}>{g.actuacion_fs || "—"}</td>
+                          <td style={{ padding: "10px 8px" }}>{g.monto != null ? `$${Number(g.monto).toLocaleString("es-AR")}` : "—"}</td>
+                          <td style={{ padding: "10px 8px" }}>{g.plazo_dias != null ? `${g.plazo_dias} d` : "—"}</td>
+                          <td style={{ padding: "10px 8px" }}>{g.articulo || "—"}</td>
+                          <td style={{ padding: "10px 8px" }} onClick={(e) => e.stopPropagation()}>
+                            {g.pdf_signed_url ? (
+                              <a href={g.pdf_signed_url} target="_blank" rel="noopener noreferrer" style={{ color: "rgba(96,141,186,.9)" }}>Ver</a>
+                            ) : (
+                              <button type="button" onClick={() => handleDownloadGasto(g)} style={{ background: "none", border: "none", color: "rgba(96,141,186,.9)", cursor: "pointer", padding: 0 }}>Descargar</button>
+                            )}
+                          </td>
+                          <td style={{ padding: "10px 8px" }} onClick={(e) => e.stopPropagation()}>
+                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                              {g.estado === "NUEVO" && (
+                                <button type="button" disabled={busy} onClick={() => handleNotificarGasto(g.id)} style={{ fontSize: 11, padding: "4px 8px", cursor: "pointer" }}>
+                                  Enviar a bandeja
+                                </button>
+                              )}
+                              {g.estado !== "REVISADO" && (
+                                <button type="button" disabled={busy} onClick={() => handleMarcarRevisadoGasto(g.id)} style={{ fontSize: 11, padding: "4px 8px", cursor: "pointer" }}>
+                                  Revisado
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {gastosDrawerOpen && selectedGasto && (
+            <div style={{
+              position: "fixed", inset: 0, zIndex: 1000,
+              background: "rgba(0,0,0,.5)", display: "flex", justifyContent: "flex-end",
+            }} onClick={() => setGastosDrawerOpen(false)}>
+              <div style={{
+                width: "min(480px, 100%)", height: "100%", background: "var(--bg)",
+                borderLeft: "1px solid rgba(255,255,255,.1)", padding: 24, overflowY: "auto",
+              }} onClick={(e) => e.stopPropagation()}>
+                <h3 style={{ margin: "0 0 16px" }}>Anticipo de gastos</h3>
+                <p style={{ fontSize: 13, color: "var(--muted)", margin: "0 0 8px" }}>{selectedGasto.jurisdiccion} {selectedGasto.numero}/{selectedGasto.anio}</p>
+                <p style={{ fontSize: 13, margin: "0 0 16px" }}>{selectedGasto.caratula}</p>
+                <div style={{ fontSize: 13, marginBottom: 16 }}>
+                  <strong>Detalle:</strong>
+                  <p style={{ marginTop: 8, whiteSpace: "pre-wrap" }}>{selectedGasto.detalle}</p>
+                </div>
+                {selectedGasto.notificado_at && (
+                  <p style={{ fontSize: 12, color: "var(--muted)" }}>Notificado: {new Date(selectedGasto.notificado_at).toLocaleString("es-AR")}</p>
+                )}
+                <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
+                  {selectedGasto.pdf_signed_url && (
+                    <a href={selectedGasto.pdf_signed_url} target="_blank" rel="noopener noreferrer" style={{ padding: "8px 16px", background: "rgba(96,141,186,.2)", borderRadius: 8, fontSize: 13 }}>Ver PDF</a>
+                  )}
+                  <button type="button" onClick={() => handleDownloadGasto(selectedGasto)} style={{ padding: "8px 16px", borderRadius: 8, fontSize: 13, cursor: "pointer" }}>Descargar PDF</button>
+                  <button type="button" onClick={() => setGastosDrawerOpen(false)} style={{ padding: "8px 16px", borderRadius: 8, fontSize: 13, cursor: "pointer" }}>Cerrar</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Contenido del tab de Detección (o vista completa si ningún tab flag está activo) */}
+      {(HAS_FEATURE_TABS ? activeTab === "deteccion" : true) && (
         <>
 
       {/* Filtros */}
