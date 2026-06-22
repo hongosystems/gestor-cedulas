@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { pjnScraperSupabase } from "@/lib/pjn-scraper-supabase";
 import { colorPericia, periciaRenunciaObservaciones } from "@/lib/semaforo";
@@ -1241,7 +1241,7 @@ type GastoAnticipoRow = {
   match_regla: string | null;
 };
 
-export default function PruebaPericiaPage() {
+function PruebaPericiaPageContent() {
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
@@ -5128,5 +5128,19 @@ export default function PruebaPericiaPage() {
         confirming={renunciando}
       />
     </main>
+  );
+}
+
+export default function PruebaPericiaPage() {
+  return (
+    <Suspense
+      fallback={
+        <main style={{ padding: "40px 20px", textAlign: "center", color: "var(--text)" }}>
+          Cargando prueba/pericia…
+        </main>
+      }
+    >
+      <PruebaPericiaPageContent />
+    </Suspense>
   );
 }
