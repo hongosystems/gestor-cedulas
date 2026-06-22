@@ -43,7 +43,7 @@ export async function POST(req: Request) {
     const user = await getUserFromRequest(req);
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const { transferId } = await req.json();
+    const { transferId, version: versionParam } = await req.json();
     if (!transferId) return NextResponse.json({ error: "Falta transferId" }, { status: 400 });
 
     const svc = supabaseService();
@@ -59,14 +59,18 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    // Última versión
-    const { data: v } = await svc
+    let query = svc
       .from("file_transfer_versions")
       .select("storage_path, version")
-      .eq("transfer_id", transferId)
-      .order("version", { ascending: false })
-      .limit(1)
-      .single();
+      .eq("transfer_id", transferId);
+
+    if (typeof versionParam === "number" && Number.isFinite(versionParam)) {
+      query = query.eq("version", versionParam).limit(1);
+    } else {
+      query = query.order("version", { ascending: false }).limit(1);
+    }
+
+    const { data: v } = await query.maybeSingle();
 
     if (!v?.storage_path) {
       return NextResponse.json({ error: "No hay archivo para descargar" }, { status: 404 });

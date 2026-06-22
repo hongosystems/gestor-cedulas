@@ -1,4 +1,5 @@
 import { displayName, docTypeLabel, snippet, type DocType, type Profile } from "@/lib/bandeja-utils";
+import { displayNameFromTransferStoragePath } from "@/lib/transfer-attachments";
 
 export type TransferSearchRow = {
   id: string;
@@ -10,7 +11,7 @@ export type TransferSearchRow = {
   expediente_ref: string | null;
   expediente_caratula: string | null;
   expediente_juzgado: string | null;
-  file_transfer_versions?: { storage_path: string }[] | null;
+  file_transfer_versions?: { storage_path: string; version?: number }[] | null;
 };
 
 /** Colapsa espacios/saltos de línea; minúsculas sin acentos (lopez = López). */
@@ -35,13 +36,17 @@ export function textMatchesQuery(haystack: string, needle: string): boolean {
   return tokens.every((tok) => h.includes(tok));
 }
 
-function normalizeVersions(raw: unknown): { storage_path: string }[] {
+function normalizeVersions(raw: unknown): { storage_path: string; version?: number }[] {
   if (!raw) return [];
   if (Array.isArray(raw)) {
-    return raw.filter((v): v is { storage_path: string } => Boolean(v && typeof v === "object"));
+    return raw
+      .filter((v): v is { storage_path: string; version?: number } =>
+        Boolean(v && typeof v === "object" && "storage_path" in v)
+      )
+      .sort((a, b) => (a.version ?? 0) - (b.version ?? 0));
   }
   if (typeof raw === "object" && raw !== null && "storage_path" in raw) {
-    return [raw as { storage_path: string }];
+    return [raw as { storage_path: string; version?: number }];
   }
   return [];
 }
@@ -87,7 +92,7 @@ export function getTransferSearchText(
   const sender = displayName(profiles[t.sender_user_id]);
   const recipient = displayName(profiles[t.recipient_user_id]);
   const attachmentNames = (t.file_transfer_versions ?? [])
-    .map((v) => v.storage_path?.split("/").pop())
+    .map((v) => displayNameFromTransferStoragePath(v.storage_path || ""))
     .filter(Boolean) as string[];
 
   return normalizeSearchText(

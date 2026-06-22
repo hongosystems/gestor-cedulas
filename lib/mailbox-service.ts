@@ -842,15 +842,17 @@ export async function importFileTransferToMailbox(
     .from("file_transfer_versions")
     .select("*")
     .eq("transfer_id", transferId)
-    .order("version", { ascending: false })
-    .limit(1);
+    .order("version", { ascending: true });
 
-  const v = versions?.[0];
-  if (v?.storage_path) {
+  for (const v of versions || []) {
+    if (!v?.storage_path) continue;
     const ext = v.storage_path.match(/\.(\w+)$/)?.[0] || "";
+    const leaf = v.storage_path.split("/").pop() || "";
+    const fromPath = leaf.match(/^v\d+-(.+)$/)?.[1];
     const baseName =
+      fromPath ||
       (t.title || "").trim() ||
-      v.storage_path.split("/").pop() ||
+      leaf ||
       `adjunto${ext || ".pdf"}`;
     await svc.from("mailbox_attachments").insert({
       id: crypto.randomUUID(),

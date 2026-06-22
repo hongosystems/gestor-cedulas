@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { importFileTransferToMailbox } from "@/lib/mailbox-service";
 import { supabaseService } from "@/lib/supabase-server";
+import {
+  assertValidTransferFile,
+  contentTypeForTransferExt,
+  MAX_TRANSFER_ATTACHMENTS,
+  transferAttachmentStoragePath,
+} from "@/lib/transfer-attachments";
 import { userHasMailboxWorkflow } from "@/lib/unread-notifications";
 import { createClient } from "@supabase/supabase-js";
 
@@ -97,8 +103,22 @@ export async function POST(req: Request) {
     const title = String(form.get("title") || "").trim();
     const message = String(form.get("message") || "").trim();
     const expediente_ref = String(form.get("expediente_ref") || "").trim() || null;
-    const file = form.get("file");
-    const hasFile = file instanceof File && (file.size ?? 0) > 0;
+    const rawFiles = [
+      ...form.getAll("files").filter((f): f is File => f instanceof File && (f.size ?? 0) > 0),
+    ];
+    const legacyFile = form.get("file");
+    if (rawFiles.length === 0 && legacyFile instanceof File && (legacyFile.size ?? 0) > 0) {
+      rawFiles.push(legacyFile);
+    }
+
+    if (rawFiles.length > MAX_TRANSFER_ATTACHMENTS) {
+      return NextResponse.json(
+        { error: `Podés adjuntar hasta ${MAX_TRANSFER_ATTACHMENTS} archivos por envío.` },
+        { status: 400 }
+      );
+    }
+
+    const hasFile = rawFiles.length > 0;
 
     if (!recipient_user_id) {
       return NextResponse.json({ error: "Falta recipient_user_id" }, { status: 400 });
@@ -113,31 +133,21 @@ export async function POST(req: Request) {
       );
     }
 
-    let ext: string | null = null;
-    let contentType: string | null = null;
-
-    if (hasFile && file instanceof File) {
-      const name = (file.name || "").toLowerCase();
-      const allowedExts = [".docx", ".pdf", ".png", ".jpg", ".jpeg", ".zip"];
-      ext = allowedExts.find((e) => name.endsWith(e)) ?? null;
-
-      if (!ext) {
+    const parsedFiles: { file: File; ext: string; contentType: string }[] = [];
+    for (const file of rawFiles) {
+      try {
+        const ext = assertValidTransferFile(file.name, file.size);
+        parsedFiles.push({
+          file,
+          ext,
+          contentType: contentTypeForTransferExt(ext),
+        });
+      } catch (e) {
         return NextResponse.json(
-          { error: "Solo se permite .docx, .pdf, .png, .jpg, .jpeg o .zip" },
+          { error: e instanceof Error ? e.message : "Archivo inválido." },
           { status: 400 }
         );
       }
-
-      contentType =
-        ext === ".docx"
-          ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-          : ext === ".pdf"
-            ? "application/pdf"
-            : ext === ".png"
-              ? "image/png"
-              : ext === ".jpg" || ext === ".jpeg"
-                ? "image/jpeg"
-                : "application/zip";
     }
 
     const svc = supabaseService();
@@ -174,10 +184,11 @@ export async function POST(req: Request) {
 
     const transferId = t.id as string;
 
-    if (hasFile && file instanceof File && ext && contentType) {
-      const version = 1;
+    for (let i = 0; i < parsedFiles.length; i++) {
+      const { file, ext, contentType } = parsedFiles[i];
+      const version = i + 1;
       const buf = Buffer.from(await file.arrayBuffer());
-      const storage_path = `transfers/${transferId}/v${version}${ext}`;
+      const storage_path = transferAttachmentStoragePath(transferId, version, file.name, ext);
 
       const { error: upErr } = await svc.storage.from("transfers").upload(storage_path, buf, {
         contentType,
@@ -186,7 +197,7 @@ export async function POST(req: Request) {
 
       if (upErr) {
         return NextResponse.json(
-          { error: `No se pudo subir el archivo: ${upErr.message}` },
+          { error: `No se pudo subir ${file.name}: ${upErr.message}` },
           { status: 500 }
         );
       }
@@ -237,7 +248,11 @@ export async function POST(req: Request) {
       notificationBody += `. ${preview}`;
     }
     if (hasFile) {
-      notificationBody += ' Abrí Recibidos para ver el contenido o descargar el adjunto.';
+      const attachHint =
+        parsedFiles.length > 1
+          ? ` (${parsedFiles.length} adjuntos)`
+          : "";
+      notificationBody += `${attachHint}. Abrí Recibidos para ver el contenido o descargar los adjuntos.`;
     } else {
       notificationBody += " Abrí Recibidos para leer el mensaje.";
     }
@@ -266,6 +281,7 @@ export async function POST(req: Request) {
         title: title || null,
         message: message || null,
         has_attachment: hasFile,
+        attachment_count: parsedFiles.length,
         ...(expedienteData.caratula ? { caratula: expedienteData.caratula } : {}),
         ...(expedienteData.juzgado ? { juzgado: expedienteData.juzgado } : {}),
         ...(expedienteData.numero ? { numero: expedienteData.numero } : {}),

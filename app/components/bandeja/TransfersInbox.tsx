@@ -16,14 +16,15 @@ import {
   transferSubject,
   type TransferSearchRow,
 } from "@/lib/bandeja-search";
+import { displayNameFromTransferStoragePath } from "@/lib/transfer-attachments";
 
 type Transfer = TransferSearchRow & { created_at: string };
 
 const TRANSFER_SELECT =
-  "id, sender_user_id, recipient_user_id, doc_type, title, message, expediente_ref, expediente_caratula, expediente_juzgado, created_at, file_transfer_versions(storage_path)";
+  "id, sender_user_id, recipient_user_id, doc_type, title, message, expediente_ref, expediente_caratula, expediente_juzgado, created_at, file_transfer_versions(storage_path, version)";
 
 const TRANSFER_SELECT_LEGACY =
-  "id, sender_user_id, recipient_user_id, doc_type, title, created_at, file_transfer_versions(storage_path)";
+  "id, sender_user_id, recipient_user_id, doc_type, title, created_at, file_transfer_versions(storage_path, version)";
 
 function mapTransferRows(data: Record<string, unknown>[] | null): Transfer[] {
   return (data ?? []).map((row) => ({
@@ -128,7 +129,7 @@ export default function TransfersInbox({ mode, searchQuery = "" }: TransfersInbo
     setItems(data);
   }
 
-  async function download(transferId: string) {
+  async function download(transferId: string, version?: number) {
     setMsg("");
     const { data: sess } = await supabase.auth.getSession();
     const token = sess.session?.access_token;
@@ -137,7 +138,7 @@ export default function TransfersInbox({ mode, searchQuery = "" }: TransfersInbo
     const res = await fetch("/api/transfers/sign-download", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ transferId }),
+      body: JSON.stringify({ transferId, ...(version != null ? { version } : {}) }),
     });
 
     const json = await res.json().catch(() => ({}));
@@ -227,6 +228,8 @@ export default function TransfersInbox({ mode, searchQuery = "" }: TransfersInbo
 
   const isReceived = mode === "recibidos";
   const selectedHasFile = selected ? transferHasAttachment(selected) : false;
+  const selectedAttachments = selected?.file_transfer_versions ?? [];
+  const selectedAttachmentCount = selectedAttachments.length;
 
   return (
     <>
@@ -276,6 +279,9 @@ export default function TransfersInbox({ mode, searchQuery = "" }: TransfersInbo
                   {hasFile ? (
                     <span className="bandeja-row-attach" title="Con adjunto">
                       📎
+                      {(t.file_transfer_versions?.length ?? 0) > 1
+                        ? ` ${t.file_transfer_versions!.length}`
+                        : ""}
                     </span>
                   ) : (
                     <span className="bandeja-row-attach bandeja-row-attach--muted" title="Solo mensaje">
@@ -328,9 +334,22 @@ export default function TransfersInbox({ mode, searchQuery = "" }: TransfersInbo
             </div>
 
             <div className="bandeja-detail-actions">
-              {selectedHasFile && (
-                <button type="button" className="btn primary" onClick={() => download(selected.id)}>
-                  Descargar {isReceived ? "" : "última versión"}
+              {selectedHasFile && selectedAttachmentCount === 1 && (
+                <button
+                  type="button"
+                  className="btn primary"
+                  onClick={() => download(selected.id, selectedAttachments[0]?.version)}
+                >
+                  Descargar
+                </button>
+              )}
+              {selectedHasFile && selectedAttachmentCount > 1 && (
+                <button
+                  type="button"
+                  className="btn primary"
+                  onClick={() => download(selected.id)}
+                >
+                  Descargar último
                 </button>
               )}
               {isReceived && selectedHasFile && (
@@ -373,10 +392,37 @@ export default function TransfersInbox({ mode, searchQuery = "" }: TransfersInbo
                 </p>
               )}
               {selectedHasFile ? (
-                <p className="helper" style={{ margin: selected.message ? "12px 0 0" : 0 }}>
-                  La descarga trae la <strong>última versión</strong> del archivo adjunto.
-                  {isReceived && " Podés redirigirlo o subir una nueva versión en .docx."}
-                </p>
+                <div style={{ margin: selected.message ? "12px 0 0" : 0 }}>
+                  <p className="helper" style={{ margin: "0 0 8px" }}>
+                    {selectedAttachmentCount > 1
+                      ? `${selectedAttachmentCount} archivos adjuntos:`
+                      : "Archivo adjunto:"}
+                    {selectedAttachmentCount === 1 &&
+                      isReceived &&
+                      " Podés redirigirlo o subir una nueva versión en .docx."}
+                    {selectedAttachmentCount > 1 &&
+                      isReceived &&
+                      " Podés descargar cada uno por separado o subir una nueva versión del documento principal (.docx)."}
+                  </p>
+                  <div className="bandeja-file-list">
+                    {selectedAttachments.map((att) => {
+                      const name = displayNameFromTransferStoragePath(att.storage_path);
+                      return (
+                        <div key={`${att.storage_path}-${att.version ?? 0}`} className="bandeja-file-chip">
+                          <span>📎 {name}</span>
+                          <button
+                            type="button"
+                            className="btn"
+                            style={{ padding: "4px 10px", fontSize: 11 }}
+                            onClick={() => download(selected.id, att.version)}
+                          >
+                            Descargar
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               ) : (
                 <p className="helper" style={{ margin: selected.message ? "12px 0 0" : 0 }}>
                   Envío solo mensaje, sin archivo adjunto.

@@ -7,6 +7,11 @@ import ExpedienteAutocomplete, { type ExpedienteOption } from "@/app/components/
 import RecipientMultiSelect, {
   formatRecipientsSummary,
 } from "@/app/components/bandeja/RecipientMultiSelect";
+import {
+  assertValidTransferFile,
+  MAX_TRANSFER_ATTACHMENT_BYTES,
+  MAX_TRANSFER_ATTACHMENTS,
+} from "@/lib/transfer-attachments";
 
 type SendTransferFormProps = {
   embedded?: boolean;
@@ -35,7 +40,7 @@ export default function SendTransferForm({
   const [title, setTitle] = useState("");
   const [expediente, setExpediente] = useState<ExpedienteOption | null>(null);
   const [message, setMessage] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [sending, setSending] = useState(false);
 
@@ -74,9 +79,31 @@ export default function SendTransferForm({
     [users, recipients]
   );
 
-  const pickFile = useCallback((f: File | null) => {
-    if (!f) return;
-    setFile(f);
+  const addFiles = useCallback((incoming: FileList | File[] | null) => {
+    if (!incoming || incoming.length === 0) return;
+    const toAdd = Array.from(incoming);
+    setFiles((prev) => {
+      const next = [...prev];
+      for (const f of toAdd) {
+        if (next.length >= MAX_TRANSFER_ATTACHMENTS) {
+          setMsg(`Podés adjuntar hasta ${MAX_TRANSFER_ATTACHMENTS} archivos.`);
+          return prev;
+        }
+        try {
+          assertValidTransferFile(f.name, f.size);
+          next.push(f);
+        } catch (e) {
+          setMsg(e instanceof Error ? e.message : "Archivo inválido.");
+          return prev;
+        }
+      }
+      setMsg("");
+      return next;
+    });
+  }, []);
+
+  const removeFile = useCallback((index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
   async function onSend() {
@@ -85,17 +112,8 @@ export default function SendTransferForm({
     if (recipients.length === 0) return setMsg("Elegí al menos un destinatario.");
 
     const messageText = message.trim();
-    if (!messageText && !file) {
+    if (!messageText && files.length === 0) {
       return setMsg("Escribí un mensaje o adjuntá un archivo.");
-    }
-
-    if (file) {
-      const allowedExts = [".docx", ".pdf", ".png", ".jpg", ".jpeg", ".zip"];
-      const name = file.name.toLowerCase();
-      const ok = allowedExts.some((ext) => name.endsWith(ext));
-      if (!ok) {
-        return setMsg("El archivo debe ser .docx, .pdf, .png, .jpg, .jpeg o .zip.");
-      }
     }
 
     setSending(true);
@@ -121,8 +139,8 @@ export default function SendTransferForm({
         if (expediente?.ref) {
           fd.append("expediente_ref", expediente.ref);
         }
-        if (file) {
-          fd.append("file", file);
+        for (const f of files) {
+          fd.append("files", f);
         }
 
         try {
@@ -185,7 +203,7 @@ export default function SendTransferForm({
         setTitle("");
         setMessage("");
         setExpediente(null);
-        setFile(null);
+        setFiles([]);
         setRecipients([]);
         onSuccess?.();
       }
@@ -300,39 +318,51 @@ export default function SendTransferForm({
               onDrop={(e) => {
                 e.preventDefault();
                 setDragOver(false);
-                pickFile(e.dataTransfer.files?.[0] ?? null);
+                addFiles(e.dataTransfer.files);
               }}
             >
               <input
                 type="file"
+                multiple
                 accept=".docx,.pdf,.png,.jpg,.jpeg,.zip,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf,image/png,image/jpeg,application/zip,application/x-zip-compressed"
-                onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
-                disabled={sending}
+                onChange={(e) => {
+                  addFiles(e.target.files);
+                  e.target.value = "";
+                }}
+                disabled={sending || files.length >= MAX_TRANSFER_ATTACHMENTS}
               />
               <div className="bandeja-dropzone-title">
-                Opcional — arrastrá un archivo o hacé click para adjuntar
+                Opcional — arrastrá archivos o hacé click para adjuntar
               </div>
-              <div className="bandeja-dropzone-hint">.docx · .pdf · .png · .jpg · .jpeg · .zip</div>
+              <div className="bandeja-dropzone-hint">
+                .docx · .pdf · .png · .jpg · .jpeg · .zip · máx.{" "}
+                {MAX_TRANSFER_ATTACHMENT_BYTES / (1024 * 1024)} MB c/u · hasta{" "}
+                {MAX_TRANSFER_ATTACHMENTS} archivos
+              </div>
             </div>
 
-            {file && (
-              <div className="bandeja-file-chip">
-                <span>
-                  📎 {file.name} · {formatFileSize(file.size)}
-                </span>
-                <button
-                  type="button"
-                  className="btn"
-                  style={{ padding: "4px 10px", fontSize: 11 }}
-                  onClick={() => setFile(null)}
-                  disabled={sending}
-                >
-                  Quitar
-                </button>
+            {files.length > 0 && (
+              <div className="bandeja-file-list">
+                {files.map((f, index) => (
+                  <div key={`${f.name}-${index}`} className="bandeja-file-chip">
+                    <span>
+                      📎 {f.name} · {formatFileSize(f.size)}
+                    </span>
+                    <button
+                      type="button"
+                      className="btn"
+                      style={{ padding: "4px 10px", fontSize: 11 }}
+                      onClick={() => removeFile(index)}
+                      disabled={sending}
+                    >
+                      Quitar
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
               <p className="bandeja-attachments-hint">
-                Podés enviar solo mensaje, solo archivo, o ambos.
+                Podés enviar solo mensaje, solo archivos, o ambos.
               </p>
               </div>
             </div>
@@ -393,8 +423,12 @@ export default function SendTransferForm({
                 <dd>{message.trim() ? `${message.trim().slice(0, 120)}${message.trim().length > 120 ? "…" : ""}` : "—"}</dd>
               </div>
               <div>
-                <dt>Adjunto</dt>
-                <dd>{file ? `${file.name} (${formatFileSize(file.size)})` : "Sin adjunto"}</dd>
+                <dt>Adjuntos</dt>
+                <dd>
+                  {files.length > 0
+                    ? files.map((f) => `${f.name} (${formatFileSize(f.size)})`).join(", ")
+                    : "Sin adjuntos"}
+                </dd>
               </div>
             </dl>
           </div>
@@ -404,7 +438,7 @@ export default function SendTransferForm({
             <ul>
               <li>El expediente es opcional; buscá por número o carátula.</li>
               <li>La descarga siempre trae la última versión del archivo.</li>
-              <li>Al menos mensaje o adjunto; expediente opcional.</li>
+              <li>Al menos mensaje o adjunto; hasta {MAX_TRANSFER_ATTACHMENTS} archivos.</li>
               <li>Cada destinatario recibe su propia copia y notificación.</li>
             </ul>
           </div>
