@@ -1215,7 +1215,11 @@ type PruebaOrdenesColFilter = "semaforo" | "estado_gestion" | "centro_medico";
 // IMPORTANTE: Para activar, crear .env.local con: NEXT_PUBLIC_FEATURE_ORDENES_SEGUIMIENTO=true
 // y reiniciar el servidor de desarrollo
 const FEATURE_ORDENES_SEGUIMIENTO = process.env.NEXT_PUBLIC_FEATURE_ORDENES_SEGUIMIENTO === "true";
-const FEATURE_GASTOS = process.env.NEXT_PUBLIC_FEATURE_GASTOS === "true";
+// Visible si flag explícito true, o si órdenes seguimiento ya está activo (salvo GASTOS=false)
+const FEATURE_GASTOS =
+  process.env.NEXT_PUBLIC_FEATURE_GASTOS === "true" ||
+  (process.env.NEXT_PUBLIC_FEATURE_GASTOS !== "false" &&
+    FEATURE_ORDENES_SEGUIMIENTO);
 const HAS_FEATURE_TABS = FEATURE_ORDENES_SEGUIMIENTO || FEATURE_GASTOS;
 
 type PruebaPericiaTab = "deteccion" | "ordenes" | "gastos";
