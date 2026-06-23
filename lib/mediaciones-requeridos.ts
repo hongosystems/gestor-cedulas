@@ -13,7 +13,7 @@ export type AseguradoraFormItem = {
   matricula: string;
   denominacion: string;
   cuit: string;
-  domicilio?: { direccion?: string; localidad?: string; provincia?: string };
+  domicilio?: { direccion?: string; localidad?: string; provincia?: string } | null;
   poliza: string;
   numeroSiniestro: string;
   domicilioManual: boolean;
