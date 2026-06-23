@@ -4633,6 +4633,34 @@ function PruebaPericiaPageContent() {
                   🔄 Reprogramar Turno
                 </button>
               )}
+
+              {/* Botón: Nuevo turno tras estudio realizado */}
+              {selectedOrden.gestion &&
+               selectedOrden.gestion.estado === "ESTUDIO_REALIZADO" && (
+                <button
+                  onClick={() => {
+                    setTurnoForm({
+                      centro_medico: selectedOrden.gestion?.centro_medico || "",
+                      fecha: "",
+                      hora: "",
+                    });
+                    setShowTurnoForm(true);
+                  }}
+                  style={{
+                    padding: "10px 16px",
+                    background: "rgba(96,141,186,.2)",
+                    border: "1px solid rgba(96,141,186,.4)",
+                    borderRadius: 8,
+                    color: "var(--text)",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  📅 Asignar nuevo turno de estudio
+                </button>
+              )}
               </div>
             )}
           </div>
@@ -4887,7 +4915,11 @@ function PruebaPericiaPageContent() {
               border: "1px solid rgba(255,255,255,.1)",
             }}>
               <h4 style={{ margin: "0 0 16px 0", fontSize: 14, fontWeight: 700, color: "var(--text)" }}>
-                {selectedOrden.gestion?.turno_fecha_hora ? "Reprogramar Turno" : "Asignar Turno"}
+                {selectedOrden.gestion?.estado === "ESTUDIO_REALIZADO"
+                  ? "Asignar nuevo turno de estudio"
+                  : selectedOrden.gestion?.turno_fecha_hora
+                    ? "Reprogramar Turno"
+                    : "Asignar Turno"}
               </h4>
               
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -4967,6 +4999,8 @@ function PruebaPericiaPageContent() {
 
                         // Combinar fecha y hora en ISO string
                         const fechaHora = new Date(`${turnoForm.fecha}T${turnoForm.hora}:00`).toISOString();
+                        const reabrirSeguimiento =
+                          selectedOrden.gestion?.estado === "ESTUDIO_REALIZADO";
 
                         const res = await fetch("/api/ordenes-medicas/update-estado", {
                           method: "POST",
@@ -4979,11 +5013,16 @@ function PruebaPericiaPageContent() {
                             estado: "TURNO_CONFIRMADO",
                             centro_medico: turnoForm.centro_medico.trim(),
                             turno_fecha_hora: fechaHora,
+                            ...(reabrirSeguimiento ? { fecha_estudio_realizado: null } : {}),
                           }),
                         });
 
                         if (res.ok) {
-                          setMsg("Turno asignado exitosamente");
+                          setMsg(
+                            reabrirSeguimiento
+                              ? "Nuevo turno asignado — seguimiento reabierto"
+                              : "Turno asignado exitosamente"
+                          );
                           setShowTurnoForm(false);
                           setTurnoForm({ centro_medico: "", fecha: "", hora: "" });
                           await loadOrdenes();
