@@ -347,10 +347,10 @@ export async function initMailboxComposeWithAttachments(
   });
   const { threadId, messageId } = await createMailboxMessageRecords(svc, senderId, input, ctx);
 
-  const uploads = fileMetas.map((fileMeta) => {
+  const uploads = fileMetas.map((fileMeta, index) => {
     const ext = extFromMailboxFileName(fileMeta.fileName)!;
     const attachmentId = crypto.randomUUID();
-    const version = 1;
+    const version = index + 1;
     const storage_path = mailboxAttachmentStoragePath(messageId, attachmentId, version, ext);
     return {
       attachment_id: attachmentId,
@@ -1294,7 +1294,12 @@ export async function uploadMailboxAttachmentVersion(
     throw new Error("Forbidden");
   }
 
-  const nextVersion = (prev.version || 1) + 1;
+  const { data: siblings } = await svc
+    .from("mailbox_attachments")
+    .select("version")
+    .eq("message_id", prev.message_id);
+  const maxVersion = Math.max(0, ...(siblings || []).map((row) => row.version || 0));
+  const nextVersion = maxVersion + 1;
   const newId = crypto.randomUUID();
   const storage_path = `mailbox/${prev.message_id}/${newId}/v${nextVersion}.docx`;
   const buf = Buffer.from(await file.arrayBuffer());
