@@ -5,6 +5,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import AseguradorasStep from "./_components/AseguradorasStep";
+import { buildRequeridosInsertRows } from "@/lib/mediaciones-requeridos";
 
 const LETRADO_CARACTER = ["Apoderado", "Patrocinante", "Apoderado y Patrocinante"];
 const REQ_CONDICION = ["Conductor", "Asegurado", "Propietario", "Conductor y asegurado", "Otro"];
@@ -274,41 +275,7 @@ export default function NuevaMediacionPage() {
       await supabase.from("mediacion_requirentes").insert(requirenteRows);
     }
 
-    const reqRows = requeridos.map((r, i) => ({
-      mediacion_id: mediacion.id,
-      nombre: r.nombre.trim() || "—",
-      empresa_nombre_razon_social: r.empresa_nombre_razon_social.trim() || null,
-      condicion: null,
-      domicilio: r.domicilio.trim() || null,
-      lesiones: r.lesiones || null,
-      es_aseguradora: false,
-      aseguradora_nombre: null,
-      aseguradora_domicilio: null,
-      orden: i,
-    }));
-    const aseguradoraRows = aseguradoras
-      .filter((a) => (a.denominacion || "").trim() !== "")
-      .map((a, i) => {
-        const domicilioDireccion = a.domicilio?.direccion?.trim() || "";
-        const domicilioLocalidad = a.domicilio?.localidad?.trim() || "";
-        const domicilioProvincia = a.domicilio?.provincia?.trim() || "";
-        const domicilioParts = [domicilioDireccion, domicilioLocalidad, domicilioProvincia].filter(Boolean);
-
-        return {
-          mediacion_id: mediacion.id,
-          nombre: "—",
-          empresa_nombre_razon_social: null,
-          condicion: null,
-          domicilio: null,
-          lesiones: null,
-          es_aseguradora: true,
-          aseguradora_nombre: a.denominacion.trim(),
-          aseguradora_domicilio: domicilioParts.length > 0 ? domicilioParts.join(", ") : null,
-          orden: reqRows.length + i,
-        };
-      });
-
-    const requeridosToInsert = [...reqRows, ...aseguradoraRows];
+    const requeridosToInsert = buildRequeridosInsertRows(mediacion.id, requeridos, aseguradoras);
     if (requeridosToInsert.length > 0) {
       await supabase.from("mediacion_requeridos").insert(requeridosToInsert);
     }

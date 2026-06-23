@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseService } from "@/lib/supabase-server";
 import { getUserFromRequest, getMediacionesRole } from "@/lib/auth-api";
+import {
+  domicilioRequeridoPdf,
+  empresaRequeridoPdf,
+} from "@/lib/mediaciones-requeridos";
 import jsPDF from "jspdf";
 
 export const runtime = "nodejs";
@@ -124,10 +128,11 @@ function buildCartaDocumentoPdf(mediacion: any, requeridos: any[], requirentesRo
     font(10, false);
     requeridos.forEach((r: any) => {
       fmt("Nombre", r.nombre);
+      fmt("Empresa / razón social", empresaRequeridoPdf(r) || undefined);
       fmt("Condición", r.condicion);
-      fmt("Domicilio", r.domicilio);
+      fmt("Domicilio", domicilioRequeridoPdf(r) || undefined);
       fmt("Lesiones", r.lesiones);
-      if (r.es_aseguradora) {
+      if (r.es_aseguradora && r.aseguradora_nombre && r.aseguradora_nombre !== empresaRequeridoPdf(r)) {
         fmt("Aseguradora", r.aseguradora_nombre);
         fmt("Domicilio aseguradora", r.aseguradora_domicilio);
       }

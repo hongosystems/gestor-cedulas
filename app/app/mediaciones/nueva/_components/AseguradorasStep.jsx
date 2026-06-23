@@ -137,6 +137,7 @@ function AseguradoraCard({
         loading={loading}
         aseguradoras={aseguradoras}
         onSelect={onSelect}
+        onManualChange={(text) => onUpdate({ denominacion: text })}
       />
 
       {yaSeleccionada && (
@@ -219,7 +220,7 @@ function AseguradoraCard({
   );
 }
 
-function AseguradoraCombobox({ value, loading, aseguradoras, onSelect }) {
+function AseguradoraCombobox({ value, loading, aseguradoras, onSelect, onManualChange }) {
   const [query, setQuery] = useState(value);
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
@@ -276,12 +277,20 @@ function AseguradoraCombobox({ value, loading, aseguradoras, onSelect }) {
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
+            onManualChange?.(e.target.value);
             setOpen(true);
             setHighlight(0);
           }}
+          onBlur={() => {
+            const trimmed = query.trim();
+            if (trimmed && trimmed !== value) {
+              onManualChange?.(trimmed);
+            }
+            window.setTimeout(() => setOpen(false), 150);
+          }}
           onFocus={() => setOpen(true)}
           onKeyDown={handleKey}
-          placeholder={loading ? 'Cargando...' : 'Buscar aseguradora...'}
+          placeholder={loading ? 'Cargando...' : 'Buscar o escribir aseguradora...'}
           disabled={loading}
           className="input"
           autoComplete="off"

@@ -4,6 +4,14 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import AseguradorasStep from "@/app/app/mediaciones/nueva/_components/AseguradorasStep";
+import { mediacionesFetch } from "@/lib/mediaciones-fetch";
+import {
+  buildRequeridosPatchPayload,
+  requeridosFromDb,
+  type AseguradoraFormItem,
+  type RequeridoForm,
+} from "@/lib/mediaciones-requeridos";
 
 const LETRADO_CARACTER = ["Apoderado", "Patrocinante", "Apoderado y Patrocinante"];
 const REQ_CONDICION = ["Conductor", "Asegurado", "Propietario", "Conductor y asegurado", "Otro"];
@@ -51,13 +59,7 @@ function ddmmaaaaToISO(ddmmaaaa: string): string | null {
   return date.toISOString().slice(0, 10);
 }
 
-type Requerido = {
-  id: string;
-  nombre: string;
-  empresa_nombre_razon_social: string;
-  domicilio: string;
-  lesiones: string;
-};
+type Requerido = RequeridoForm;
 
 async function requireSessionOrRedirect() {
   const { data } = await supabase.auth.getSession();
@@ -106,6 +108,7 @@ export default function EditarMediacionPage() {
   const [lugar_atencion, setLugar_atencion] = useState("");
   const [lesiones_ambos, setLesiones_ambos] = useState("");
   const [requeridos, setRequeridos] = useState<Requerido[]>([]);
+  const [aseguradoras, setAseguradoras] = useState<AseguradoraFormItem[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -125,9 +128,7 @@ export default function EditarMediacionPage() {
         return;
       }
 
-      const res = await fetch(`/api/mediaciones/${id}`, {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
+      const res = await mediacionesFetch(`/api/mediaciones/${id}`);
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json.data) {
         const errorMsg = json.error || "Mediación no encontrada";
@@ -168,17 +169,13 @@ export default function EditarMediacionPage() {
       setIntervino(m.intervino || "");
       setLugar_atencion(m.lugar_atencion || "");
       setLesiones_ambos(m.lesiones_ambos || "");
+      const parsed = requeridosFromDb(m.requeridos || []);
       setRequeridos(
-        (m.requeridos || []).length > 0
-          ? (m.requeridos || []).map((r: any, i: number) => ({
-              id: r.id || String(i),
-              nombre: r.nombre || "",
-              empresa_nombre_razon_social: r.empresa_nombre_razon_social || "",
-              domicilio: r.domicilio || "",
-              lesiones: r.lesiones || "",
-            }))
-          : [{ id: "1", nombre: "", empresa_nombre_razon_social: "", domicilio: "", lesiones: "" }]
+        parsed.requeridos.length > 0
+          ? parsed.requeridos
+          : [{ id: crypto.randomUUID(), nombre: "", empresa_nombre_razon_social: "", domicilio: "", lesiones: "" }]
       );
+      setAseguradoras(parsed.aseguradoras);
       setLoading(false);
     })();
   }, [id, router]);
@@ -202,6 +199,7 @@ export default function EditarMediacionPage() {
   }
   function removeRequerido(rid: string) {
     setRequeridos((prev) => prev.filter((r) => r.id !== rid));
+    setAseguradoras((prev) => prev.filter((a) => a.requeridoId !== rid));
   }
   function updateRequerido(rid: string, field: keyof Requerido, value: string | boolean) {
     setRequeridos((prev) => prev.map((r) => (r.id === rid ? { ...r, [field]: value } : r)));
@@ -244,20 +242,12 @@ export default function EditarMediacionPage() {
       intervino: intervino.trim() || null,
       lugar_atencion: lugar_atencion.trim() || null,
       lesiones_ambos: lesiones_ambos.trim() || null,
-      requeridos: requeridos
-        .filter((r) => r.nombre.trim() || r.empresa_nombre_razon_social.trim())
-        .map((r, i) => ({
-          nombre: r.nombre.trim() || "—",
-          empresa_nombre_razon_social: r.empresa_nombre_razon_social.trim() || null,
-          domicilio: r.domicilio.trim() || null,
-          lesiones: r.lesiones || null,
-          orden: i,
-        })),
+      requeridos: buildRequeridosPatchPayload(requeridos, aseguradoras),
     };
 
-    const res = await fetch(`/api/mediaciones/${id}`, {
+    const res = await mediacionesFetch(`/api/mediaciones/${id}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
     const json = await res.json().catch(() => ({}));
@@ -381,6 +371,11 @@ export default function EditarMediacionPage() {
                 <div className="field"><input className="input" placeholder="Empresa nombre o razón social" value={r.empresa_nombre_razon_social} onChange={(e) => updateRequerido(r.id, "empresa_nombre_razon_social", e.target.value)} /></div>
                 <div className="field"><input className="input" placeholder="Domicilio" value={r.domicilio} onChange={(e) => updateRequerido(r.id, "domicilio", e.target.value)} /></div>
                 <div className="field"><select className="input" value={r.lesiones} onChange={(e) => updateRequerido(r.id, "lesiones", e.target.value)}><option value="">Lesiones</option>{LESIONES.map((l) => <option key={l} value={l}>{l}</option>)}</select></div>
+                <AseguradorasStep
+                  value={aseguradoras as any}
+                  onChange={setAseguradoras as any}
+                  requeridoId={r.id}
+                />
               </div>
             ))}
             <button type="button" className="btn" onClick={addRequerido} disabled={requeridos.length >= 3}>+ Agregar requerido</button>

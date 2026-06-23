@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseService } from "@/lib/supabase-server";
 import { getUserFromRequest, getMediacionesRole } from "@/lib/auth-api";
+import {
+  domicilioRequeridoPdf,
+  empresaRequeridoPdf,
+} from "@/lib/mediaciones-requeridos";
 import jsPDF from "jspdf";
 
 export const runtime = "nodejs";
@@ -137,19 +141,21 @@ function buildFormularioMediacionPdf(mediacion: any, requeridos: any[], requiren
   for (let i = 0; i < requeridosCount; i++) {
     const r = requeridosList[i] || {};
     line(`- Nombre y Apellido: ${v(r.nombre)}`, false, 11);
-    line(`(Empresa nombre o razón social): ${v(r.empresa_nombre_razon_social)}`, false, 11);
+    line(`(Empresa nombre o razón social): ${v(empresaRequeridoPdf(r))}`, false, 11);
     y += 2;
     line(`Condición: ${v(r.condicion)}`, false, 11);
     y += 2;
-    line(`Domicilio: ${v(r.domicilio)}`, false, 11);
+    line(`Domicilio: ${v(domicilioRequeridoPdf(r))}`, false, 11);
     y += 2;
     const lesionesTexto = r.lesiones == null || String(r.lesiones).trim() === "" ? "Lesiones" : String(r.lesiones);
     line(`Lesiones: ${lesionesTexto}`, false, 11);
     y += 2;
-    if (r.es_aseguradora && v(r.aseguradora_nombre)) {
+    const empresaPdf = empresaRequeridoPdf(r);
+    if (r.es_aseguradora && v(r.aseguradora_nombre) && v(r.aseguradora_nombre) !== empresaPdf) {
       line(`Aseguradora: ${v(r.aseguradora_nombre)}`, false, 11);
-      if (v(r.aseguradora_domicilio)) {
-        line(`Domicilio Aseguradora: ${v(r.aseguradora_domicilio)}`, false, 11);
+      const domAseg = (r.aseguradora_domicilio || "").trim();
+      if (domAseg && domAseg !== domicilioRequeridoPdf(r)) {
+        line(`Domicilio Aseguradora: ${domAseg}`, false, 11);
       }
     }
     y += 4;

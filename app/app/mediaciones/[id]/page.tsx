@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { mediacionesFetch } from "@/lib/mediaciones-fetch";
 
 type Mediacion = {
   id: string;
@@ -178,7 +179,6 @@ export default function MediacionDetailPage() {
       const session = await requireSessionOrRedirect();
       if (!session) return;
 
-      const token = session.access_token;
       const uid = session.user.id;
       setCurrentUid(uid);
       const { data: roleData } = await supabase
@@ -198,7 +198,7 @@ export default function MediacionDetailPage() {
         return;
       }
 
-      const res = await fetch(`/api/mediaciones/${id}`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await mediacionesFetch(`/api/mediaciones/${id}`);
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         setMsg(json.error || "Error al cargar");
@@ -223,14 +223,14 @@ export default function MediacionDetailPage() {
     setSendingDevolver(true);
     setMsg("");
     const [obsRes, patchRes] = await Promise.all([
-      fetch(`/api/mediaciones/${id}/observaciones`, {
+      mediacionesFetch(`/api/mediaciones/${id}/observaciones`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ texto: textoDevolver.trim() }),
       }),
-      fetch(`/api/mediaciones/${id}`, {
+      mediacionesFetch(`/api/mediaciones/${id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ estado: "devuelto" }),
       }),
     ]);
@@ -254,9 +254,9 @@ export default function MediacionDetailPage() {
     if (!session) return;
     setSendingAceptar(true);
     setMsg("");
-    const res = await fetch(`/api/mediaciones/${id}`, {
+    const res = await mediacionesFetch(`/api/mediaciones/${id}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ estado: "aceptado" }),
     });
     setSendingAceptar(false);
@@ -273,9 +273,9 @@ export default function MediacionDetailPage() {
     if (!session) return;
     setGeneratingPdf(true);
     setMsg("");
-    const res = await fetch(`/api/mediaciones/${id}/generate-doc`, {
+    const res = await mediacionesFetch(`/api/mediaciones/${id}/generate-doc`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tipo_plantilla: "formulario_mediacion", modo_firma: "sin_firma" }),
     });
     const json = await res.json().catch(() => ({}));
@@ -285,13 +285,26 @@ export default function MediacionDetailPage() {
       return;
     }
     const docId = json.data?.documento_id || json.data?.id;
-    setMediacion((prev) => (prev && json.data ? { ...prev, documentos: [json.data, ...(prev.documentos || [])], estado: "doc_generado" } : prev));
+    if (json.data) {
+      setMediacion((prev) =>
+        prev
+          ? {
+              ...prev,
+              documentos: [json.data, ...(prev.documentos || [])],
+              estado: "doc_generado",
+            }
+          : prev
+      );
+    }
+    const refreshRes = await mediacionesFetch(`/api/mediaciones/${id}`);
+    const refreshJson = await refreshRes.json().catch(() => ({}));
+    if (refreshRes.ok && refreshJson.data) {
+      setMediacion(refreshJson.data);
+    }
     // `download` requiere auth; por eso no usamos window.open directo (el navegador no manda headers).
     if (docId) {
       try {
-        const downloadRes = await fetch(`/api/mediaciones/download?documento_id=${docId}`, {
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        });
+        const downloadRes = await mediacionesFetch(`/api/mediaciones/download?documento_id=${docId}`);
         if (!downloadRes.ok) {
           const text = await downloadRes.text();
           setMsg(text || "Error al descargar el PDF");
@@ -311,9 +324,7 @@ export default function MediacionDetailPage() {
     const session = await requireSessionOrRedirect();
     if (!session || !docPrincipal) return;
     try {
-      const res = await fetch(`/api/mediaciones/download?documento_id=${docPrincipal.id}`, {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
+      const res = await mediacionesFetch(`/api/mediaciones/download?documento_id=${docPrincipal.id}`);
       if (!res.ok) {
         const text = await res.text();
         setMsg(text || "Error al cargar el documento");
@@ -333,9 +344,7 @@ export default function MediacionDetailPage() {
     if (!session || !docPrincipal) return;
     setMsg("");
     try {
-      const res = await fetch(`/api/mediaciones/download?documento_id=${docPrincipal.id}`, {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
+      const res = await mediacionesFetch(`/api/mediaciones/download?documento_id=${docPrincipal.id}`);
       if (!res.ok) {
         const text = await res.text();
         setMsg(text || "Error al descargar el PDF");
@@ -386,6 +395,12 @@ export default function MediacionDetailPage() {
 
   const ultimaObservacion = mediacion.observaciones?.[0];
   const docPrincipal = mediacion.documentos?.[0];
+  const pdfDesactualizado = Boolean(
+    docPrincipal &&
+      mediacion.fecha_ultima_actualizacion &&
+      new Date(mediacion.fecha_ultima_actualizacion).getTime() >
+        new Date(docPrincipal.created_at).getTime()
+  );
 
   return (
     <main className="container">
@@ -423,6 +438,25 @@ export default function MediacionDetailPage() {
                 <span style={{ padding: "6px 14px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: "rgba(255,255,255,.12)", textTransform: "capitalize" }}>{mediacion.estado.replace(/_/g, " ")}</span>
                 <span className="muted">{mediacion.numero_tramite}</span>
               </div>
+
+              {pdfDesactualizado && (
+                <div
+                  style={{
+                    marginBottom: 20,
+                    padding: 16,
+                    background: "rgba(251,191,36,.1)",
+                    border: "1px solid rgba(251,191,36,.35)",
+                    borderRadius: 12,
+                    fontSize: 14,
+                  }}
+                >
+                  <strong>El PDF no refleja los últimos cambios.</strong>
+                  <p style={{ margin: "8px 0 0 0" }}>
+                    La mediación se editó después de generar el documento. Regenerá el PDF para incluir datos
+                    actualizados (empresa, domicilio, aseguradoras, etc.).
+                  </p>
+                </div>
+              )}
 
               {mediacion.estado === "devuelto" && ultimaObservacion && (
                 <div style={{ marginBottom: 20, padding: 16, background: "rgba(241,196,15,.12)", border: "1px solid rgba(241,196,15,.35)", borderRadius: 12 }}>
@@ -529,6 +563,16 @@ export default function MediacionDetailPage() {
                   <>
                     <button type="button" className="btn" onClick={verDocumento}>Ver documento</button>
                     <button type="button" className="btn primary" onClick={descargarPdf}>Descargar PDF</button>
+                    {pdfDesactualizado && (isAdminMediaciones || isSuperadmin) && (
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={generarDocumento}
+                        disabled={generatingPdf}
+                      >
+                        {generatingPdf ? "Regenerando…" : "Regenerar documento"}
+                      </button>
+                    )}
                   </>
                 )}
               </div>}
