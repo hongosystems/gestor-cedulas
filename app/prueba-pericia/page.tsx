@@ -1341,6 +1341,7 @@ function PruebaPericiaPageContent() {
     fecha: "",
     hora: "",
   });
+  const [turnoArchivos, setTurnoArchivos] = useState<File[]>([]);
   const [savingComunicacion, setSavingComunicacion] = useState(false);
   const [savingTurno, setSavingTurno] = useState(false);
   const [creatingGestion, setCreatingGestion] = useState(false);
@@ -4522,6 +4523,7 @@ function PruebaPericiaPageContent() {
                       fecha: "",
                       hora: "",
                     });
+                    setTurnoArchivos([]);
                     setShowTurnoForm(true);
                   }}
                   style={{
@@ -4616,6 +4618,7 @@ function PruebaPericiaPageContent() {
                       fecha: "",
                       hora: "",
                     });
+                    setTurnoArchivos([]);
                     setShowTurnoForm(true);
                   }}
                   style={{
@@ -4644,6 +4647,7 @@ function PruebaPericiaPageContent() {
                       fecha: "",
                       hora: "",
                     });
+                    setTurnoArchivos([]);
                     setShowTurnoForm(true);
                   }}
                   style={{
@@ -4984,6 +4988,61 @@ function PruebaPericiaPageContent() {
                   />
                 </div>
 
+                {selectedOrden.gestion?.estado === "ESTUDIO_REALIZADO" && (() => {
+                  const archivosActuales = selectedOrden.archivos?.length || 0;
+                  const espaciosDisponibles = Math.max(0, 5 - archivosActuales);
+                  return (
+                    <div>
+                      <label style={{ display: "block", fontSize: 12, color: "var(--muted)", marginBottom: 4 }}>
+                        Nueva orden médica (opcional)
+                      </label>
+                      {espaciosDisponibles === 0 ? (
+                        <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                          Esta orden ya tiene 5 archivos. No se pueden adjuntar más.
+                        </div>
+                      ) : (
+                        <>
+                          <input
+                            type="file"
+                            accept=".pdf,.doc,.docx"
+                            multiple
+                            disabled={savingTurno}
+                            onChange={(e) => {
+                              const files = Array.from(e.target.files || []);
+                              if (files.length > espaciosDisponibles) {
+                                setMsg(`Solo podés agregar ${espaciosDisponibles} archivo(s) más`);
+                                e.target.value = "";
+                                setTurnoArchivos([]);
+                                return;
+                              }
+                              setTurnoArchivos(files);
+                            }}
+                            style={{
+                              width: "100%",
+                              padding: "8px",
+                              background: "rgba(11,47,85,.95)",
+                              border: "1px solid rgba(255,255,255,.2)",
+                              borderRadius: 6,
+                              color: "var(--text)",
+                              fontSize: 13,
+                            }}
+                          />
+                          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+                            PDF, DOC o DOCX. Hasta {espaciosDisponibles} archivo(s), máx. 4MB total.
+                          </div>
+                          {turnoArchivos.length > 0 && (
+                            <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 12, color: "var(--text)" }}>
+                              {turnoArchivos.map((file) => (
+                                <li key={file.name}>{file.name}</li>
+                              ))}
+                            </ul>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 <div style={{ display: "flex", gap: 8 }}>
                   <button
                     onClick={async () => {
@@ -5002,6 +5061,60 @@ function PruebaPericiaPageContent() {
                         const reabrirSeguimiento =
                           selectedOrden.gestion?.estado === "ESTUDIO_REALIZADO";
 
+                        if (reabrirSeguimiento && turnoArchivos.length > 0) {
+                          const MAX_SIZE_PER_FILE = 4 * 1024 * 1024;
+                          const MAX_TOTAL_SIZE = 4 * 1024 * 1024;
+                          const archivosActuales = selectedOrden.archivos?.length || 0;
+                          const espaciosDisponibles = 5 - archivosActuales;
+
+                          if (turnoArchivos.length > espaciosDisponibles) {
+                            setMsg(`Solo podés agregar ${espaciosDisponibles} archivo(s) más`);
+                            return;
+                          }
+
+                          let totalSize = 0;
+                          for (const file of turnoArchivos) {
+                            if (file.size > MAX_SIZE_PER_FILE) {
+                              setMsg(`El archivo "${file.name}" excede el límite de 4MB`);
+                              return;
+                            }
+                            totalSize += file.size;
+                          }
+
+                          if (totalSize > MAX_TOTAL_SIZE) {
+                            const totalMB = (totalSize / (1024 * 1024)).toFixed(2);
+                            setMsg(`El tamaño total (${totalMB}MB) excede el límite de 4MB`);
+                            return;
+                          }
+
+                          const formData = new FormData();
+                          turnoArchivos.forEach((file, index) => {
+                            formData.append(`file_${index}`, file);
+                          });
+                          formData.append("case_ref", selectedOrden.case_ref);
+                          if (selectedOrden.expediente_id) {
+                            formData.append("expediente_id", selectedOrden.expediente_id);
+                          }
+
+                          const uploadRes = await fetch("/api/ordenes-medicas/upload", {
+                            method: "POST",
+                            headers: {
+                              Authorization: `Bearer ${session.access_token}`,
+                            },
+                            body: formData,
+                          });
+
+                          if (!uploadRes.ok) {
+                            const error = await uploadRes.json().catch(() => ({ error: "Error desconocido" }));
+                            if (uploadRes.status === 413) {
+                              setMsg("Error: el tamaño total excede el límite permitido (4MB)");
+                            } else {
+                              setMsg("Error al subir archivos: " + (error.error || "Error desconocido"));
+                            }
+                            return;
+                          }
+                        }
+
                         const res = await fetch("/api/ordenes-medicas/update-estado", {
                           method: "POST",
                           headers: {
@@ -5018,13 +5131,17 @@ function PruebaPericiaPageContent() {
                         });
 
                         if (res.ok) {
+                          const archivosSubidos = reabrirSeguimiento ? turnoArchivos.length : 0;
                           setMsg(
                             reabrirSeguimiento
-                              ? "Nuevo turno asignado — seguimiento reabierto"
+                              ? archivosSubidos > 0
+                                ? `Nuevo turno asignado — seguimiento reabierto (${archivosSubidos} archivo(s) adjunto(s))`
+                                : "Nuevo turno asignado — seguimiento reabierto"
                               : "Turno asignado exitosamente"
                           );
                           setShowTurnoForm(false);
                           setTurnoForm({ centro_medico: "", fecha: "", hora: "" });
+                          setTurnoArchivos([]);
                           await loadOrdenes();
                           // Recargar la orden seleccionada
                           const updatedRes = await fetch("/api/ordenes-medicas/list", {
@@ -5068,6 +5185,7 @@ function PruebaPericiaPageContent() {
                     onClick={() => {
                       setShowTurnoForm(false);
                       setTurnoForm({ centro_medico: "", fecha: "", hora: "" });
+                      setTurnoArchivos([]);
                     }}
                     style={{
                       padding: "10px 16px",
