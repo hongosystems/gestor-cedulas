@@ -1,5 +1,11 @@
 import { supabaseService } from "@/lib/supabase-server";
 import {
+  legacyTransferRecipientReadAt,
+  markThreadRead as markMailboxThreadReadState,
+  reconcileMailboxReadStateForUser,
+} from "@/lib/mailbox-read-state";
+import { findMailboxThreadId } from "@/lib/mailbox-thread-resolve";
+import {
   assertValidMailboxFile,
   assertValidMailboxFileList,
   contentTypeForMailboxExt,
@@ -15,6 +21,9 @@ import type {
   MailboxRecipientType,
   MailboxThreadDetail,
 } from "@/lib/mailbox-types";
+
+export { findMailboxThreadId } from "@/lib/mailbox-thread-resolve";
+export type { MarkThreadReadResult, MailboxReconcileResult } from "@/lib/mailbox-read-state";
 
 export type MailboxFileMeta = {
   fileName: string;
@@ -670,6 +679,9 @@ export async function listMailboxInbox(
   }
 
   const migratedLegacyIds = await getMigratedLegacyTransferIds(svc);
+  items.sort(
+    (a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()
+  );
   const legacy = await listLegacyInbox(userId, opts.folder, opts.q, migratedLegacyIds);
   const merged = [...items, ...legacy]
     .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime())
@@ -762,20 +774,6 @@ async function listLegacyInbox(
   });
 }
 
-export async function findMailboxThreadId(
-  svc: ReturnType<typeof supabaseService>,
-  id: string
-): Promise<string | null> {
-  const { data: byPk } = await svc.from("mailbox_threads").select("id").eq("id", id).maybeSingle();
-  if (byPk?.id) return byPk.id;
-  const { data: byLegacy } = await svc
-    .from("mailbox_threads")
-    .select("id")
-    .eq("legacy_transfer_id", id)
-    .maybeSingle();
-  return byLegacy?.id ?? null;
-}
-
 /** Importa un file_transfer al mailbox (idempotente). Retorna el thread_id del mailbox. */
 export async function importFileTransferToMailbox(
   svc: ReturnType<typeof supabaseService>,
@@ -821,6 +819,11 @@ export async function importFileTransferToMailbox(
 
   const messageId = message.id as string;
   const sentAt = new Date().toISOString();
+  const recipientReadAt = await legacyTransferRecipientReadAt(
+    svc,
+    t.recipient_user_id,
+    transferId
+  );
 
   await svc.from("mailbox_recipients").insert([
     {
@@ -829,7 +832,7 @@ export async function importFileTransferToMailbox(
       user_id: t.recipient_user_id,
       recipient_type: "to",
       folder: "inbox",
-      read_at: null,
+      read_at: recipientReadAt,
     },
     {
       thread_id: threadId,
@@ -891,8 +894,14 @@ export async function ensureMailboxThreadFromLegacy(userId: string, transferId: 
   return importFileTransferToMailbox(svc, transferId);
 }
 
-/** Importa transferencias legacy pendientes al mailbox para que aparezcan en No leídas. */
-export async function syncLegacyTransfersForUser(userId: string, limit = 100): Promise<number> {
+/**
+ * Importa transfers legacy pendientes y reconcilia estado de lectura.
+ * Idempotente: importación + backfill + sync notifications.
+ */
+export async function syncLegacyTransfersForUser(
+  userId: string,
+  limit = 100
+): Promise<{ imported: number; backfilled: number; notificationsSynced: number }> {
   const svc = supabaseService();
   const migrated = await getMigratedLegacyTransferIds(svc);
 
@@ -916,7 +925,12 @@ export async function syncLegacyTransfersForUser(userId: string, limit = 100): P
       /* omitir filas corruptas */
     }
   }
-  return imported;
+
+  const { backfilled, notificationsSynced } = await reconcileMailboxReadStateForUser(
+    svc,
+    userId
+  );
+  return { imported, backfilled, notificationsSynced };
 }
 
 export async function resolveMailboxThreadId(userId: string, id: string): Promise<string> {
@@ -1139,40 +1153,7 @@ export async function markRecipientRead(
 }
 
 export async function markThreadRead(userId: string, threadId: string) {
-  const svc = supabaseService();
-  await svc
-    .from("mailbox_recipients")
-    .update({ read_at: new Date().toISOString() })
-    .eq("thread_id", threadId)
-    .eq("user_id", userId)
-    .is("read_at", null);
-
-  const mailboxId = (await findMailboxThreadId(svc, threadId)) ?? threadId;
-
-  await svc
-    .from("notifications")
-    .update({ is_read: true })
-    .eq("user_id", userId)
-    .eq("is_read", false)
-    .filter("metadata->>mailbox_thread_id", "eq", mailboxId);
-
-  const { data: thread } = await svc
-    .from("mailbox_threads")
-    .select("legacy_transfer_id")
-    .eq("id", mailboxId)
-    .maybeSingle();
-
-  const transferIds = new Set<string>([threadId]);
-  if (thread?.legacy_transfer_id) transferIds.add(thread.legacy_transfer_id as string);
-
-  for (const transferId of transferIds) {
-    await svc
-      .from("notifications")
-      .update({ is_read: true })
-      .eq("user_id", userId)
-      .eq("is_read", false)
-      .filter("metadata->>transfer_id", "eq", transferId);
-  }
+  return markMailboxThreadReadState(supabaseService(), userId, threadId);
 }
 
 export async function archiveRecipient(userId: string, recipientId: string, archive: boolean) {

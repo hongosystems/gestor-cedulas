@@ -1,5 +1,6 @@
 import { canWorkflowCedulas } from "@/lib/bandeja-utils";
 import { countUnreadMailbox } from "@/lib/mailbox-service";
+import { syncNotificationsReadForMailboxThread } from "@/lib/mailbox-read-state";
 import { isMailboxLinkedNotification, isTransferLinkedNotification } from "@/lib/notification-utils";
 import { supabaseService } from "@/lib/supabase-server";
 
@@ -79,11 +80,15 @@ export async function markMailboxNotificationsReadForThread(
   threadId: string
 ): Promise<void> {
   const svc = supabaseService();
-  const { error } = await svc
-    .from("notifications")
-    .update({ is_read: true })
-    .eq("user_id", userId)
-    .eq("is_read", false)
-    .filter("metadata->>mailbox_thread_id", "eq", threadId);
-  if (error) throw error;
+  const { data: thread } = await svc
+    .from("mailbox_threads")
+    .select("legacy_transfer_id")
+    .eq("id", threadId)
+    .maybeSingle();
+  await syncNotificationsReadForMailboxThread(
+    svc,
+    userId,
+    threadId,
+    thread?.legacy_transfer_id as string | null
+  );
 }

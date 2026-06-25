@@ -501,7 +501,8 @@ export default function NotificationsInbox({
     if (processingIds.has(id)) return;
     setProcessingIds((prev) => new Set(prev).add(id));
     try {
-      await supabase.rpc("mark_notification_read", { p_id: id });
+      const { error } = await supabase.rpc("mark_notification_read", { p_id: id });
+      if (error) throw error;
       setItems((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
       notifyCountsChanged();
     } catch (err) {
@@ -610,7 +611,11 @@ export default function NotificationsInbox({
     const unreadIds = unreadInThread.map((n) => n.id);
     setProcessingIds((prev) => new Set([...prev, ...unreadIds]));
     try {
-      await Promise.all(unreadIds.map((id) => supabase.rpc("mark_notification_read", { p_id: id })));
+      const results = await Promise.all(
+        unreadIds.map((id) => supabase.rpc("mark_notification_read", { p_id: id }))
+      );
+      const failed = results.find((r) => r.error);
+      if (failed?.error) throw failed.error;
       setItems((prev) =>
         prev.map((n) => (unreadIds.includes(n.id) ? { ...n, is_read: true } : n))
       );
@@ -649,6 +654,9 @@ export default function NotificationsInbox({
     setReplyFile(null);
     setExpedienteInfo(null);
     setOrdenPdfUrl(null);
+    if (!notif.is_read) {
+      await markThreadNotificationsRead(getThreadRootId(notif));
+    }
     // Resolución por case_ref para notificaciones automáticas de pericia
     const meta = parseMetadataSafe(notif.metadata);
     let expedienteInfoResolvedByCaseRef = false;

@@ -118,6 +118,7 @@ export async function loadMailboxInboxForFolder(folder: MailboxFolder) {
 }
 
 export type MailboxFolderCounts = {
+  inbox: number;
   sent: number;
   all: number;
   unread: number;
@@ -132,6 +133,7 @@ export async function fetchMailboxFolderCounts(): Promise<MailboxFolderCounts> {
   ]);
   const all = dedupeInboxItems([...inbox, ...sent]);
   return {
+    inbox: inbox.length,
     sent: sent.length,
     all: all.length,
     unread: unreadCount,

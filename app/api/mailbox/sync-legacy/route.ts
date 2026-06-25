@@ -6,6 +6,10 @@ import { supabaseService } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
 
+/**
+ * Reconciliación de bandeja: importa transfers legacy pendientes y alinea
+ * mailbox_recipients.read_at con el historial de notifications.
+ */
 export async function POST(req: Request) {
   try {
     const { user, error } = await requireMailboxUser(req);
@@ -26,11 +30,11 @@ export async function POST(req: Request) {
     });
 
     if (!workflow) {
-      return NextResponse.json({ imported: 0 });
+      return NextResponse.json({ imported: 0, backfilled: 0, notificationsSynced: 0 });
     }
 
-    const imported = await syncLegacyTransfersForUser(user!.id);
-    return NextResponse.json({ imported });
+    const result = await syncLegacyTransfersForUser(user!.id);
+    return NextResponse.json(result);
   } catch (e) {
     return mailboxError(e);
   }

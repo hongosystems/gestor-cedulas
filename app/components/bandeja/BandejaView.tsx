@@ -12,7 +12,7 @@ import {
 } from "@/lib/bandeja-utils";
 import { bandejaTabToFolder, isMailboxTab } from "@/lib/bandeja-mail-folders";
 import { fetchMailboxFolderCounts } from "@/lib/bandeja-inbox-search";
-import { fetchUnreadBadgeCounts, syncLegacyMailboxTransfers } from "@/lib/unread-notifications-client";
+import { fetchUnreadBadgeCounts, reconcileMailboxState } from "@/lib/unread-notifications-client";
 import NotificationsInbox from "@/app/components/bandeja/NotificationsInbox";
 import MailboxComposeForm from "@/app/components/bandeja/MailboxComposeForm";
 import MailboxInbox from "@/app/components/bandeja/MailboxInbox";
@@ -28,6 +28,7 @@ type NavItem = {
   label: string;
   icon: string;
   badge?: number;
+  /** Badge rojo de urgencia (solo no leídas / recibidos con pendientes). */
   alert?: boolean;
   requiresWorkflow?: boolean;
 };
@@ -44,6 +45,7 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
   const { roles, loading: rolesLoading, hasSession } = useUserRoles();
   const [search, setSearch] = useState("");
   const [folderCounts, setFolderCounts] = useState({
+    inbox: 0,
     sent: 0,
     all: 0,
     unread: 0,
@@ -120,12 +122,15 @@ export default function BandejaView({ initialTab }: BandejaViewProps) {
     let cancelled = false;
     (async () => {
       try {
-        const imported = await syncLegacyMailboxTransfers();
-        if (!cancelled && imported > 0) {
+        const result = await reconcileMailboxState();
+        if (
+          !cancelled &&
+          (result.imported > 0 || result.backfilled > 0 || result.notificationsSynced > 0)
+        ) {
           await refreshCounts();
         }
       } catch {
-        /* sync opcional al abrir bandeja */
+        /* reconciliación opcional al abrir bandeja */
       }
     })();
     return () => {

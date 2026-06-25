@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { findMailboxThreadId, markThreadRead } from "@/lib/mailbox-service";
+import { markThreadRead } from "@/lib/mailbox-read-state";
+import { findMailboxThreadId } from "@/lib/mailbox-thread-resolve";
 import { supabaseService } from "@/lib/supabase-server";
 import { requireMailboxUser, mailboxError } from "@/lib/mailbox-api";
 
@@ -13,13 +14,15 @@ export async function PATCH(
     const { user, error } = await requireMailboxUser(req);
     if (error) return error;
     const { id } = await ctx.params;
+    const svc = supabaseService();
 
-    const mailboxId = await findMailboxThreadId(supabaseService(), id);
-    if (mailboxId) {
-      await markThreadRead(user!.id, mailboxId);
+    const mailboxId = await findMailboxThreadId(svc, id);
+    if (!mailboxId) {
+      return NextResponse.json({ error: "Hilo no encontrado" }, { status: 404 });
     }
 
-    return NextResponse.json({ ok: true });
+    const result = await markThreadRead(svc, user!.id, mailboxId);
+    return NextResponse.json({ ok: true, ...result });
   } catch (e) {
     return mailboxError(e);
   }

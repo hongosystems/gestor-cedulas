@@ -80,55 +80,53 @@ export default function MailboxInbox({
     [allItems, liveSearch, profiles, searchHits]
   );
 
-  const displayItems = useMemo(() => {
-    if (folder !== "unread" || !selected) return items;
-    const selectedKey = `${selected.source}-${selected.id}`;
-    if (items.some((i) => `${i.source}-${i.id}` === selectedKey)) return items;
-    return [selected, ...items];
-  }, [items, selected, folder]);
-
   const markItemReadIfNeeded = useCallback(
-    async (item: MailboxInboxItem | null) => {
-      if (!item?.unread) return;
+    async (item: MailboxInboxItem | null): Promise<boolean> => {
+      if (!item?.unread) return true;
       try {
         await markMailboxThreadRead(item.threadId);
-        setAllItems((prev) =>
-          prev.map((i) =>
-            i.threadId === item.threadId ? { ...i, unread: false } : i
-          )
-        );
+        if (folder === "unread") {
+          setAllItems((prev) => prev.filter((i) => i.threadId !== item.threadId));
+        } else {
+          setAllItems((prev) =>
+            prev.map((i) =>
+              i.threadId === item.threadId ? { ...i, unread: false } : i
+            )
+          );
+        }
         onListChanged?.();
-      } catch {
-        /* mantener estado local si falla */
+        return true;
+      } catch (e) {
+        setMsg(e instanceof Error ? e.message : "No se pudo marcar como leído");
+        return false;
       }
     },
-    [onListChanged]
+    [folder, onListChanged]
   );
 
   const selectItem = useCallback(
     async (next: MailboxInboxItem) => {
-      setSelected(next);
       if (next.unread) {
-        void markItemReadIfNeeded(next);
+        const ok = await markItemReadIfNeeded(next);
+        setSelected(ok ? { ...next, unread: false } : next);
+        return;
       }
+      setSelected(next);
     },
     [markItemReadIfNeeded]
   );
 
   const closeItem = useCallback(async () => {
-    if (selected?.unread) {
-      await markItemReadIfNeeded(selected);
-    }
     setSelected(null);
-  }, [selected, markItemReadIfNeeded]);
+  }, []);
 
   useEffect(() => {
     if (!selected) return;
-    const stillVisible = displayItems.some(
+    const stillVisible = items.some(
       (i) => i.id === selected.id && i.source === selected.source
     );
-    if (!stillVisible) setSelected(null);
-  }, [displayItems, selected]);
+    if (!stillVisible && folder !== "unread") setSelected(null);
+  }, [items, selected, folder]);
 
   if (loading) {
     return (
@@ -182,7 +180,7 @@ export default function MailboxInbox({
             )}
           </div>
         ) : (
-          displayItems.map((t) => (
+          items.map((t) => (
             <button
               key={`${t.source}-${t.id}`}
               type="button"
