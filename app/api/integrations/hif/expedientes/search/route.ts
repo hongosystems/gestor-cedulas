@@ -5,12 +5,14 @@ import {
   mapJurisdiccionToFuero,
   parsePartesFromCaratula,
 } from "@/lib/integrations/hif-mappers";
+import {
+  mergeSearchRows,
+  patternCaratula,
+  patternNumero,
+  type PjnFavoritoSearchRow,
+} from "@/lib/integrations/hif-search";
 
 export const runtime = "nodejs";
-
-function escapeIlikePattern(value: string): string {
-  return value.replace(/[%_\\]/g, "\\$&");
-}
 
 export async function GET(req: NextRequest) {
   if (!validateHifApiKey(req)) {
@@ -25,25 +27,47 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const pattern = `%${escapeIlikePattern(q)}%`;
   const supabase = supabaseService();
+  // TODO: mejorar búsqueda multi-palabra con tokenización
+  // Hoy "guaita lautaro" no encuentra "GUAITA, LAUTARO..." por la coma intermedia
+  // Solución posible: tokenizar el query y hacer ILIKE AND por cada palabra
+  // O usar to_tsvector + websearch_to_tsquery para full-text search profesional
+  const caratulaPattern = patternCaratula(q);
+  const numeroPattern = patternNumero(q);
 
-  const { data, error } = await supabase
-    .from("pjn_favoritos")
-    .select("id, jurisdiccion, numero, anio, caratula, juzgado")
-    .or(`caratula.ilike.${pattern},numero.ilike.${pattern}`)
-    .limit(20);
+  const [porCaratula, porNumero] = await Promise.all([
+    supabase
+      .from("pjn_favoritos")
+      .select("id, jurisdiccion, numero, anio, caratula, juzgado")
+      .ilike("caratula", caratulaPattern)
+      .limit(15),
+    supabase
+      .from("pjn_favoritos")
+      .select("id, jurisdiccion, numero, anio, caratula, juzgado")
+      .ilike("numero", numeroPattern)
+      .limit(15),
+  ]);
 
-  if (error) {
-    console.error("[hif/search]", error);
+  if (porCaratula.error) {
+    console.error("[hif/search] caratula", porCaratula.error);
     return NextResponse.json({ error: "Error al buscar expedientes" }, { status: 500 });
   }
 
-  const results = (data ?? []).map((row) => ({
+  if (porNumero.error) {
+    console.error("[hif/search] numero", porNumero.error);
+    return NextResponse.json({ error: "Error al buscar expedientes" }, { status: 500 });
+  }
+
+  const data = mergeSearchRows(
+    porCaratula.data as PjnFavoritoSearchRow[] | null,
+    porNumero.data as PjnFavoritoSearchRow[] | null
+  );
+
+  const results = data.map((row) => ({
     id: row.id,
     caratula: row.caratula ?? "",
     numero: row.numero,
-    fuero: mapJurisdiccionToFuero(row.jurisdiccion),
+    fuero: mapJurisdiccionToFuero(row.jurisdiccion ?? ""),
     ano: row.anio,
     partes: parsePartesFromCaratula(row.caratula ?? "").map((p) => p.nombre),
   }));
