@@ -1976,15 +1976,33 @@ export default function MisCedulasPage() {
                           </span>
                         )}
                         {isAdminCedulas && c.estado_ocr === "error" && (
-                          <button
-                            type="button"
-                            className="btn"
-                            onClick={(e) => { e.stopPropagation(); reintentarOcr(c.id); }}
-                            disabled={!!reintentandoOcrId}
-                            style={{ fontSize: 11, padding: "4px 8px", alignSelf: "flex-start" }}
-                          >
-                            {reintentandoOcrId === c.id ? "Procesando…" : "Reintentar OCR"}
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              className="btn"
+                              onClick={(e) => { e.stopPropagation(); reintentarOcr(c.id); }}
+                              disabled={!!reintentandoOcrId}
+                              style={{ fontSize: 11, padding: "4px 8px", alignSelf: "flex-start" }}
+                            >
+                              {reintentandoOcrId === c.id ? "Procesando…" : "Reintentar OCR"}
+                            </button>
+                            {c.ocr_error?.trim() && (
+                              <span
+                                title={c.ocr_error.trim()}
+                                style={{
+                                  fontSize: 10,
+                                  color: "#c96",
+                                  lineHeight: 1.35,
+                                  maxWidth: 200,
+                                  wordBreak: "break-word",
+                                }}
+                              >
+                                {c.ocr_error.trim().length > 140
+                                  ? `${c.ocr_error.trim().slice(0, 137)}…`
+                                  : c.ocr_error.trim()}
+                              </span>
+                            )}
+                          </>
                         )}
                       </div>
                     </td>

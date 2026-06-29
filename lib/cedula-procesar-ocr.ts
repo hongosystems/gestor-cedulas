@@ -126,6 +126,41 @@ export type ProcesarOcrOptions = {
   skipCargarPjn?: boolean;
 };
 
+/** Hints opcionales para cedula-mvp (expNro/caratula conocidos en Supabase). */
+function appendOcrHintsToFormData(
+  formData: FormData,
+  row: { caratula?: string | null; ocr_exp_nro?: string | null }
+) {
+  const caratula = row.caratula?.trim();
+  if (caratula) {
+    formData.append("caratula", caratula);
+  }
+
+  const expRaw = row.ocr_exp_nro?.trim();
+  if (expRaw) {
+    const expNro = expRaw.replace(/\s+/g, "");
+    if (/^\d{4,6}\/\d{4}$/.test(expNro)) {
+      formData.append("expNro", expNro);
+    }
+  }
+}
+
+function parseRailwayErrorBody(errorBody: string, status: number): string {
+  const trimmed = errorBody?.trim();
+  if (!trimmed) {
+    return `Error ${status}`;
+  }
+  try {
+    const json = JSON.parse(trimmed) as { error?: string };
+    if (json.error && String(json.error).trim()) {
+      return String(json.error).trim();
+    }
+  } catch {
+    /* texto plano */
+  }
+  return trimmed;
+}
+
 export async function procesarOcrEnBackground(
   cedulaId: string,
   svc: ReturnType<typeof supabaseService>,
@@ -146,7 +181,7 @@ export async function procesarOcrEnBackground(
   try {
     const { data: cedula, error: cedulaErr } = await svc
       .from("cedulas")
-      .select("id, pdf_path, tipo_documento, juzgado")
+      .select("id, pdf_path, tipo_documento, juzgado, caratula, ocr_exp_nro")
       .eq("id", cedulaId)
       .single();
 
@@ -199,8 +234,17 @@ export async function procesarOcrEnBackground(
 
     const formData = new FormData();
     formData.append("pdf", new Blob([pdfBuffer], { type: "application/pdf" }), pdfFilename);
+    appendOcrHintsToFormData(formData, cedula);
 
     const ocrEndpoint = cedula.tipo_documento === "OFICIO" ? "/procesar-oficio" : "/procesar";
+    console.log("[procesar-ocr] Railway", {
+      cedulaId,
+      endpoint: ocrEndpoint,
+      hints: {
+        caratula: Boolean(cedula.caratula?.trim()),
+        expNro: Boolean(cedula.ocr_exp_nro?.trim()),
+      },
+    });
 
     let railwayRes: Response;
     try {
@@ -229,7 +273,10 @@ export async function procesarOcrEnBackground(
 
     if (!railwayRes.ok) {
       const errorBody = await railwayRes.text();
-      const errorMsg = errorBody || railwayRes.statusText || `Error ${railwayRes.status}`;
+      const errorMsg =
+        parseRailwayErrorBody(errorBody, railwayRes.status) ||
+        railwayRes.statusText ||
+        `Error ${railwayRes.status}`;
       await svc
         .from("cedulas")
         .update({
