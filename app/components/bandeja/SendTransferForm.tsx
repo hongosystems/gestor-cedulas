@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { getFreshAccessToken } from "@/lib/auth-client";
 import { supabase } from "@/lib/supabase";
 import { displayName, docTypeLabel, type DocType, type Profile } from "@/lib/bandeja-utils";
 import ExpedienteAutocomplete, { type ExpedienteOption } from "@/app/components/bandeja/ExpedienteAutocomplete";
@@ -118,8 +119,7 @@ export default function SendTransferForm({
 
     setSending(true);
     try {
-      const { data: sess } = await supabase.auth.getSession();
-      const token = sess.session?.access_token;
+      const token = await getFreshAccessToken();
       if (!token) {
         window.location.href = "/login";
         return;
@@ -151,10 +151,14 @@ export default function SendTransferForm({
           });
           const json = await res.json().catch(() => ({}));
           if (!res.ok) {
+            const apiError = (json?.error as string) || "No se pudo enviar.";
             attempts.push({
               userId: recipientId,
               ok: false,
-              error: (json?.error as string) || "No se pudo enviar.",
+              error:
+                res.status === 401
+                  ? "Tu sesión expiró. Recargá la página e intentá de nuevo."
+                  : apiError,
             });
           } else {
             attempts.push({ userId: recipientId, ok: true });

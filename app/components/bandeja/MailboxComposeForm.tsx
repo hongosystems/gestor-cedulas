@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { getFreshAccessToken } from "@/lib/auth-client";
 import { supabase } from "@/lib/supabase";
 import { displayName, type DocType, type Profile } from "@/lib/bandeja-utils";
 import ComposeDocTypeSelect from "@/app/components/bandeja/ComposeDocTypeSelect";
@@ -113,8 +114,7 @@ export default function MailboxComposeForm({
 
     setSending(true);
     try {
-      const { data: sess } = await supabase.auth.getSession();
-      const token = sess.session?.access_token;
+      const token = await getFreshAccessToken();
       if (!token) {
         window.location.href = "/login";
         return;
@@ -136,7 +136,11 @@ export default function MailboxComposeForm({
       );
 
       if (!result.ok) {
-        setMsg(result.error);
+        setMsg(
+          result.error === "Unauthorized"
+            ? "Tu sesión expiró. Recargá la página e intentá de nuevo."
+            : result.error
+        );
         return;
       }
 

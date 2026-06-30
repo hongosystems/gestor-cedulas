@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { supabase } from "@/lib/supabase";
+import { getFreshAccessToken } from "@/lib/auth-client";
 
 export type ExpedienteOption = {
   id: string;
@@ -86,8 +86,7 @@ export default function ExpedienteAutocomplete({
     setLoading(true);
     setError("");
     try {
-      const { data: sess } = await supabase.auth.getSession();
-      const token = sess.session?.access_token;
+      const token = await getFreshAccessToken();
       if (!token) return;
 
       const res = await fetch(`/api/expedientes/search?q=${encodeURIComponent(q)}`, {
@@ -95,7 +94,11 @@ export default function ExpedienteAutocomplete({
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(json?.error || "No se pudo buscar.");
+        setError(
+          res.status === 401
+            ? "Tu sesión expiró. Recargá la página e intentá de nuevo."
+            : json?.error || "No se pudo buscar."
+        );
         setResults([]);
         return;
       }
