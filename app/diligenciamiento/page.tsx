@@ -20,6 +20,7 @@ type CedulaDiligenciamiento = {
   ocr_procesado_at: string | null;
   pdf_acredita_url: string | null;
   pjn_cargado_at: string | null;
+  pjn_cargado_manual_at?: string | null;
   tipo_documento?: "CEDULA" | "OFICIO" | null;
   estado_ocr?: string | null;
   observaciones_pjn?: string | null;
@@ -525,35 +526,65 @@ export default function DiligenciamientoPage() {
 
   async function togglePjnEstado(item: CedulaDiligenciamiento) {
     if (!canOperarPjn) return;
-    if (!item.pjn_cargado_at) {
-      setMsgSuccess(false);
-      setMsg("Estado pendiente. Usá “Cargar en PJN” para marcar como cargado.");
-      return;
-    }
     const authHeaders = await getAuthHeaders({ "Content-Type": "application/json" });
     if (!authHeaders) {
       setMsgSuccess(false);
       setMsg("Sesión expirada");
       return;
     }
+
+    const isManual = !!item.pjn_cargado_manual_at && !item.pjn_cargado_at;
+    const isCargadoAuto = !!item.pjn_cargado_at;
+    const body = isCargadoAuto
+      ? { reset: true }
+      : isManual
+        ? { reset: true, manual: true }
+        : { manual: true };
+
     const res = await fetch(`/api/cedulas/${item.id}/confirmar-pjn`, {
       method: "POST",
       headers: authHeaders,
-      body: JSON.stringify({ reset: true }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
       const json = await res.json().catch(() => ({} as { error?: string }));
       setMsgSuccess(false);
-      setMsg(json.error || "No se pudo volver a Pendiente");
+      setMsg(json.error || "No se pudo actualizar el estado PJN");
       return;
     }
+
+    const json = (await res.json()) as {
+      pjn_cargado_at?: string | null;
+      pjn_cargado_manual_at?: string | null;
+    };
+
     setCedulas((prev) =>
-      prev.map((c) =>
-        c.id === item.id ? { ...c, pjn_cargado_at: null, observaciones_pjn: null } : c
-      )
+      prev.map((c) => {
+        if (c.id !== item.id) return c;
+        if (body.reset && body.manual) {
+          return { ...c, pjn_cargado_manual_at: null };
+        }
+        if (body.reset) {
+          return { ...c, pjn_cargado_at: null, observaciones_pjn: null };
+        }
+        if (body.manual) {
+          return {
+            ...c,
+            pjn_cargado_manual_at: json.pjn_cargado_manual_at ?? new Date().toISOString(),
+          };
+        }
+        return { ...c, pjn_cargado_at: json.pjn_cargado_at ?? new Date().toISOString() };
+      })
     );
+
     setMsgSuccess(true);
-    setMsg("Estado PJN actualizado a Pendiente.");
+    if (body.manual && !body.reset) {
+      setMsg("Estado PJN actualizado a Cargado Manual.");
+    } else if (body.reset) {
+      setMsg("Estado PJN actualizado a Pendiente.");
+    } else {
+      setMsg("Estado PJN actualizado.");
+    }
   }
 
   return (
@@ -859,44 +890,59 @@ export default function DiligenciamientoPage() {
                           renderFecha={() => fmtDate(item.ocr_procesado_at)}
                           renderAccionesCompact={() => renderAcciones(false)}
                           renderAccionesDetail={() => renderAcciones(true)}
-                          renderPjnEstado={() => (
-                            <button
-                              type="button"
-                              onClick={() => togglePjnEstado(item)}
-                              title={
-                                item.pjn_cargado_at
-                                  ? `Cargado: ${fmtDate(item.pjn_cargado_at)} · Click para volver a Pendiente`
-                                  : "Pendiente"
-                              }
-                              style={{
-                                border: "1px solid",
-                                borderColor: item.pjn_cargado_at
-                                  ? "rgba(46, 204, 113, 0.5)"
-                                  : "rgba(255,255,255,.24)",
-                                background: item.pjn_cargado_at
-                                  ? "rgba(46, 204, 113, 0.22)"
-                                  : "rgba(70,78,92,.7)",
-                                color: "rgba(255,255,255,.96)",
-                                borderRadius: 999,
-                                padding: "5px 11px",
-                                fontSize: 12,
-                                fontWeight: 700,
-                                cursor: item.pjn_cargado_at ? "pointer" : "default",
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: 6,
-                              }}
-                            >
-                              {item.pjn_cargado_at ? (
-                                <>
-                                  <span aria-hidden style={{ fontSize: 10 }}>●</span>
-                                  Cargado
-                                </>
-                              ) : (
-                                "Pendiente"
-                              )}
-                            </button>
-                          )}
+                          renderPjnEstado={() => {
+                            const isCargadoAuto = !!item.pjn_cargado_at;
+                            const isCargadoManual =
+                              !!item.pjn_cargado_manual_at && !item.pjn_cargado_at;
+                            const title = isCargadoAuto
+                              ? `Cargado: ${fmtDate(item.pjn_cargado_at)} · Click para volver a Pendiente`
+                              : isCargadoManual
+                                ? `Cargado manual: ${fmtDate(item.pjn_cargado_manual_at)} · Click para volver a Pendiente`
+                                : "Click para marcar Cargado Manual";
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => togglePjnEstado(item)}
+                                title={title}
+                                style={{
+                                  border: "1px solid",
+                                  borderColor: isCargadoAuto
+                                    ? "rgba(46, 204, 113, 0.5)"
+                                    : isCargadoManual
+                                      ? "rgba(59, 130, 246, 0.55)"
+                                      : "rgba(255,255,255,.24)",
+                                  background: isCargadoAuto
+                                    ? "rgba(46, 204, 113, 0.22)"
+                                    : isCargadoManual
+                                      ? "rgba(59, 130, 246, 0.22)"
+                                      : "rgba(70,78,92,.7)",
+                                  color: "rgba(255,255,255,.96)",
+                                  borderRadius: 999,
+                                  padding: "5px 11px",
+                                  fontSize: 12,
+                                  fontWeight: 700,
+                                  cursor: "pointer",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 6,
+                                }}
+                              >
+                                {isCargadoAuto ? (
+                                  <>
+                                    <span aria-hidden style={{ fontSize: 10 }}>●</span>
+                                    Cargado
+                                  </>
+                                ) : isCargadoManual ? (
+                                  <>
+                                    <span aria-hidden style={{ fontSize: 10 }}>●</span>
+                                    Cargado Manual
+                                  </>
+                                ) : (
+                                  "Pendiente"
+                                )}
+                              </button>
+                            );
+                          }}
                         />
                       );
                     })
