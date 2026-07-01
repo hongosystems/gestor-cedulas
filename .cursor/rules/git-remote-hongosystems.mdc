@@ -1,0 +1,35 @@
+---
+description: Remoto Git y convenciones de commit para gestor-cedulas (hongosystems)
+alwaysApply: true
+---
+
+# Git — hongosystems/gestor-cedulas
+
+Este proyecto vive en **https://github.com/hongosystems/gestor-cedulas**.
+
+## Remoto
+
+- El remoto `origin` debe apuntar a `https://github.com/hongosystems/gestor-cedulas.git`.
+- Tras commitear, hacer `git push origin <rama>` (normalmente `main`) salvo que el usuario indique otra rama.
+- No cambiar el remoto a otro org/repo sin pedido explícito del usuario.
+
+## Qué commitear
+
+Incluir solo código y docs del producto relevantes al cambio.
+
+**No commitear** salvo pedido explícito:
+
+- PDFs sueltos en la raíz (`*.pdf`)
+- `exportaciones/`, exports JSON de chat, datos personales (`scripts/_*.json`)
+- `.next/`, `node_modules/`, `.env*`
+- Artefactos locales de diagnóstico one-off
+
+## Mensajes de commit
+
+Seguir el estilo del repo: prefijo tipo `feat`, `fix`, `chore` + ámbito entre paréntesis.
+
+Ejemplo: `feat(cedulas): destinatarios adicionales al cargar`
+
+## Push
+
+Si el push falla por permisos (403), informar al usuario: el commit local quedó hecho; debe autenticarse con una cuenta con acceso a `hongosystems/gestor-cedulas`.
