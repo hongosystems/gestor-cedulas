@@ -91,6 +91,9 @@ export default function NuevaCedulaPage() {
     esBeneficio?: boolean;
   }>>([]);
   const [cargandoUsuarios, setCargandoUsuarios] = useState(false);
+  const [destinatariosAdicionales, setDestinatariosAdicionales] = useState<{ id: string; full_name: string }[]>([]);
+  const [showSelectorDestinatario, setShowSelectorDestinatario] = useState(false);
+  const [allProfiles, setAllProfiles] = useState<{ id: string; full_name: string }[]>([]);
 
   const [file, setFile] = useState<File | null>(null);
   const [tipoDocumento, setTipoDocumento] = useState<"CEDULA" | "OFICIO" | "OTROS_ESCRITOS" | null>(null);
@@ -106,6 +109,19 @@ export default function NuevaCedulaPage() {
     if (!fechaCargaISO) return "";
     return addDaysISO(fechaCargaISO, 30);
   }, [fechaCargaISO]);
+
+  const profilesDisponibles = useMemo(() => {
+    const idsExcluidos = new Set([
+      ...usuariosAsignados.map((u) => u.id),
+      ...destinatariosAdicionales.map((d) => d.id),
+    ]);
+    return allProfiles.filter((p) => !idsExcluidos.has(p.id));
+  }, [allProfiles, usuariosAsignados, destinatariosAdicionales]);
+
+  function resetDestinatariosAdicionales() {
+    setDestinatariosAdicionales([]);
+    setShowSelectorDestinatario(false);
+  }
 
   async function requireSessionOrRedirect() {
     const { data } = await supabase.auth.getSession();
@@ -156,6 +172,20 @@ export default function NuevaCedulaPage() {
       if (prof?.must_change_password) {
         window.location.href = "/cambiar-password";
         return;
+      }
+
+      const { data: allProfilesData } = await supabase
+        .from("profiles")
+        .select("id, full_name, email")
+        .order("full_name");
+
+      if (allProfilesData) {
+        setAllProfiles(
+          allProfilesData.map((p) => ({
+            id: p.id,
+            full_name: (p.full_name || p.email || "Usuario sin nombre").trim(),
+          }))
+        );
       }
 
       setLoading(false);
@@ -282,6 +312,7 @@ export default function NuevaCedulaPage() {
   // Función para buscar expediente en PJN_Favoritos cuando el usuario ingresa número y año
   async function buscarExpediente(numero: string, anio: string, jurisdiccion: string) {
     setMsg("");
+    resetDestinatariosAdicionales();
     setExpedientesRelacionados([]);
     setMostrarSelectorExpedientes(false);
     
@@ -371,6 +402,7 @@ export default function NuevaCedulaPage() {
   }
 
   function seleccionarExpediente(exp: typeof expedientesRelacionados[0]) {
+    resetDestinatariosAdicionales();
     setCaratula(exp.caratula || "");
     setJuzgado(exp.juzgado || "");
     setExpedienteNumero(exp.numero);
@@ -509,6 +541,40 @@ export default function NuevaCedulaPage() {
         setMsg("Archivo subido, pero no se pudo guardar el link en la base: " + dbErr.message);
         window.location.href = "/app";
         return;
+      }
+
+      // 4) Compartir con destinatarios adicionales vía file_transfers (Recibidos)
+      if (destinatariosAdicionales.length > 0) {
+        const expedienteRef =
+          expedienteNumero.trim() && expedienteAnio.trim()
+            ? `${expedienteNumero.trim()}/${expedienteAnio.trim()}`
+            : null;
+
+        try {
+          const shareRes = await fetch("/api/cedulas/share-destinatarios-adicionales", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({
+              cedula_id: cedulaId,
+              recipient_user_ids: destinatariosAdicionales.map((d) => d.id),
+              expediente_ref: expedienteRef,
+              file_name: file.name,
+            }),
+          });
+
+          if (!shareRes.ok) {
+            const errData = await shareRes.json().catch(() => ({}));
+            console.error(
+              "[onSave] Error compartiendo destinatarios adicionales:",
+              errData.error || shareRes.status
+            );
+          }
+        } catch (shareErr) {
+          console.error("[onSave] Error compartiendo destinatarios adicionales:", shareErr);
+        }
       }
 
       window.location.href = "/app";
@@ -872,6 +938,7 @@ export default function NuevaCedulaPage() {
                 className="input"
                 value={juzgado}
                 onChange={(e) => {
+                  resetDestinatariosAdicionales();
                   setJuzgado(e.target.value);
                   obtenerUsuariosPorJuzgado(e.target.value, caratula);
                 }}
@@ -943,6 +1010,98 @@ export default function NuevaCedulaPage() {
                       No hay usuarios asignados a este juzgado.
                     </p>
                   )}
+
+                  {destinatariosAdicionales.length > 0 && (
+                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(0, 82, 156, 0.15)" }}>
+                      <p style={{ margin: "0 0 6px 0", fontSize: 12, color: "var(--muted)", fontWeight: 500 }}>
+                        Destinatarios adicionales:
+                      </p>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {destinatariosAdicionales.map((dest) => (
+                          <span
+                            key={dest.id}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                              fontSize: 12,
+                              padding: "4px 10px",
+                              borderRadius: 999,
+                              background: "rgba(0, 82, 156, 0.15)",
+                              border: "1px solid rgba(0, 82, 156, 0.3)",
+                              color: "var(--text)",
+                            }}
+                          >
+                            {dest.full_name}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setDestinatariosAdicionales((prev) =>
+                                  prev.filter((d) => d.id !== dest.id)
+                                )
+                              }
+                              style={{
+                                background: "none",
+                                border: "none",
+                                cursor: "pointer",
+                                color: "var(--muted)",
+                                fontSize: 14,
+                                lineHeight: 1,
+                                padding: 0,
+                              }}
+                              title="Quitar destinatario"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div style={{ marginTop: 10 }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowSelectorDestinatario((v) => !v)}
+                      style={{
+                        padding: "6px 12px",
+                        fontSize: 12,
+                        color: "var(--muted)",
+                        background: "transparent",
+                        border: "1px dashed rgba(0, 82, 156, 0.35)",
+                        borderRadius: 6,
+                        cursor: "pointer",
+                      }}
+                    >
+                      + Agregar destinatario
+                    </button>
+                    {showSelectorDestinatario && (
+                      <select
+                        className="input"
+                        value=""
+                        onChange={(e) => {
+                          const profileId = e.target.value;
+                          if (!profileId) return;
+                          const profile = allProfiles.find((p) => p.id === profileId);
+                          if (
+                            profile &&
+                            !destinatariosAdicionales.some((d) => d.id === profileId)
+                          ) {
+                            setDestinatariosAdicionales((prev) => [...prev, profile]);
+                          }
+                          setShowSelectorDestinatario(false);
+                        }}
+                        style={{ marginTop: 8, width: "100%", cursor: "pointer" }}
+                      >
+                        <option value="">Seleccionar usuario...</option>
+                        {profilesDisponibles.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.full_name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

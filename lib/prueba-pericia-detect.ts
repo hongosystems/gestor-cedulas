@@ -72,7 +72,28 @@ export const PRUEBA_PERICIA_DETALLE_PATTERNS: RegExp[] = [
   // Etapa probatoria documental: certificación de prueba ofrecida
   /SE\s+CERTIFIQUE\s+PRUEBA/i,
   /SOLICITA\s+SE\s+CERTIFIQUE\s+PRUEBA/i,
+  /CERTIFIQUEN?\s+(?:LAS\s+)?PRUEBAS?/i,
+  /CERTIFICADO\s+DE\s+PRUEBA/i,
+  /INFORMESE\s+SOBRE\s+LA\s+PRUEBA/i,
+  /PRUEBA\s+PENDIENTE/i,
+  /CLAUSURA\s+PRUEBA/i,
+  /PRUEBA:\s*CLAUSURA/i,
+  /APERTURA\s+A\s+PRUEBA/i,
+  /SE\s+REQUIERE\s+AL\s+PERITO/i,
+  /PERITO\s+MEDICO\s+PRESENTA\s+ESCRITO/i,
+  /PERITO.*CONTESTA\s+TRASLADO/i,
+  /DE\s+LA\s+PERICIAL/i,
+  /MANIFIESTA.*PERITO/i,
+  /SOLICITA\s+A\s+PERITO/i,
 ];
+
+/** Quita acentos para que HÁGASE/TÉNGASE/MÉDICO matcheen patrones ASCII. */
+export function normalizeDetalleForMatch(text: string): string {
+  return text
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
 
 function extractDetalleTextFromMovimiento(mov: Record<string, unknown>): string {
   let detalleText = "";
@@ -96,7 +117,7 @@ function extractDetalleTextFromMovimiento(mov: Record<string, unknown>): string 
     }
   }
 
-  return detalleText.trim();
+  return normalizeDetalleForMatch(detalleText.trim());
 }
 
 function normalizeMovimientos(movimientos: unknown): unknown[] | null {

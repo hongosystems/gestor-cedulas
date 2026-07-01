@@ -11,7 +11,12 @@ import ResponsableAvatars from "@/app/components/ResponsableAvatars";
 import { useColumnFilters, uniqueOptionsFromField } from "@/app/hooks/useColumnFilters";
 import { usePageSearchBridge } from "@/app/hooks/usePageSearchBridge";
 import { loadMentionUsersOnce } from "@/lib/users-list-cache";
-import { tienePruebaPericia } from "@/lib/prueba-pericia-detect";
+import {
+  buildOrdenesDeteccionIndex,
+  incluirEnDeteccion,
+  ordenesDeteccionRefsFromApi,
+  type OrdenesDeteccionIndex,
+} from "@/lib/prueba-pericia-deteccion";
 import {
   dedupeExpedientesByMatchKey,
   isExpedientePjnMergeEnabled,
@@ -1692,6 +1697,27 @@ export default function MisJuzgadosPage() {
         setMsg(msg ? `${msg} Error al cargar favoritos: ${err?.message || 'Error desconocido'}` : `Error al cargar favoritos: ${err?.message || 'Error desconocido'}`);
       }
 
+      let ordenesDeteccionIndex: OrdenesDeteccionIndex | null = null;
+      if (juzgadoFilter === "prueba_pericia") {
+        try {
+          const { data: ordenesData, error: ordenesErr } = await supabase
+            .from("ordenes_medicas")
+            .select("id, case_ref, expediente_id, expedientes(numero_expediente, caratula, juzgado)");
+          if (!ordenesErr && ordenesData) {
+            ordenesDeteccionIndex = buildOrdenesDeteccionIndex(
+              ordenesDeteccionRefsFromApi(ordenesData)
+            );
+            console.log(
+              `[Mis Juzgados] Órdenes médicas para detección Prueba/Pericia: ${ordenesData.length}`
+            );
+          } else if (ordenesErr) {
+            console.warn(`[Mis Juzgados] No se pudieron cargar órdenes para Prueba/Pericia:`, ordenesErr);
+          }
+        } catch (ordenesLoadErr) {
+          console.warn(`[Mis Juzgados] Error cargando órdenes para Prueba/Pericia:`, ordenesLoadErr);
+        }
+      }
+
       // Si el filtro es "prueba_pericia" y los favoritos no tienen movimientos, cargarlos desde cases
       if (juzgadoFilter === "prueba_pericia" && pjnFavoritos.length > 0) {
         const favoritosSinMovimientos = pjnFavoritos.filter(f => !f.movimientos);
@@ -1793,36 +1819,21 @@ export default function MisJuzgadosPage() {
         });
         console.log(`[Mis Juzgados] ✅ Favoritos filtrados por BENEFICIO: ${favoritosFiltrados.length} de ${pjnFavoritos.length}`);
       } else if (juzgadoFilter === "prueba_pericia") {
-        // Filtrar favoritos por Prueba/Pericia en movimientos
+        // Prueba/Pericia = todos los juzgados; detección por movimientos PJN u orden médica cargada
         console.log(`[Mis Juzgados] Filtrando por PRUEBA/PERICIA. Total favoritos: ${pjnFavoritos.length}`);
         const favoritosConMovimientos = pjnFavoritos.filter(f => f.movimientos).length;
         console.log(`[Mis Juzgados] Favoritos con movimientos: ${favoritosConMovimientos} de ${pjnFavoritos.length}`);
-        
+
         favoritosFiltrados = pjnFavoritos.filter((f: PjnFavorito) => {
-          if (!f.movimientos) {
-            return false;
-          }
-          
-          const tienePericia = tienePruebaPericia(f.movimientos);
-          if (!tienePericia) return false;
-          
-          // Respetar la distribución por juzgados asignados
-          if (juzgadosNormalizados.length > 0) {
-            if (!f.juzgado) return false;
-            const juzgadoNormalizado = normalizarJuzgado(f.juzgado);
-            return juzgadosNormalizados.some(jAsignado => {
-              if (juzgadoNormalizado === jAsignado) return true;
-              const numAsignado = jAsignado.match(/N[°º]\s*(\d+)/i)?.[1];
-              const numFavorito = juzgadoNormalizado.match(/N[°º]\s*(\d+)/i)?.[1];
-              if (numAsignado && numFavorito && numAsignado === numFavorito) {
-                if (jAsignado.includes("JUZGADO") && juzgadoNormalizado.includes("JUZGADO")) {
-                  return true;
-                }
-              }
-              return false;
-            });
-          }
-          return true;
+          const numeroExpediente = `${f.jurisdiccion} ${f.numero}/${f.anio}`;
+          return incluirEnDeteccion(
+            {
+              id: `pjn_${f.id}`,
+              numero_expediente: numeroExpediente,
+              movimientos: f.movimientos,
+            },
+            ordenesDeteccionIndex
+          );
         });
         console.log(`[Mis Juzgados] ✅ Favoritos filtrados por PRUEBA/PERICIA: ${favoritosFiltrados.length} de ${pjnFavoritos.length}`);
       } else if (juzgadoFilter && juzgadoFilter !== "mis_juzgados" && juzgadoFilter !== "todos" && juzgadoFilter !== "beneficio" && juzgadoFilter !== "prueba_pericia") {
@@ -1887,8 +1898,13 @@ export default function MisJuzgadosPage() {
           { ddmmaaaaToISO, normalizeJuzgado: (raw) => normalizeJuzgado(raw ?? null) }
         );
         expedientesBase = mergedLocals;
-        const unmatchedIds = new Set(unmatchedFavoritos.map((f) => f.id));
-        favoritosParaLista = favoritosFiltrados.filter((f) => unmatchedIds.has(f.id));
+        if (juzgadoFilter === "prueba_pericia") {
+          // No ocultar favoritos consumidos por merge: en este modo solo listamos favoritos detectados
+          favoritosParaLista = favoritosFiltrados;
+        } else {
+          const unmatchedIds = new Set(unmatchedFavoritos.map((f) => f.id));
+          favoritosParaLista = favoritosFiltrados.filter((f) => unmatchedIds.has(f.id));
+        }
         console.log(
           `[Mis Juzgados] Merge PJN: ${mergedCount} manuales enlazados, ${favoritosParaLista.length} favoritos en lista (${pjnFavoritos.length - unmatchedFavoritos.length} consumidos por match)`
         );
