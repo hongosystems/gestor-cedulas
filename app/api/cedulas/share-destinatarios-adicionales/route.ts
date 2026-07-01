@@ -49,8 +49,14 @@ export async function POST(req: Request) {
 
     const body = await req.json();
     const cedulaId = String(body.cedula_id || "").trim();
-    const recipientIds = Array.isArray(body.recipient_user_ids)
-      ? [...new Set(body.recipient_user_ids.map((id: unknown) => String(id || "").trim()).filter(Boolean))]
+    const recipientIds: string[] = Array.isArray(body.recipient_user_ids)
+      ? Array.from(
+          new Set(
+            (body.recipient_user_ids as unknown[])
+              .map((id) => String(id ?? "").trim())
+              .filter((id) => id.length > 0)
+          )
+        )
       : [];
     const expedienteRef = String(body.expediente_ref || "").trim() || null;
     const fileName = String(body.file_name || "").trim() || "documento.pdf";
