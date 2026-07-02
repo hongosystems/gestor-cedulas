@@ -1,8 +1,61 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  assertValidMailboxFile,
+  extFromMailboxFileName,
+  MAX_MAILBOX_ATTACHMENTS_PER_MESSAGE,
+} from "@/lib/mailbox-attachments";
 import { supabaseService } from "@/lib/supabase-server";
 import { withAutoNotasTimestamp } from "@/lib/notas-timestamp";
+import {
+  contentTypeForTransferExt,
+  transferAttachmentStoragePath,
+} from "@/lib/transfer-attachments";
 
 export const runtime = "nodejs";
+
+type ReplyFileMeta = { file_name: string; file_size: number };
+type ReplyTransferUpload = { transferId: string; version: number; storage_path: string };
+
+function parseReplyFileMeta(raw: unknown): ReplyFileMeta[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const file_name = String((item as ReplyFileMeta).file_name || "").trim();
+      const file_size = Number((item as ReplyFileMeta).file_size || 0);
+      if (!file_name || !Number.isFinite(file_size) || file_size <= 0) return null;
+      return { file_name, file_size };
+    })
+    .filter((item): item is ReplyFileMeta => item !== null);
+}
+
+function parseReplyTransferUploads(raw: unknown): ReplyTransferUpload[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const transferId = String((item as ReplyTransferUpload).transferId || "").trim();
+      const storage_path = String((item as ReplyTransferUpload).storage_path || "").trim();
+      const version = Number((item as ReplyTransferUpload).version || 1);
+      if (!transferId || !storage_path) return null;
+      return { transferId, version, storage_path };
+    })
+    .filter((item): item is ReplyTransferUpload => item !== null);
+}
+
+function validateReplyFiles(files: ReplyFileMeta[]) {
+  if (files.length > MAX_MAILBOX_ATTACHMENTS_PER_MESSAGE) {
+    return `Podés adjuntar hasta ${MAX_MAILBOX_ATTACHMENTS_PER_MESSAGE} archivos por mensaje.`;
+  }
+  for (const file of files) {
+    try {
+      assertValidMailboxFile(file.file_name, file.file_size);
+    } catch (e) {
+      return e instanceof Error ? e.message : "Archivo inválido.";
+    }
+  }
+  return null;
+}
 
 async function getUserFromRequest(req: Request) {
   const authHeader = req.headers.get("authorization");
@@ -54,6 +107,7 @@ export async function POST(req: NextRequest) {
     let is_pjn_favorito: boolean | undefined;
     let phase: string | undefined;
     let has_file_hint = false;
+    let files_meta: ReplyFileMeta[] = [];
     let transfer_upload:
       | {
           transferId: string;
@@ -61,7 +115,8 @@ export async function POST(req: NextRequest) {
           storage_path: string;
         }
       | null = null;
-    let file: File | null = null;
+    let transfers_upload: ReplyTransferUpload[] = [];
+    let rawFiles: File[] = [];
 
     if (contentType.includes("multipart/form-data")) {
       // Es FormData con archivo
@@ -73,14 +128,22 @@ export async function POST(req: NextRequest) {
       const isPjn = form.get("is_pjn_favorito");
       is_pjn_favorito = isPjn ? String(isPjn) === "true" : undefined;
       const fileData = form.get("file");
-      if (fileData instanceof File) {
-        file = fileData;
+      const legacyFiles = form
+        .getAll("files")
+        .filter((f): f is File => f instanceof File && (f.size ?? 0) > 0);
+      if (legacyFiles.length > 0) {
+        rawFiles = legacyFiles;
+      } else if (fileData instanceof File && (fileData.size ?? 0) > 0) {
+        rawFiles = [fileData];
       }
+      files_meta = rawFiles.map((f) => ({ file_name: f.name, file_size: f.size }));
     } else {
       // Es JSON sin archivo
       const body = await req.json();
       phase = body.phase;
       has_file_hint = body.has_file === true;
+      files_meta = parseReplyFileMeta(body.files);
+      transfers_upload = parseReplyTransferUploads(body.transfers);
       if (body.transfer && typeof body.transfer === "object") {
         const t = body.transfer as any;
         transfer_upload =
@@ -105,27 +168,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Validar archivo si está presente
-    if (file) {
-      const name = (file.name || "").toLowerCase();
-      if (!name.endsWith(".docx")) {
-        return NextResponse.json(
-          { error: "Solo se permite .docx como archivo adjunto" },
-          { status: 400 }
-        );
-      }
-      // Este check es solo preventivo; en Vercel igual puede cortar antes (413) si el payload es grande.
-      const MAX_DOCX_BYTES = 10 * 1024 * 1024; // 10MB
-      if (file.size > MAX_DOCX_BYTES) {
-        return NextResponse.json(
-          { error: "El archivo .docx excede el límite de 10MB" },
-          { status: 413 }
-        );
+    // Validar archivos si están presentes
+    if (files_meta.length > 0) {
+      const validationError = validateReplyFiles(files_meta);
+      if (validationError) {
+        return NextResponse.json({ error: validationError }, { status: 400 });
       }
     }
 
     const svc = supabaseService();
-    const hasFile = !!file || has_file_hint;
+    const hasFile = files_meta.length > 0 || has_file_hint;
 
     // Obtener la notificación padre para obtener el thread_id y metadata
     const { data: parentNotif, error: parentError } = await svc
@@ -222,10 +274,22 @@ export async function POST(req: NextRequest) {
       parentNotif.link === "/app/recibidos" ||
       !!(parentMetadata && typeof parentMetadata === "object" && (parentMetadata as any)?.transfer_id);
 
-    // Fase 1 (init): crear la transferencia y devolver el `storage_path`, pero SIN recibir/subir el archivo.
+    // Fase 1 (init): crear la transferencia y devolver los `storage_path`, pero SIN recibir/subir archivos.
     if (phase === "init_transfer") {
       if (!hasFile) {
         return NextResponse.json({ ok: true, transferNeeded: false });
+      }
+
+      if (files_meta.length === 0) {
+        return NextResponse.json(
+          { error: "Debés indicar al menos un archivo adjunto." },
+          { status: 400 }
+        );
+      }
+
+      const validationError = validateReplyFiles(files_meta);
+      if (validationError) {
+        return NextResponse.json({ error: validationError }, { status: 400 });
       }
 
       // Obtener el transfer_id original del metadata (si existiera)
@@ -290,36 +354,54 @@ export async function POST(req: NextRequest) {
       }
 
       const transferId = String(newTransfer.id);
-      const version = 1;
-      const storage_path = `transfers/${transferId}/v${version}.docx`;
+      const uploads = files_meta.map((meta, index) => {
+        const ext = extFromMailboxFileName(meta.file_name)!;
+        const version = index + 1;
+        return {
+          version,
+          storage_path: transferAttachmentStoragePath(transferId, version, meta.file_name, ext),
+          content_type: contentTypeForTransferExt(ext),
+        };
+      });
 
       return NextResponse.json({
         ok: true,
         transferNeeded: true,
         transferId,
-        version,
-        storage_path,
+        uploads,
+        // Compatibilidad con clientes que esperan un solo adjunto
+        version: uploads[0]?.version ?? 1,
+        storage_path: uploads[0]?.storage_path,
       });
     }
 
-    // Si hay un archivo adjunto y la notificación padre es de transferencia, crear una nueva transferencia
+    // Si hay archivos adjuntos, crear una nueva transferencia
     let transferId: string | null = null;
     if (phase === "commit_reply") {
-      if (transfer_upload?.transferId && transfer_upload.storage_path) {
-        transferId = transfer_upload.transferId;
+      const uploadsToCommit =
+        transfers_upload.length > 0
+          ? transfers_upload
+          : transfer_upload
+            ? [transfer_upload]
+            : [];
 
-        const { error: vErr } = await svc.from("file_transfer_versions").insert({
-          transfer_id: transferId,
-          version: transfer_upload.version || 1,
-          storage_path: transfer_upload.storage_path,
-          created_by: user.id,
-        });
+      if (uploadsToCommit.length > 0) {
+        transferId = uploadsToCommit[0].transferId;
 
-        if (vErr) {
-          return NextResponse.json({ error: vErr.message }, { status: 500 });
+        for (const upload of uploadsToCommit) {
+          const { error: vErr } = await svc.from("file_transfer_versions").insert({
+            transfer_id: upload.transferId,
+            version: upload.version || 1,
+            storage_path: upload.storage_path,
+            created_by: user.id,
+          });
+
+          if (vErr) {
+            return NextResponse.json({ error: vErr.message }, { status: 500 });
+          }
         }
       }
-    } else if (file) {
+    } else if (rawFiles.length > 0) {
       // Obtener el transfer_id original del metadata
       let originalTransferId: string | null = null;
       
@@ -382,46 +464,47 @@ export async function POST(req: NextRequest) {
         );
       }
       
-      transferId = newTransfer.id;
-      const version = 1;
-      
-      // Subir archivo a storage
-      const buf = Buffer.from(await file.arrayBuffer());
-      const storage_path = `transfers/${transferId}/v${version}.docx`;
-      
-      const { error: upErr } = await svc.storage
-        .from("transfers")
-        .upload(storage_path, buf, {
-          contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      const createdTransferId = String(newTransfer.id);
+      transferId = createdTransferId;
+
+      for (let i = 0; i < rawFiles.length; i++) {
+        const uploadFile = rawFiles[i];
+        const ext = extFromMailboxFileName(uploadFile.name)!;
+        const version = i + 1;
+        const storage_path = transferAttachmentStoragePath(
+          createdTransferId,
+          version,
+          uploadFile.name,
+          ext
+        );
+        const buf = Buffer.from(await uploadFile.arrayBuffer());
+
+        const { error: upErr } = await svc.storage.from("transfers").upload(storage_path, buf, {
+          contentType: contentTypeForTransferExt(ext),
           upsert: true,
         });
-      
-      if (upErr) {
-        console.error("[API reply] Error al subir archivo:", upErr);
-        return NextResponse.json(
-          { error: `No se pudo subir el archivo: ${upErr.message}` },
-          { status: 500 }
-        );
-      }
-      
-      // Insertar versión
-      const { error: vErr } = await svc
-        .from("file_transfer_versions")
-        .insert({
-          transfer_id: transferId,
+
+        if (upErr) {
+          console.error("[API reply] Error al subir archivo:", upErr);
+          return NextResponse.json(
+            { error: `No se pudo subir ${uploadFile.name}: ${upErr.message}` },
+            { status: 500 }
+          );
+        }
+
+        const { error: vErr } = await svc.from("file_transfer_versions").insert({
+          transfer_id: createdTransferId,
           version,
           storage_path,
           created_by: user.id,
         });
-      
-      if (vErr) {
-        console.error("[API reply] Error al crear versión:", vErr);
-        return NextResponse.json(
-          { error: vErr.message },
-          { status: 500 }
-        );
+
+        if (vErr) {
+          console.error("[API reply] Error al crear versión:", vErr);
+          return NextResponse.json({ error: vErr.message }, { status: 500 });
+        }
       }
-      
+
       console.log("[API reply] Transferencia creada exitosamente:", transferId);
     }
 
@@ -429,7 +512,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           error:
-            "No se pudo registrar el archivo adjunto. Si usaste un .docx, reintentá el envío o respondé desde el hilo del documento en Recibidos.",
+            "No se pudo registrar el archivo adjunto. Reintentá el envío o respondé desde el hilo del documento en Recibidos.",
           suggestion:
             "Si subiste una nueva versión desde la pantalla Recibidos, la otra parte debería poder descargarla desde la notificación tras actualizar la app.",
         },

@@ -11,6 +11,13 @@ import {
   textMatchesQuery,
 } from "@/lib/bandeja-search";
 import { isMailboxLinkedNotification, isTransferLinkedNotification } from "@/lib/notification-utils";
+import {
+  assertValidMailboxFile,
+  contentTypeForMailboxExt,
+  extFromMailboxFileName,
+  MAX_MAILBOX_ATTACHMENT_BYTES,
+  MAX_MAILBOX_ATTACHMENTS_PER_MESSAGE,
+} from "@/lib/mailbox-attachments";
 
 type Notif = {
   id: string;
@@ -69,6 +76,12 @@ function snippet(text: string, maxLen: number) {
   const t = text.replace(/\s+/g, " ").trim();
   if (t.length <= maxLen) return t;
   return `${t.slice(0, maxLen - 1)}…`;
+}
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function fmtTime(iso: string) {
@@ -286,7 +299,7 @@ export default function NotificationsInbox({
   const [backUrl, setBackUrl] = useState<string>("/app");
   const [selectedNotif, setSelectedNotif] = useState<Notif | null>(null);
   const [replyText, setReplyText] = useState<string>("");
-  const [replyFile, setReplyFile] = useState<File | null>(null);
+  const [replyFiles, setReplyFiles] = useState<File[]>([]);
   const [replying, setReplying] = useState(false);
   const [ordenPdfUrl, setOrdenPdfUrl] = useState<string | null>(null);
   const [expedienteInfo, setExpedienteInfo] = useState<{
@@ -651,7 +664,7 @@ export default function NotificationsInbox({
     }
     setSelectedNotif(notif);
     setReplyText("");
-    setReplyFile(null);
+    setReplyFiles([]);
     setExpedienteInfo(null);
     setOrdenPdfUrl(null);
     if (!notif.is_read) {
@@ -1274,6 +1287,40 @@ export default function NotificationsInbox({
     }
   }
 
+  function addReplyFiles(incoming: FileList | File[] | null) {
+    if (!incoming || incoming.length === 0) return;
+    const toAdd = Array.from(incoming);
+    setReplyFiles((prev) => {
+      const next = [...prev];
+      for (const f of toAdd) {
+        if (next.length >= MAX_MAILBOX_ATTACHMENTS_PER_MESSAGE) {
+          setToast({
+            type: "error",
+            message: `Podés adjuntar hasta ${MAX_MAILBOX_ATTACHMENTS_PER_MESSAGE} archivos.`,
+          });
+          setTimeout(() => setToast(null), 4000);
+          return prev;
+        }
+        try {
+          assertValidMailboxFile(f.name, f.size);
+          next.push(f);
+        } catch (e) {
+          setToast({
+            type: "error",
+            message: e instanceof Error ? e.message : "Archivo inválido.",
+          });
+          setTimeout(() => setToast(null), 4000);
+          return prev;
+        }
+      }
+      return next;
+    });
+  }
+
+  function removeReplyFile(index: number) {
+    setReplyFiles((prev) => prev.filter((_, i) => i !== index));
+  }
+
   async function handleReply() {
     if (!selectedNotif || !replyText.trim()) return;
     const parentForReply = threadSortedDesc[0] || selectedNotif;
@@ -1310,28 +1357,16 @@ export default function NotificationsInbox({
 
       const messageTrimmed = replyText.trim();
       const token = session.session.access_token;
-      const MAX_DOCX_BYTES = 10 * 1024 * 1024; // 10MB
+      const hasReplyFiles = replyFiles.length > 0;
 
       let res: Response;
 
-      // Si hay un archivo adjunto: evitar multipart hacia Vercel.
+      // Si hay archivos adjuntos: evitar multipart hacia Vercel.
       // En su lugar, hacemos:
-      // 1) init_transfer (crea la transferencia y devuelve storage_path)
+      // 1) init_transfer (crea la transferencia y devuelve storage_path por archivo)
       // 2) upload directo a Supabase Storage desde el browser
-      // 3) commit_reply (crea versión + notificaciones, sin recibir el archivo)
-      if (replyFile) {
-        const name = (replyFile.name || "").toLowerCase();
-        if (!name.endsWith(".docx")) {
-          setToast({ type: "error", message: "Solo se permite .docx como archivo adjunto" });
-          setReplying(false);
-          return;
-        }
-        if (replyFile.size > MAX_DOCX_BYTES) {
-          setToast({ type: "error", message: "El archivo .docx excede el límite de 10MB" });
-          setReplying(false);
-          return;
-        }
-
+      // 3) commit_reply (crea versiones + notificaciones, sin recibir los archivos)
+      if (hasReplyFiles) {
         const initRes = await fetch("/api/notifications/reply", {
           method: "POST",
           headers: {
@@ -1345,6 +1380,7 @@ export default function NotificationsInbox({
             expediente_id: parentForReply.expediente_id,
             is_pjn_favorito: parentForReply.is_pjn_favorito,
             has_file: true,
+            files: replyFiles.map((f) => ({ file_name: f.name, file_size: f.size })),
           }),
         });
 
@@ -1359,35 +1395,54 @@ export default function NotificationsInbox({
           return;
         }
 
-        let transfer: { transferId: string; version: number; storage_path: string } | undefined;
+        let transfers:
+          | { transferId: string; version: number; storage_path: string }[]
+          | undefined;
         if (initJson?.transferNeeded) {
-          if (!initJson?.storage_path || !initJson?.transferId) {
+          const uploads = Array.isArray(initJson.uploads) ? initJson.uploads : [];
+          if (!initJson?.transferId || uploads.length !== replyFiles.length) {
             setToast({ type: "error", message: "Respuesta inválida al inicializar transferencia" });
             setReplying(false);
             return;
           }
 
-          const { error: uploadErr } = await supabase.storage
-            .from("transfers")
-            .upload(initJson.storage_path, replyFile, {
-              contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-              upsert: true,
-            });
+          transfers = [];
+          for (let i = 0; i < replyFiles.length; i++) {
+            const file = replyFiles[i];
+            const upload = uploads[i] as {
+              version?: number;
+              storage_path?: string;
+              content_type?: string;
+            };
+            const ext = extFromMailboxFileName(file.name);
+            if (!ext || !upload?.storage_path) {
+              setToast({ type: "error", message: "Tipo de archivo no permitido." });
+              setReplying(false);
+              return;
+            }
 
-          if (uploadErr) {
-            setToast({
-              type: "error",
-              message: uploadErr.message || "No se pudo subir el archivo adjunto",
+            const { error: uploadErr } = await supabase.storage
+              .from("transfers")
+              .upload(upload.storage_path, file, {
+                contentType: upload.content_type || contentTypeForMailboxExt(ext),
+                upsert: true,
+              });
+
+            if (uploadErr) {
+              setToast({
+                type: "error",
+                message: uploadErr.message || `No se pudo subir ${file.name}`,
+              });
+              setReplying(false);
+              return;
+            }
+
+            transfers.push({
+              transferId: initJson.transferId,
+              version: upload.version || i + 1,
+              storage_path: upload.storage_path,
             });
-            setReplying(false);
-            return;
           }
-
-          transfer = {
-            transferId: initJson.transferId,
-            version: initJson.version || 1,
-            storage_path: initJson.storage_path,
-          };
         }
 
         res = await fetch("/api/notifications/reply", {
@@ -1403,7 +1458,7 @@ export default function NotificationsInbox({
             expediente_id: parentForReply.expediente_id,
             is_pjn_favorito: parentForReply.is_pjn_favorito,
             has_file: true,
-            ...(transfer ? { transfer } : {}),
+            ...(transfers && transfers.length > 0 ? { transfers } : {}),
           }),
         });
       } else {
@@ -1431,13 +1486,15 @@ export default function NotificationsInbox({
           if (result.ok) {
             setToast({
               type: "success",
-              message: replyFile 
-                ? "Respuesta y archivo enviados correctamente. El remitente original recibirá una notificación."
+              message: hasReplyFiles
+                ? replyFiles.length > 1
+                  ? `Respuesta y ${replyFiles.length} archivos enviados correctamente. El remitente original recibirá una notificación.`
+                  : "Respuesta y archivo enviados correctamente. El remitente original recibirá una notificación."
                 : "Respuesta enviada correctamente. El remitente original recibirá una notificación."
             });
             // Auto-ocultar después de 4 segundos
             setTimeout(() => setToast(null), 4000);
-            setReplyFile(null); // Limpiar el archivo después de enviar
+            setReplyFiles([]);
           }
           
           // Agregar la respuesta del usuario al hilo inmediatamente (antes de recargar)
@@ -1447,8 +1504,10 @@ export default function NotificationsInbox({
             const myReply: Notif = {
               id: `temp-${Date.now()}`,
               title: `Re: ${parentForReply.title}`,
-              body: replyFile 
-                ? `${currentUserName} respondió con archivo adjunto: ${messageText}`
+              body: hasReplyFiles
+                ? replyFiles.length > 1
+                  ? `${currentUserName} respondió con ${replyFiles.length} archivos adjuntos: ${messageText}`
+                  : `${currentUserName} respondió con archivo adjunto: ${messageText}`
                 : `${currentUserName} respondió: ${messageText}`,
               link: parentForReply.link,
               is_read: true,
@@ -2311,12 +2370,17 @@ export default function NotificationsInbox({
                           color: "rgba(234,243,255,.8)",
                           marginBottom: 6
                         }}>
-                          Adjuntar archivo (.docx) — opcional
+                          Adjuntar archivos — opcional
                         </label>
                         <input
                           type="file"
-                          accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                          onChange={(e) => setReplyFile(e.target.files?.[0] ?? null)}
+                          multiple
+                          accept=".docx,.pdf,.png,.jpg,.jpeg,.zip"
+                          disabled={replying || replyFiles.length >= MAX_MAILBOX_ATTACHMENTS_PER_MESSAGE}
+                          onChange={(e) => {
+                            addReplyFiles(e.target.files);
+                            e.target.value = "";
+                          }}
                           style={{
                             width: "100%",
                             padding: 8,
@@ -2328,13 +2392,43 @@ export default function NotificationsInbox({
                             fontFamily: "inherit",
                           }}
                         />
-                        {replyFile && (
-                          <div style={{
-                            marginTop: 6,
-                            fontSize: 12,
-                            color: "rgba(234,243,255,.7)"
-                          }}>
-                            Archivo seleccionado: {replyFile.name}
+                        <div style={{
+                          marginTop: 6,
+                          fontSize: 11,
+                          color: "rgba(234,243,255,.55)"
+                        }}>
+                          .docx · .pdf · .png · .jpg · .jpeg · .zip · máx.{" "}
+                          {MAX_MAILBOX_ATTACHMENT_BYTES / (1024 * 1024)} MB c/u · hasta{" "}
+                          {MAX_MAILBOX_ATTACHMENTS_PER_MESSAGE} archivos
+                        </div>
+                        {replyFiles.length > 0 && (
+                          <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+                            {replyFiles.map((f, index) => (
+                              <div
+                                key={`${f.name}-${index}`}
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  gap: 8,
+                                  fontSize: 12,
+                                  color: "rgba(234,243,255,.7)",
+                                }}
+                              >
+                                <span>
+                                  📎 {f.name} · {formatFileSize(f.size)}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="btn"
+                                  disabled={replying}
+                                  onClick={() => removeReplyFile(index)}
+                                  style={{ padding: "2px 8px", fontSize: 11 }}
+                                >
+                                  Quitar
+                                </button>
+                              </div>
+                            ))}
                           </div>
                         )}
                       </div>
@@ -2343,7 +2437,7 @@ export default function NotificationsInbox({
                             onClick={() => {
                               setSelectedNotif(null);
                               setReplyText("");
-                              setReplyFile(null);
+                              setReplyFiles([]);
                             }}
                             className="btn"
                             disabled={replying}
@@ -2361,7 +2455,7 @@ export default function NotificationsInbox({
                               opacity: (!replyText.trim() || replying) ? 0.6 : 1
                             }}
                           >
-                            {replying ? "Enviando..." : replyFile ? "Responder con archivo" : "Responder"}
+                            {replying ? "Enviando..." : replyFiles.length > 0 ? "Responder con archivo" : "Responder"}
                           </button>
                         </div>
                     </>
