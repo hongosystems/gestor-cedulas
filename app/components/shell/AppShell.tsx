@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useUserRoles } from "@/app/hooks/useUserRoles";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
@@ -15,6 +15,7 @@ const SIDEBAR_COLLAPSED_KEY = "gestor-sidebar-collapsed";
 
 export default function AppShell({ children }: AppShellProps) {
   const { roles, loading, userEmail, userName } = useUserRoles();
+  const shellReadyRef = useRef(false);
   const [collapsed, setCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
     try {
@@ -48,7 +49,13 @@ export default function AppShell({ children }: AppShellProps) {
 
   const closeMobile = useCallback(() => setMobileOpen(false), []);
 
-  if (loading) {
+  if (!loading) {
+    shellReadyRef.current = true;
+  }
+
+  const showBlockingLoader = loading && !shellReadyRef.current;
+
+  if (showBlockingLoader) {
     return (
       <div className="app-shell app-shell--loading">
         <div className="app-shell-loading-msg">Cargando…</div>
