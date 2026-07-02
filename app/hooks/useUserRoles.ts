@@ -67,18 +67,63 @@ export function useUserRoles() {
       setLoading(false);
     })();
 
-    const { data: sub } = supabase.auth.onAuthStateChange(() => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      // Supabase refresca el token al volver a la pestaña (TOKEN_REFRESHED).
+      // No mostrar "Cargando…" ni desmontar páginas por eso.
+      if (event === "TOKEN_REFRESHED" || event === "INITIAL_SESSION") return;
+
+      if (!session) {
+        setHasSession(false);
+        setRoles(EMPTY_ROLES);
+        setUserEmail(null);
+        setUserName(null);
+        return;
+      }
+
+      setHasSession(true);
+      const uid = session.user.id;
+      setUserEmail(session.user.email ?? null);
+
+      if (event === "USER_UPDATED") {
+        void (async () => {
+          const { data: prof } = await supabase
+            .from("profiles")
+            .select("full_name")
+            .eq("id", uid)
+            .maybeSingle();
+          if (!cancelled) setUserName(prof?.full_name?.trim() || null);
+        })();
+        return;
+      }
+
+      // SIGNED_IN (p. ej. login en otra pestaña): recargar roles una vez.
       setLoading(true);
       void (async () => {
-        const { data: sess } = await supabase.auth.getSession();
-        if (cancelled) return;
-        if (!sess.session) {
-          setHasSession(false);
-          setRoles(EMPTY_ROLES);
-          setUserEmail(null);
-          setUserName(null);
+        try {
+          const [{ data: roleData }, { data: prof }] = await Promise.all([
+            supabase
+              .from("user_roles")
+              .select(
+                "is_superadmin, is_abogado, is_admin_expedientes, is_admin_cedulas, is_admin_mediaciones, is_mediador, is_admin_ordenes_medicas"
+              )
+              .eq("user_id", uid)
+              .maybeSingle(),
+            supabase.from("profiles").select("full_name").eq("id", uid).maybeSingle(),
+          ]);
+          if (cancelled) return;
+          setRoles({
+            isSuperadmin: roleData?.is_superadmin === true,
+            isAbogado: roleData?.is_abogado === true,
+            isAdminExpedientes: roleData?.is_admin_expedientes === true,
+            isAdminCedulas: roleData?.is_admin_cedulas === true,
+            isAdminMediaciones: roleData?.is_admin_mediaciones === true,
+            isMediador: roleData?.is_mediador === true,
+            isAdminOrdenesMedicas: roleData?.is_admin_ordenes_medicas === true,
+          });
+          setUserName(prof?.full_name?.trim() || null);
+        } finally {
+          if (!cancelled) setLoading(false);
         }
-        setLoading(false);
       })();
     });
 
