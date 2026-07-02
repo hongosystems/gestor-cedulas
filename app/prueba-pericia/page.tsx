@@ -9,7 +9,7 @@ import { colorPericia, periciaRenunciaObservaciones } from "@/lib/semaforo";
 import { stripAutoNotasTimestamp, withAutoNotasTimestamp } from "@/lib/notas-timestamp";
 import { FilterableTh } from "@/app/components/FilterableTh";
 import { useColumnFilters } from "@/app/hooks/useColumnFilters";
-import { usePageSearchBridge } from "@/app/hooks/usePageSearchBridge";
+import { useEffectivePageSearch, usePageSearchBridge } from "@/app/hooks/usePageSearchBridge";
 import {
   buildFavoritoIndexFromList,
   expedienteMatchKey,
@@ -18,6 +18,8 @@ import {
   findFavoritoForExpediente,
   incluirEnDeteccion,
   buildOrdenesDeteccionIndex,
+  buildOrdenesExistentesMap,
+  itemTieneOrdenMedica,
   ordenesDeteccionRefsFromApi,
   type OrdenDeteccionRef,
 } from "@/lib/prueba-pericia-deteccion";
@@ -1323,6 +1325,8 @@ function PruebaPericiaPageContent() {
     [activeTab]
   );
   usePageSearchBridge(pageSearchValue, handlePageSearchChange);
+  const effectiveSearchTerm = useEffectivePageSearch(searchTerm);
+  const effectiveSearchTermOrdenes = useEffectivePageSearch(searchTermOrdenes);
   const [createdByFilterOrdenes, setCreatedByFilterOrdenes] = useState<string>("all");
   const [createdByOptionsOrdenes, setCreatedByOptionsOrdenes] = useState<Array<{ id: string; name: string }>>([]);
   
@@ -1603,19 +1607,9 @@ function PruebaPericiaPageContent() {
           if (ordenesRes.ok) {
             const { data: ordenes } = await ordenesRes.json();
             if (ordenes && Array.isArray(ordenes)) {
-              setOrdenesParaDeteccion(ordenesDeteccionRefsFromApi(ordenes));
-              // Crear un mapa de case_ref -> tiene orden
-              const ordenesMap: Record<string, boolean> = {};
-              ordenes.forEach((orden: any) => {
-                if (orden.case_ref) {
-                  ordenesMap[orden.case_ref] = true;
-                }
-                // También mapear por expediente_id si existe
-                if (orden.expediente_id) {
-                  ordenesMap[orden.expediente_id] = true;
-                }
-              });
-              setOrdenesExistentes(ordenesMap);
+              const refs = ordenesDeteccionRefsFromApi(ordenes);
+              setOrdenesParaDeteccion(refs);
+              setOrdenesExistentes(buildOrdenesExistentesMap(refs));
             }
           }
         } catch (err) {
@@ -1725,7 +1719,9 @@ function PruebaPericiaPageContent() {
         const result = await res.json();
         const ordenes = result.data || [];
         setOrdenesData(ordenes);
-        setOrdenesParaDeteccion(ordenesDeteccionRefsFromApi(ordenes));
+        const refs = ordenesDeteccionRefsFromApi(ordenes);
+        setOrdenesParaDeteccion(refs);
+        setOrdenesExistentes(buildOrdenesExistentesMap(refs));
         
         // Construir opciones para el filtro "Cargado por" basado en los usuarios que crearon órdenes
         const userIds = new Set<string>();
@@ -2004,18 +2000,21 @@ function PruebaPericiaPageContent() {
   useEffect(() => {
     if (!FEATURE_GASTOS) return;
     const tab = searchParams.get("tab");
-    const gastoId = searchParams.get("gasto_id");
     if (tab === "gastos") {
       setActiveTab("gastos");
-      if (gastoId && gastosData.length > 0) {
-        const found = gastosData.find((g) => g.id === gastoId);
-        if (found) {
-          setSelectedGasto(found);
-          setGastosDrawerOpen(true);
-        }
-      }
     }
-  }, [searchParams, gastosData]);
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!FEATURE_GASTOS || activeTab !== "gastos") return;
+    const gastoId = searchParams.get("gasto_id");
+    if (!gastoId || gastosData.length === 0) return;
+    const found = gastosData.find((g) => g.id === gastoId);
+    if (found) {
+      setSelectedGasto(found);
+      setGastosDrawerOpen(true);
+    }
+  }, [searchParams, activeTab, gastosData]);
 
   // Filtrar expedientes por Prueba/Pericia y juzgados
   const expedientesFiltrados = useMemo(() => {
@@ -2124,6 +2123,14 @@ function PruebaPericiaPageContent() {
     return incluidos;
   }, [expedientes, pjnFavoritos, juzgadoFilter, ordenesParaDeteccion]);
 
+  const ordenesDeteccionIndex = useMemo(
+    () =>
+      ordenesParaDeteccion.length > 0
+        ? buildOrdenesDeteccionIndex(ordenesParaDeteccion)
+        : null,
+    [ordenesParaDeteccion]
+  );
+
   // Preparar items para mostrar
   const itemsToShow = useMemo(() => {
     return expedientesFiltrados.map(e => {
@@ -2189,8 +2196,8 @@ function PruebaPericiaPageContent() {
       );
     }
 
-    if (searchTerm.trim()) {
-      const searchLower = searchTerm.trim().toLowerCase();
+    if (effectiveSearchTerm.trim()) {
+      const searchLower = effectiveSearchTerm.trim().toLowerCase();
       filtered = filtered.filter((item: any) => {
         const numeroExpediente = (item.numero || "").toLowerCase();
         const caratula = (item.caratula || "").toLowerCase();
@@ -2249,7 +2256,7 @@ function PruebaPericiaPageContent() {
     itemsToShow,
     createdByFilter,
     deteccionCol.filters,
-    searchTerm,
+    effectiveSearchTerm,
     sortField,
     sortDirection,
     currentPage,
@@ -2398,8 +2405,8 @@ function PruebaPericiaPageContent() {
         (orden: any) => (orden.gestion?.centro_medico || "").trim() === cm
       );
     }
-    if (searchTermOrdenes.trim()) {
-      const searchLower = searchTermOrdenes.trim().toLowerCase();
+    if (effectiveSearchTermOrdenes.trim()) {
+      const searchLower = effectiveSearchTermOrdenes.trim().toLowerCase();
       ordenesFiltradas = ordenesFiltradas.filter((orden: any) => {
         const caseRef = (orden.case_ref || "").toLowerCase();
         const filename = (orden.filename || "").toLowerCase();
@@ -2412,7 +2419,7 @@ function PruebaPericiaPageContent() {
       );
     }
     return ordenesFiltradas;
-  }, [ordenesData, ordenesCol.filters, searchTermOrdenes, createdByFilterOrdenes]);
+  }, [ordenesData, ordenesCol.filters, effectiveSearchTermOrdenes, createdByFilterOrdenes]);
 
   const deteccionColSpan = getExpedienteMasterDetailColSpan(
     FEATURE_ORDENES_SEGUIMIENTO ? 1 : 0
@@ -2423,7 +2430,7 @@ function PruebaPericiaPageContent() {
 
   useEffect(() => {
     setExpandedRowId(null);
-  }, [activeTab, currentPage, searchTerm, createdByFilter, juzgadoFilter, deteccionCol.filters]);
+  }, [activeTab, currentPage, effectiveSearchTerm, createdByFilter, juzgadoFilter, deteccionCol.filters]);
 
   if (loading) {
     return (
@@ -3789,7 +3796,11 @@ function PruebaPericiaPageContent() {
                     FEATURE_ORDENES_SEGUIMIENTO
                       ? () => {
                     const caseRef = item.numero || item.caratula || "Sin referencia";
-                    const tieneOrden = ordenesExistentes[caseRef] || (!item.is_pjn_favorito && ordenesExistentes[item.id]);
+                    const tieneOrden = itemTieneOrdenMedica(
+                      item,
+                      ordenesDeteccionIndex,
+                      ordenesExistentes
+                    );
                     const isUploading = uploadingOrden[item.id] === true;
 
                     return (

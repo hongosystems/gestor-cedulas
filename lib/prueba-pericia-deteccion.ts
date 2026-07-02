@@ -106,3 +106,47 @@ export function favoritoNumeroExpediente(f: PjnFavoritoForMerge): string {
 export function favoritoMatchKey(f: PjnFavoritoForMerge): string {
   return matchKeyFromFavorito(f);
 }
+
+/** Mapa rápido case_ref / matchKey / expediente_id → tiene orden. */
+export function buildOrdenesExistentesMap(
+  ordenes: OrdenDeteccionRef[]
+): Record<string, boolean> {
+  const map: Record<string, boolean> = {};
+  const index = buildOrdenesDeteccionIndex(ordenes);
+
+  for (const orden of ordenes) {
+    for (const ref of [orden.case_ref, orden.numero_expediente, orden.expediente_id]) {
+      const trimmed = (ref || "").trim();
+      if (trimmed) map[trimmed] = true;
+    }
+  }
+  for (const ref of index.rawCaseRefs) map[ref] = true;
+  for (const key of index.matchKeys) map[key] = true;
+  for (const id of index.expedienteIds) map[id] = true;
+
+  return map;
+}
+
+/** True si la fila de Detección ya tiene orden médica (match flexible por número). */
+export function itemTieneOrdenMedica(
+  item: { id: string; numero?: string | null; is_pjn_favorito?: boolean },
+  ordenesIndex: OrdenesDeteccionIndex | null,
+  ordenesExistentes: Record<string, boolean>
+): boolean {
+  const num = (item.numero || "").trim();
+  if (num && ordenesExistentes[num]) return true;
+  if (ordenesExistentes[item.id]) return true;
+
+  if (!ordenesIndex) return false;
+
+  if (ordenesIndex.expedienteIds.has(item.id)) return true;
+
+  const key = expedienteMatchKey({ id: item.id, numero_expediente: num });
+  if (key && ordenesIndex.matchKeys.has(key)) return true;
+  if (num && ordenesIndex.rawCaseRefs.has(num)) return true;
+
+  const parts = parseExpedienteFromNumero(num);
+  if (parts && ordenesIndex.matchKeys.has(matchKeyFromParts(parts))) return true;
+
+  return false;
+}

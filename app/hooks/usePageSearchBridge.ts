@@ -16,6 +16,9 @@ export function usePageSearchBridge(
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
+  const valueRef = useRef(value);
+  valueRef.current = value;
+
   const ctxRef = useRef(ctx);
   ctxRef.current = ctx;
 
@@ -28,7 +31,8 @@ export function usePageSearchBridge(
     if (!c) return;
 
     c.bindPage((v) => onChangeRef.current(v));
-    onChangeRef.current(c.value);
+    // Al montar: reflejar el estado local en el topbar (no pisar la página con valor viejo del buscador global).
+    c.syncFromPage(valueRef.current);
 
     return () => {
       c.unbindPage();
